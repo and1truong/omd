@@ -18,6 +18,12 @@ const items=()=>page.evaluate(async blockId=>{
 const input=id=>page.locator(`[id="${id}"]`);
 const row=id=>page.locator(`[data-item-id="${id}"] > .check-row`);
 const focused=id=>page.waitForFunction(id=>document.activeElement?.id===id,id);
+// Focus can still belong to the old input while its async move is pending.
+// Wait for the rendered parent and sibling position before reading saved state.
+const placed=(id,parentId,index)=>page.waitForFunction(({id,parentId,index})=>{
+  const entry=document.querySelector(`[data-item-id="${id}"]`),list=entry?.parentElement;
+  return !!entry&&!!list&&(list.parentElement?.dataset.itemId??'')===parentId&&[...list.children].indexOf(entry)===index;
+},{id,parentId,index});
 const menu=async id=>{await row(id).getByRole('button',{name:'Checklist item actions',exact:true}).click();return page.locator('#block-actions-dialog');};
 const children=id=>{const visit=items=>{for(const item of items){if(item.id===id)return item.children??[];const found=visit(item.children??[]);if(found)return found;}};return items().then(visit);};
 const addChild=async id=>{
@@ -47,8 +53,8 @@ try {
   const context=await browser.newContext({viewport:{width:1280,height:900}});context.setDefaultTimeout(10000);
   page=await context.newPage();await ready();const [first,second]=await fixture();
 
-  await input(second).press('Tab');await focused(second);assert.equal((await children(first))[0].id,second);
-  await input(second).press('Shift+Tab');await focused(second);assert.deepEqual((await items()).map(i=>i.id),[first,second]);
+  await input(second).press('Tab');await placed(second,first,0);await focused(second);assert.equal((await children(first))[0].id,second);
+  await input(second).press('Shift+Tab');await placed(second,'',1);await focused(second);assert.deepEqual((await items()).map(i=>i.id),[first,second]);
   const child=await addChild(second);await input(child).fill('Child');
   const grandchild=await addChild(child);await input(grandchild).fill('Grandchild');
   const leaf=await addChild(grandchild);await input(leaf).fill('Leaf');
@@ -61,10 +67,12 @@ try {
   await input(second).press('Tab');assert.equal((await items()).length,2,'A four-level branch cannot be indented.');
 
   // Enter creates a sibling at level 4, and sibling arrows preserve the parent.
-  await input(leaf).press('Enter');const sibling=(await children(grandchild))[1].id;await focused(sibling);await input(sibling).fill('Sibling');
-  await row(sibling).getByRole('button',{name:'Move checklist item up',exact:true}).click();await focused(sibling);
+  await input(leaf).press('Enter');
+  await page.waitForFunction(id=>document.querySelector(`[data-item-id="${id}"] > .checklist-items`)?.children.length===2,grandchild);
+  const sibling=(await children(grandchild))[1].id;await focused(sibling);await input(sibling).fill('Sibling');
+  await row(sibling).getByRole('button',{name:'Move checklist item up',exact:true}).click();await placed(sibling,grandchild,0);await focused(sibling);
   assert.deepEqual((await children(grandchild)).map(i=>i.id),[sibling,leaf]);
-  await row(sibling).getByRole('button',{name:'Move checklist item down',exact:true}).click();await focused(sibling);
+  await row(sibling).getByRole('button',{name:'Move checklist item down',exact:true}).click();await placed(sibling,grandchild,1);await focused(sibling);
   assert.deepEqual((await children(grandchild)).map(i=>i.id),[leaf,sibling]);
   await row(leaf).getByRole('checkbox').check();
   await page.waitForFunction(blockId=>document.querySelector(`[data-block-id="${blockId}"] .checklist-progress`)?.textContent==='1 / 6',blockId);
@@ -72,9 +80,9 @@ try {
   assert.equal(await row(grandchild).getByRole('checkbox').isChecked(),false);
 
   // Outdent and indent move the full branch while preserving focus.
-  await input(grandchild).press('Shift+Tab');await focused(grandchild);
+  await input(grandchild).press('Shift+Tab');await placed(grandchild,second,1);await focused(grandchild);
   assert.deepEqual((await children(second)).map(i=>i.id),[child,grandchild]);
-  await input(grandchild).press('Tab');await focused(grandchild);assert.equal((await children(child))[0].id,grandchild);
+  await input(grandchild).press('Tab');await placed(grandchild,child,0);await focused(grandchild);assert.equal((await children(child))[0].id,grandchild);
 
   // Composition Enter must not add an item before committing text.
   const before=await items();
@@ -91,8 +99,8 @@ try {
   page=await mobile.newPage();await ready();const [,parent]=await fixture();
   const nested=await addChild(parent),deep=await addChild(nested),last=await addChild(deep);await input(last).fill('Deep mobile task');
   actions=await menu(last);assert.equal(await actions.getByRole('button',{name:'Add child checklist item',exact:true}).isDisabled(),true);
-  await actions.getByRole('button',{name:'Outdent checklist item',exact:true}).tap();await focused(last);assert.equal((await children(nested))[1].id,last);
-  actions=await menu(last);await actions.getByRole('button',{name:'Indent checklist item',exact:true}).tap();await focused(last);assert.equal((await children(deep))[0].id,last);
+  await actions.getByRole('button',{name:'Outdent checklist item',exact:true}).tap();await placed(last,nested,1);await focused(last);assert.equal((await children(nested))[1].id,last);
+  actions=await menu(last);await actions.getByRole('button',{name:'Indent checklist item',exact:true}).tap();await placed(last,deep,0);await focused(last);assert.equal((await children(deep))[0].id,last);
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Nested checklist controls must fit mobile.');
   assert.ok((await input(last).boundingBox()).width>0,'Deep item text must remain editable.');
   await page.screenshot({path:`${root}/test-results/checklist-${engine}-mobile.png`});
