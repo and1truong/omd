@@ -160,9 +160,9 @@ try {
   const composeItem=(await call('get_notebook')).blocks.find(b=>b.id===checklist.id).items[0];
   await page.evaluate(id=>{const input=document.getElementById(id);window.omdComposing=input;input.focus();input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));input.replaceChildren(Object.assign(document.createElement('p'),{textContent:'Đang chọn chữ'}));input.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));},composeItem.id);
   await call('checklist_update',{blockId:checklist.id,itemId:composeItem.id,patch:{done:false}});
-  assert.deepEqual(await page.evaluate(()=>[window.omdComposing.isConnected,window.omdComposing.textContent]),[true,'Đang chọn chữ']);
+  assert.deepEqual(await page.evaluate(()=>[window.omdComposing.isConnected,window.omdComposing.innerText]),[true,'Đang chọn chữ']);
   await page.evaluate(()=>window.omdComposing.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));
-  await pollStore(page,blockId=>window.omdPollingStore.getState().blocks.find(b=>b.id===blockId)?.items[0]?.text==='Đang chọn chữ',checklist.id);await settle();
+  await pollStore(page,({blockId,itemId})=>!document.getElementById(itemId).editor.view.composing&&window.omdPollingStore.getState().blocks.find(b=>b.id===blockId)?.items[0]?.text==='Đang chọn chữ',{blockId:checklist.id,itemId:composeItem.id});await settle();
   assert.equal((await call('get_notebook')).blocks.find(b=>b.id===checklist.id).items[0].text,'Đang chọn chữ');
   await call('checklist_update',{blockId:checklist.id,itemId:composeItem.id,patch:{text:composeItem.text,done:composeItem.done}});await page.evaluate(()=>delete window.omdComposing);
   await page.evaluate(()=>{const input=document.getElementById('page-title');input.focus();input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));input.value='Tiêu đề đang chọn';input.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));});
