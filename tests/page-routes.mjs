@@ -5,6 +5,10 @@ export async function verifyPageRoutes({browser,appURL,call,root}) {
   const context=await browser.newContext({viewport:{width:1280,height:900}}),a=await context.newPage(),b=await context.newPage();
   const ready=target=>target.waitForFunction(()=>document.getElementById('agent-status')?.textContent.includes('55 tools'));
   const active=async target=>(await call('get_notebook',{},target)).id;
+  const selected=async(target,pageId)=>{
+    await target.evaluate(async()=>{const app=await import(new URL('./src/app.js',document.baseURI).href);await app.ready;window.omdRouteStore=app.getStore();});
+    await target.waitForFunction(pageId=>window.omdRouteStore.getActivePageId()===pageId,pageId);
+  };
   const path=id=>new URL(`page/${encodeURIComponent(id)}`,appURL).href;
   const synchronized=async(target,revision)=>{
     await target.evaluate(async()=>{window.omdRouteStore=(await import(new URL('./src/app.js',document.baseURI).href)).getStore();});
@@ -54,10 +58,10 @@ export async function verifyPageRoutes({browser,appURL,call,root}) {
     const text=(await call('add_block',{type:'text',text:'Before browser history'},b)).block;
     await b.getByRole('textbox',{name:'text content',exact:true}).fill('Saved before navigating back');
     await b.goBack();await b.waitForURL(path(first));await ready(b);
-    await b.waitForFunction(pageId=>window.omdRouteStore.getActivePageId()===pageId,first);
+    await selected(b,first);
     assert.equal(await active(b),first);
     assert.equal((await call('get_page',{pageId:second},b)).blocks.find(block=>block.id===text.id).text,'Saved before navigating back');
-    await b.goForward();await b.waitForURL(path(second));await b.waitForFunction(pageId=>window.omdRouteStore.getActivePageId()===pageId,second);assert.equal(await active(b),second);
+    await b.goForward();await b.waitForURL(path(second));await selected(b,second);assert.equal(await active(b),second);
     await synchronized(a,(await call('get_notebook',{},b)).revision);
     await call('page_select',{pageId:first},a);
     await a.screenshot({path:`${root}/test-results/routes-left.png`});await b.screenshot({path:`${root}/test-results/routes-right.png`});
