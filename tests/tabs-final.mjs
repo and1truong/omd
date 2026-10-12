@@ -67,10 +67,47 @@ async function strictIME(orientation,nested) {
   await page.evaluate(()=>restorePut());await page.getByRole('button',{name:'Cancel tab rename',exact:true}).click();
   await context.close();console.log(`${engine} ${base||'/'}: ${orientation} nested=${nested} strict inline IME export/remove/ack/failure and non-strict preedit passed.`);
 }
+async function unload(orientation,nested) {
+  const f=await fresh(orientation,nested),{page,context}=f,old=await title(page),input=await rename(f,'');
+  await input.pressSequentially('Unsaved keyboard draft');
+  assert.equal((await page.locator('#save-status').innerText()).trim(),'Not saved');
+  await quota(page);await input.press('Enter');await page.getByRole('button',{name:'Retry tab rename',exact:true}).waitFor();await idle(page);
+  const dialogs=[];page.on('dialog',async dialog=>{dialogs.push(dialog.type());await dialog.dismiss();});
+  await page.reload({timeout:1000}).catch(error=>{assert.match(error.message,/ERR_ABORTED|cancel|interrupt|Timeout/i);});
+  assert.deepEqual(dialogs,['beforeunload'],'real reload after trusted keyboard input warns for a failed tab draft');
+  assert.equal(await input.inputValue(),'Unsaved keyboard draft');assert.equal(await title(page),old);
+  await page.evaluate(()=>{window.copied='';navigator.clipboard.writeText=async value=>{window.copied=value;};});
+  await page.getByRole('button',{name:'Copy tab title draft',exact:true}).click();assert.equal(await page.evaluate(()=>copied),'Unsaved keyboard draft');
+  await page.screenshot({path:`${root}/test-results/tabs-final-${engine}-${base?'project':'root'}-${orientation}-${nested?'nested':'root'}-failed.png`,fullPage:true});
+  await page.evaluate(()=>restorePut());await page.getByRole('button',{name:'Retry tab rename',exact:true}).click();await input.waitFor({state:'detached'});await idle(page);
+  assert.equal(await title(page),'Unsaved keyboard draft');assert.equal((await page.locator('#save-status').innerText()).trim(),'Saved');
+  await rename(f,'Pending acknowledged title');
+  await page.evaluate(()=>{const dispatch=store.dispatch;window.restoreDispatch=()=>{store.dispatch=dispatch;};store.dispatch=(name,...args)=>name==='tab_update'?new Promise((resolve,reject)=>{window.ackRename=()=>dispatch(name,...args).then(resolve,reject);}):dispatch(name,...args);});
+  await page.getByRole('textbox',{name:'Rename tab',exact:true}).press('Enter');await tick(page);
+  assert.equal((await page.locator('#save-status').innerText()).trim(),'Saving…');
+  await page.reload({timeout:1000}).catch(error=>{assert.match(error.message,/ERR_ABORTED|cancel|interrupt|Timeout/i);});assert.equal(dialogs.length,2,'inflight inline persistence also protects a real reload');
+  await page.evaluate(()=>ackRename());await page.getByRole('textbox',{name:'Rename tab',exact:true}).waitFor({state:'detached'});await idle(page);await page.evaluate(()=>restoreDispatch());
+  await rename(f,'Discard this failed draft');await quota(page);await page.getByRole('textbox',{name:'Rename tab',exact:true}).press('Enter');await page.getByRole('button',{name:'Cancel tab rename',exact:true}).waitFor();
+  await page.evaluate(()=>restorePut());await page.getByRole('button',{name:'Cancel tab rename',exact:true}).click();await idle(page);
+  assert.equal((await page.locator('#save-status').innerText()).trim(),'Saved');assert.equal(await title(page),'Pending acknowledged title');
+  await page.reload();assert.equal(dialogs.length,2,'discarded/acknowledged sessions do not warn');
+  await context.close();console.log(`${engine} ${base||'/'}: ${orientation} nested=${nested} failed/inflight real beforeunload, keyboard dirty status, copy/retry/discard passed.`);
+  const h=await fresh(orientation,nested),healthy=await rename(h,'');await healthy.pressSequentially('Healthy keyboard draft');
+  await h.page.evaluate(()=>{const dispatch=store.dispatch;store.dispatch=(name,...args)=>name==='tab_update'?new Promise((resolve,reject)=>{window.ackRename=()=>dispatch(name,...args).then(resolve,reject);}):dispatch(name,...args);});
+  const healthyDialogs=[];h.page.on('dialog',async dialog=>{healthyDialogs.push(dialog.type());await dialog.dismiss();});
+  assert.equal((await h.page.locator('#save-status').innerText()).trim(),'Not saved');
+  await h.page.reload({timeout:1000}).catch(error=>{assert.match(error.message,/ERR_ABORTED|cancel|interrupt|Timeout/i);});
+  assert.deepEqual(healthyDialogs,['beforeunload'],'healthy dirty inline edit warns before beforeunload auto-save completes');
+  assert.equal(await healthy.inputValue(),'Healthy keyboard draft');
+  await h.page.evaluate(()=>ackRename());await healthy.waitFor({state:'detached'});await idle(h.page);assert.equal(await title(h.page),'Healthy keyboard draft');
+  await h.page.locator(`[id="${h.tabId}-button"]`).press('F2');await h.page.reload();assert.equal(healthyDialogs.length,1,'unchanged open editor does not cause an unload warning');
+  await h.context.close();
+}
 try {
   await new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.once('error',reject);server.once('exit',code=>reject(new Error(`Server exited ${code}`)));});
   browser=await ({chromium,webkit}[engine]).launch({headless:true,...(engine==='chromium'?{channel:'chromium'}:{})});
   await mkdir(`${root}/test-results`,{recursive:true});
   for(const orientation of ['horizontal','vertical'])for(const nested of [false,true])await strictIME(orientation,nested);
+  for(const orientation of ['horizontal','vertical'])for(const nested of [false,true])await unload(orientation,nested);
   assert.deepEqual(errors,[]);
 } finally {await browser?.close();server.kill();}

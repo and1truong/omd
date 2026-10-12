@@ -45,7 +45,7 @@ function revealChecklistItem(target:HTMLElement) {
 interface InsertionAnchor {blockId:string;side:'before'|'after'}
 interface DragData {containerId?:string;kind:'block'|'card'|'column'|'tab';blockId:string;cardId?:string;columnId?:string;tabId?:string;pageId?:string}
 let suppressTabClick=false;
-let tabTitleEdit:{flush:(options?:{settle?:boolean;pageId?:string})=>Promise<unknown>}|undefined;
+let tabTitleEdit:{flush:(options?:{settle?:boolean;pageId?:string})=>Promise<unknown>;status:()=> 'saved'|'dirty'|'pending'}|undefined;
 export const openPalette = () => {shell?.closeMobile();palette?.open();};
 export const getView = () => shell!.getView();
 export const setView = async (patch:PartialView) => {if(patch.sidebarOpen)await beforeNavigate();return shell!.setView(patch);};
@@ -114,7 +114,8 @@ function writeNative(target:NativeTarget,value:string,label:string) {
 }
 function updateSaveStatus() {
   const drafts=nativeEdits?.list()??[],failed=drafts.filter(draft=>draft.error),status=domId('save-status'),dot=element('span','status-dot');
-  const label=failed.length?'Not saved':saveState.pending||drafts.length?'Saving…':(saveState.error&&saveState.error!==dismissedSaveError)||textEditors?.hasPending()?'Not saved':'Saved';
+  const tabStatus=tabTitleEdit?.status();
+  const label=failed.length||tabStatus==='dirty'?'Not saved':saveState.pending||drafts.length||tabStatus==='pending'?'Saving…':(saveState.error&&saveState.error!==dismissedSaveError)||textEditors?.hasPending()?'Not saved':'Saved';
   status.dataset.state=label==='Not saved'?'error':label==='Saved'?'saved':'pending';
   status.replaceChildren(dot,document.createTextNode(label));
   if(!recovery){recovery=element('section','draft-recovery');recovery.setAttribute('aria-label','Unsaved edits');document.querySelector('.page-heading')!.after(recovery);}
@@ -434,7 +435,7 @@ function renderTabs(shell:HTMLElement,b:BlockOf<'tabs'>) {
       const input=element('input','tab-title-input');input.type='text';input.value=value;input.id=`${t.id}-label`;input.setAttribute('aria-label','Rename tab');input.size=Math.max(5,input.value.length);
       const original=input.value;let finished=false,requested=false,failed=false,pending:Promise<void>|undefined,saveError:Error|undefined;
       let editHeader:HTMLElement=header;let editTab=tab,editRename=rename,recovery:HTMLElement|undefined,notice:HTMLElement|undefined;
-      const session={flush:async({settle=true,pageId:targetPageId}:{settle?:boolean;pageId?:string}={})=>{
+      const session={status:(): 'saved'|'dirty'|'pending'=>finished?'saved':pending?'pending':failed||input.value!==original?'dirty':'saved',flush:async({settle=true,pageId:targetPageId}:{settle?:boolean;pageId?:string}={})=>{
         if(targetPageId&&targetPageId!==pageId)return;
         if(composition.isComposing(input)){
           if(!settle)return;
@@ -445,7 +446,9 @@ function renderTabs(shell:HTMLElement,b:BlockOf<'tabs'>) {
       }};
       function close(focus=false) {
         finished=true;observer.disconnect();if(tabTitleEdit===session)tabTitleEdit=undefined;
+        if(saveState.error===saveError)dismissedSaveError=saveState.error;
         input.remove();recovery?.remove();notice?.remove();editHeader.style.removeProperty('flex-wrap');editHeader.removeAttribute('role');for(const name of ['aria-label','aria-selected','aria-controls'])editHeader.removeAttribute(name);editTab.hidden=editRename.hidden=false;if(focus&&editTab.isConnected)editTab.focus();
+        updateSaveStatus();
       }
       function recover() {
         if(!recovery){
@@ -473,10 +476,11 @@ function renderTabs(shell:HTMLElement,b:BlockOf<'tabs'>) {
           recovery?.querySelectorAll('button').forEach(button=>button.disabled=true);
           if(value!==original)await store.dispatch('tab_update',{pageId,blockId:b.id,tabId:t.id,title:value},{quiet:true});
           editTab.textContent=value||'Untitled';editTab.setAttribute('aria-label',`Open ${value||'tab'}`);editRename.setAttribute('aria-label',`Rename ${value||'Untitled'} tab`);close(focus);
-        }).catch(error=>{saveError=errorOf(error);requested=false;input.disabled=false;recovery?.querySelectorAll('button').forEach(button=>button.disabled=false);failed=true;recover();notify(saveError.message,'error',true);throw error;}).finally(()=>{pending=undefined;});return pending;
+        }).catch(error=>{saveError=errorOf(error);requested=false;input.disabled=false;recovery?.querySelectorAll('button').forEach(button=>button.disabled=false);failed=true;recover();notify(saveError.message,'error',true);throw error;}).finally(()=>{pending=undefined;updateSaveStatus();});updateSaveStatus();return pending;
       }
       const observer=new MutationObserver(()=>{if(failed&&!finished)recover();else if(!input.isConnected)void finish().catch(()=>{});});observer.observe(document.body,{childList:true,subtree:true});
       composition.track(input,()=>requested?finish(false,true).catch(()=>{}):undefined,()=>pageId);
+      input.addEventListener('input',updateSaveStatus);
       input.addEventListener('blur',()=>{if(!failed)void finish().catch(()=>{});});
       input.addEventListener('keydown',event=>{
         event.stopPropagation();if(event.isComposing||event.keyCode===229||composition.isComposing(input))return;
@@ -682,7 +686,7 @@ async function boot() {
   setupRoutes(store,{beforeNavigate,onError:error=>notify(error.message,'error',true)});
   let fitFrame=0;window.addEventListener('resize',()=>{cancelAnimationFrame(fitFrame);fitFrame=requestAnimationFrame(()=>{for(const el of document.querySelectorAll<HTMLElement>('[data-autofit],.auto-height'))fit(el);});});
   domId('canvas-stage-close').addEventListener('click',closeCanvas);domId('canvas-stage-pages').addEventListener('click',openPalette);
-  window.addEventListener('pagehide',event=>{flushPending().then(()=>{if(!event.persisted){textEditors!.destroy();return store.close();}}).catch(error=>notify(errorOf(error).message,'error',true));});window.addEventListener('beforeunload',event=>{if(nativeEdits!.list().length||textEditors!.hasPending()||composition.hasActive()){event.preventDefault();event.returnValue='';}flushPending().catch(error=>notify(errorOf(error).message,'error',true));});
+  window.addEventListener('pagehide',event=>{flushPending().then(()=>{if(!event.persisted){textEditors!.destroy();return store.close();}}).catch(error=>notify(errorOf(error).message,'error',true));});window.addEventListener('beforeunload',event=>{if(nativeEdits!.list().length||textEditors!.hasPending()||composition.hasActive()||(tabTitleEdit&&tabTitleEdit.status()!=='saved')){event.preventDefault();event.returnValue='';}flushPending().catch(error=>notify(errorOf(error).message,'error',true));});
   for (const key of ['title','subtitle'] as const) {
     const el=domId(key==='title'?'page-title':'page-subtitle');
     const target=(pageId:string):NativeTarget=>({kind:'page',pageId,field:key}),label=key==='title'?'Page title':'Page description';
