@@ -78,7 +78,7 @@ try {
   await call('page_move',{pageId:treeRoot,parentId:createdPage});assert.equal((await call('list_pages')).find(p=>p.pageId===treeLeaf).depth,3);
   await page.getByRole('button',{name:'Page actions for Tree root',exact:true}).click();await settle();await page.locator('#page-actions-dialog').getByRole('button',{name:'Move to…',exact:true}).click();await settle();
   assert.equal(await page.locator(`#page-parent-target option[value="${treeLeaf}"]`).count(),0,'Move picker must exclude descendant destinations.');
-  await page.locator('#page-parent-target').selectOption('');await page.locator('#page-parent-apply').click();await settle();assert.equal((await call('list_pages')).find(p=>p.pageId===treeRoot).parentId,'');
+  await page.locator('#page-parent-target').selectOption('');await settle();await page.locator('#page-parent-apply').click();await settle();assert.equal((await call('list_pages')).find(p=>p.pageId===treeRoot).parentId,'');
   await page.getByRole('button',{name:'Page actions for Project branch',exact:true}).click();await settle();await page.locator('#page-actions-dialog').getByRole('button',{name:'Move to notebook',exact:true}).click();await settle();
   assert.equal((await call('list_pages')).find(p=>p.pageId===treeLeaf).depth,1);
   await page.getByRole('button',{name:'Page actions for Tree root',exact:true}).click();await settle();await page.locator('#page-actions-dialog').getByRole('button',{name:'Delete page',exact:true}).click();await settle();await page.locator('#confirm-dialog').getByRole('button',{name:'Delete page',exact:true}).click();await settle();await page.locator(`.sidebar-page[data-page-id="${treeRoot}"]`).waitFor({state:'detached'});
@@ -88,7 +88,7 @@ try {
   assert.equal((await call('get_page',{pageId:createdPage})).title,'A second page');
   const checklist = (await call('add_block', { type: 'checklist', title: 'Test tasks' })).block;
   await call('checklist_add', { blockId: checklist.id, text: 'An agent-created task' });
-  await page.getByRole('checkbox', { name: 'Complete An agent-created task', exact: true }).check();
+  await page.getByRole('checkbox', { name: 'Complete An agent-created task', exact: true }).check();await settle();
   notebook = await call('get_notebook'); assert.ok(notebook.blocks[0].items[0].done);
   await page.locator('#page-title').fill('Written by a person');
   await call('set_view',{sidebarOpen:false,contentWidth:'wide',collapsedPageIds:[]});
@@ -116,13 +116,13 @@ try {
   await page.getByRole('button', { name: 'Collapse Another section', exact: true }).click();await settle();
   const board = (await call('add_block', { type: 'kanban' })).block;
   const card = (await call('card_add', { blockId: board.id, columnId: board.columns[0].id, title: 'Ship this' })).cardId;
-  await page.getByRole('combobox', { name: 'Move card to column' }).selectOption(board.columns[1].id);
+  await page.getByRole('combobox', { name: 'Move card to column' }).selectOption(board.columns[1].id);await settle();
   await call('column_move', { blockId: board.id, columnId: board.columns[1].id, index: 0 });
   await call('card_update', { blockId: board.id, cardId: card, patch: { description: 'Tiny next step' } });
   assert.equal((await call('get_notebook')).blocks.find(b => b.id === board.id).columns[0].cards[0].id, card);
   await call('open_settings');
-  await page.locator('#theme').selectOption('dark'); assert.equal(await page.locator('html').getAttribute('data-theme'), 'dark');
-  await page.locator('#theme').selectOption('system'); await page.emulateMedia({ colorScheme: 'dark' });
+  await page.locator('#theme').selectOption('dark');await settle(); assert.equal(await page.locator('html').getAttribute('data-theme'), 'dark');
+  await page.locator('#theme').selectOption('system');await settle(); await page.emulateMedia({ colorScheme: 'dark' });
   await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
   await page.emulateMedia({ colorScheme: 'light' }); await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
   await page.getByRole('button',{name:'Close settings',exact:true}).click();await settle();
@@ -228,11 +228,11 @@ try {
   await page.keyboard.press('Tab');assert.ok(await page.evaluate(()=>document.activeElement===document.getElementById('sidebar-close')),'Drawer focus must wrap in both directions.');
   await page.getByRole('button',{name:'Switch to A second page',exact:true}).click();await settle();assert.ok(await page.locator('#sidebar').isHidden());
   assert.equal(await page.locator('#page-title').inputValue(),'A second page');await call('page_select',{pageId:firstPage});
-  await page.keyboard.press('Control+k');await page.locator('#page-search').fill('Mobile subpage');await page.locator('#page-create-parent').selectOption(createdPage);await page.getByRole('button',{name:'+ Create “Mobile subpage”',exact:true}).click();await settle();const mobileChild=(await call('get_notebook')).id;
+  await page.keyboard.press('Control+k');await page.locator('#page-search').fill('Mobile subpage');await page.locator('#page-create-parent').selectOption(createdPage);await settle();await page.getByRole('button',{name:'+ Create “Mobile subpage”',exact:true}).click();await settle();const mobileChild=(await call('get_notebook')).id;
   assert.equal((await call('list_pages')).find(p=>p.pageId===mobileChild).parentId,createdPage);
   await call('set_view',{sidebarOpen:true});await page.screenshot({path:`${root}/test-results/mobile-page-tree.png`});await call('set_view',{sidebarOpen:false});await call('page_remove',{pageId:mobileChild});await call('page_select',{pageId:firstPage});
   await call('set_view',{sidebarOpen:true});await page.keyboard.press('Escape');assert.ok(await page.locator('#sidebar').isHidden());
-  await page.locator('#page-menu > summary').click();await settle();await page.locator('#wide-page').check();assert.equal((await call('get_view')).contentWidth,'wide');await page.locator('#wide-page').uncheck();await page.locator('#page-menu > summary').click();await settle();
+  await page.locator('#page-menu > summary').click();await settle();await page.locator('#wide-page').check();await settle();assert.equal((await call('get_view')).contentWidth,'wide');await page.locator('#wide-page').uncheck();await settle();await page.locator('#page-menu > summary').click();await settle();
   const menuBlock=(await call('add_block',{type:'text',text:'Context menu fixture'})).block;
   const menuShell=page.locator(`[data-block-id="${menuBlock.id}"]`);
   await menuShell.getByRole('button',{name:'Block actions',exact:true}).click();await settle();await page.locator('#block-actions-dialog').getByRole('button',{name:'Move block up',exact:true}).click();await settle();
