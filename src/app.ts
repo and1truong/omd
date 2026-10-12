@@ -16,7 +16,8 @@ function $<T extends HTMLElement=HTMLElement>(selector:string):T {if(selector.st
 let store:NotebookStore,palette:ReturnType<typeof setupPalette>|undefined,diagrams:ReturnType<typeof createDiagramManager>|undefined,renderer:ReturnType<typeof createRenderCache>,shell:ReturnType<typeof setupShell>|undefined,dragData:DragData|null|undefined;
 let textEditors:ReturnType<typeof createTextEditors>|undefined;
 interface InsertionAnchor {blockId:string;side:'before'|'after'}
-interface DragData {containerId?:string;kind:'block'|'card'|'column';blockId:string;cardId?:string;columnId?:string}
+interface DragData {containerId?:string;kind:'block'|'card'|'column'|'tab';blockId:string;cardId?:string;columnId?:string;tabId?:string;pageId?:string}
+let suppressTabClick=false;
 export const openPalette = () => {shell?.closeMobile();palette?.open();};
 export const getView = () => shell!.getView();
 export const setView = async (patch:PartialView) => {if(patch.sidebarOpen)await beforeNavigate();return shell!.setView(patch);};
@@ -85,9 +86,13 @@ export async function confirmAction(title:string,message:string,yes = 'Continue'
     domId('confirm-ok').addEventListener('click', accept); domId('confirm-cancel').addEventListener('click', cancel); dialog.addEventListener('close', finish, { once: true }); dialog.showModal();
   });
 }
+function endDrag() {
+  dragData = null; document.body.classList.remove('dragging-block'); for (const el of document.querySelectorAll('.dragging,.drop-active,.tab-drop-before,.tab-drop-after')) el.classList.remove('dragging', 'drop-active', 'tab-drop-before', 'tab-drop-after');
+  setTimeout(()=>{suppressTabClick=false;},0);
+}
 function draggable(handle:HTMLElement,data:DragData) {
-  handle.draggable = true; handle.addEventListener('dragstart', event => { event.stopPropagation(); dragData = data; event.dataTransfer!.effectAllowed = 'move'; event.dataTransfer!.setData('application/x-omd', JSON.stringify(data)); handle.closest('.block,.kanban-card,.kanban-column')?.classList.add('dragging'); if (data.kind === 'block') document.body.classList.add('dragging-block'); });
-  handle.addEventListener('dragend', () => { dragData = null; document.body.classList.remove('dragging-block'); for (const el of document.querySelectorAll('.dragging,.drop-active')) el.classList.remove('dragging', 'drop-active'); });
+  handle.draggable = true; handle.addEventListener('dragstart', event => { event.stopPropagation(); dragData = data; event.dataTransfer!.effectAllowed = 'move'; event.dataTransfer!.setData('application/x-omd', JSON.stringify(data)); (data.kind==='tab'?handle:handle.closest('.block,.kanban-card,.kanban-column'))?.classList.add('dragging'); if (data.kind === 'block') document.body.classList.add('dragging-block'); if(data.kind==='tab')suppressTabClick=true; });
+  handle.addEventListener('dragend', endDrag);
 }
 function dropTarget(el:HTMLElement,canDrop:(data:DragData)=>boolean,drop:(data:DragData)=>unknown) {
   el.addEventListener('dragover', event => { if (dragData && canDrop(dragData)) { event.preventDefault(); event.stopPropagation(); event.dataTransfer!.dropEffect = 'move'; el.classList.add('drop-active'); } });
@@ -189,10 +194,33 @@ function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
   shell.append(button('+ Add an item', 'Add checklist item', async () => { const r = await action('checklist_add', { blockId: b.id }); if (r) requestAnimationFrame(() => domId(r.itemId)?.focus()); }, 'add-inline'));
 }
 function renderTabs(shell:HTMLElement,b:BlockOf<'tabs'>) {
+  const pageId=store.getActivePageId();
   shell.append(title(b, '▤')); const group = element('div', 'tab-group'); const layout = element('div', `tabs-layout ${b.orientation}`);
   const tablist = element('div', 'tablist'); tablist.setAttribute('role', 'tablist'); tablist.setAttribute('aria-label', b.title || 'Tabs'); tablist.setAttribute('aria-orientation', b.orientation);
+  const headers:HTMLElement[]=[];
+  const clearDrop=()=>{for(const tab of headers)tab.classList.remove('tab-drop-before','tab-drop-after');};
+  const canDrop=()=>dragData?.kind==='tab'&&dragData.blockId===b.id&&dragData.pageId===pageId&&store.getActivePageId()===pageId&&tablist.isConnected;
+  function insertion(event:DragEvent) {
+    const index=headers.findIndex(tab=>{const rect=tab.getBoundingClientRect();return b.orientation==='horizontal'?event.clientY<rect.top||(event.clientY<=rect.bottom&&event.clientX<rect.left+rect.width/2):event.clientY<rect.top+rect.height/2;});
+    return index<0?headers.length:index;
+  }
+  tablist.addEventListener('dragover',event=>{
+    clearDrop();if(!canDrop())return;
+    event.preventDefault();event.stopPropagation();event.dataTransfer!.dropEffect='move';
+    const index=insertion(event);(headers[index]??headers[headers.length-1]).classList.add(index===headers.length?'tab-drop-after':'tab-drop-before');
+  });
+  tablist.addEventListener('dragleave',event=>{if(!tablist.contains(event.relatedTarget as Node|null))clearDrop();});
+  tablist.addEventListener('drop',event=>{
+    clearDrop();if(!canDrop())return;
+    event.preventDefault();event.stopPropagation();
+    const tabId=dragData!.tabId!,tabs=findBlock(store.getRenderState(),b.id,'tabs').block.tabs;
+    const beforeId=b.tabs[insertion(event)]?.id,slot=beforeId?tabs.findIndex(tab=>tab.id===beforeId):tabs.length;
+    const from=tabs.findIndex(tab=>tab.id===tabId),index=slot-(from<slot?1:0);
+    endDrag();if(from>=0&&slot>=0&&from!==index)void action('tab_move',{pageId,blockId:b.id,tabId,index});
+  });
   b.tabs.forEach((t, i) => {
-    const tab = button(t.title || 'Untitled', `Open ${t.title || 'tab'}`, () => action('tab_select', { blockId: b.id, tabId: t.id }), 'tab-button'); tab.setAttribute('role', 'tab'); tab.setAttribute('aria-selected', String(t.id === b.activeTabId)); tab.id = `${t.id}-button`; tab.setAttribute('aria-controls', `${t.id}-panel`); tab.tabIndex = t.id === b.activeTabId ? 0 : -1;
+    const tab = button(t.title || 'Untitled', `Open ${t.title || 'tab'}`, event => {if(suppressTabClick){event.preventDefault();return;}return action('tab_select', { blockId: b.id, tabId: t.id });}, 'tab-button'); tab.setAttribute('role', 'tab'); tab.setAttribute('aria-selected', String(t.id === b.activeTabId)); tab.id = `${t.id}-button`; tab.setAttribute('aria-controls', `${t.id}-panel`); tab.tabIndex = t.id === b.activeTabId ? 0 : -1;
+    draggable(tab,{kind:'tab',pageId,blockId:b.id,tabId:t.id});headers.push(tab);tab.title+=' (drag to reorder)';
     tab.addEventListener('keydown', e => { const keys = b.orientation === 'horizontal' ? ['ArrowLeft', 'ArrowRight'] : ['ArrowUp', 'ArrowDown']; let n;
       if (e.key === keys[0]) n = (i - 1 + b.tabs.length) % b.tabs.length; if (e.key === keys[1]) n = (i + 1) % b.tabs.length; if (e.key === 'Home') n = 0; if (e.key === 'End') n = b.tabs.length - 1;
       if (n !== undefined) { e.preventDefault(); action('tab_select', { blockId: b.id, tabId: b.tabs[n].id }, { focus: `${b.tabs[n].id}-button` }); }

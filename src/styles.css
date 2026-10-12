@@ -207,6 +207,15 @@ body[data-content-width=wide] .paper { max-width: none; }
 .dragging-block .drop-slot { height: 12px; border: 1px dashed var(--line); border-radius: 3px; }
 .dragging-block .block-insert-button { visibility: hidden; }
 .drop-active { outline: 2px dashed var(--focus); outline-offset: 2px; }
+.tab-button[draggable] { position: relative; cursor: grab; }
+.tab-button.dragging { cursor: grabbing; }
+.tab-drop-before::before, .tab-drop-after::after { content: ''; position: absolute; background: var(--focus); pointer-events: none; }
+.tabs-layout.horizontal > .tablist > .tab-drop-before::before, .tabs-layout.horizontal > .tablist > .tab-drop-after::after { top: 0; bottom: 0; width: 3px; }
+.tabs-layout.horizontal > .tablist > .tab-drop-before::before { left: 0; }
+.tabs-layout.horizontal > .tablist > .tab-drop-after::after { right: 0; }
+.tabs-layout.vertical > .tablist > .tab-drop-before::before, .tabs-layout.vertical > .tablist > .tab-drop-after::after { left: 0; right: 0; height: 3px; }
+.tabs-layout.vertical > .tablist > .tab-drop-before::before { top: 0; }
+.tabs-layout.vertical > .tablist > .tab-drop-after::after { bottom: 0; }
 .dragging { opacity: .45; }
 dialog { border: 1px solid var(--line); background: var(--paper); color: var(--text); border-radius: 10px; box-shadow: 0 12px 60px #0003; padding: 24px; width: min(540px,calc(100% - 32px)); max-height: 85dvh; overflow: auto; }
 dialog::backdrop { background: #11191655; }
