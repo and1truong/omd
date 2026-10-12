@@ -20,7 +20,7 @@ export async function createStore(storage:StorageLike,options:StoreOptions = {})
   interface State {meta:Notebook;records:Records;options:ChangeEvent;page:Page}
   const state=createZustandStore<State>()(subscribeWithSelector<State>(()=>({meta:loaded!.meta,records:new Map(),options:{},page:{...loaded!.meta.pages.find(p=>p.id===loaded!.meta.activePageId)!,blocks:[]}})));
   state.setState({meta:freeze(loaded!.meta,true),records:loaded!.records!,page:freeze(materialize(loaded!.records!,loaded!.meta.activePageId),true)});loaded=null;
-  const undoStack:string[]=[],redoStack:string[]=[],afterChange=new Set<()=>void>();let queue:Promise<unknown>=Promise.resolve();let closed=false,pending=0,navigations=0,lastError:Error|null=null;const statusListeners=new Set<(status:SaveStatus)=>void>();
+  const undoStack:string[]=[],redoStack:string[]=[],afterChange=new Set<()=>void>();let queue:Promise<unknown>=Promise.resolve();let closed=true,pending=0,navigations=0,lastError:Error|null=null;const statusListeners=new Set<(status:SaveStatus)=>void>();
   function status(){return {pending,navigating:navigations>0,error:lastError};}
   function notifyStatus(){for(const fn of statusListeners)fn(status());}
   function enqueue<T>(fn:()=>Promise<T>,navigate=false):Promise<T>{pending++;if(navigate)navigations++;notifyStatus();const task=queue.then(fn).catch(error=>{lastError=errorOf(error);throw error;}).finally(()=>{pending--;if(navigate)navigations--;notifyStatus();});queue=task.catch(()=>{});return task;}
@@ -116,6 +116,7 @@ export async function createStore(storage:StorageLike,options:StoreOptions = {})
   });}
   if(channel)channel.onmessage=()=>{if(!closed)api.reload().catch(()=>{});};
   if(locks?.request)for(const previous of await repository.historyOwners())await locks.request(`${repository.name}.history:${previous}`,{ifAvailable:true},async lock=>{if(lock)await repository.pruneOwner(previous);});
+  closed=false;
   return api;
   }catch(error){
     try{channel?.close();}finally{try{releaseLease?.();}finally{repository.close();}}
