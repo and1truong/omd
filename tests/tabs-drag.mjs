@@ -112,6 +112,29 @@ async function inlineRename(group,nested,orientation) {
   console.log(`${engine} ${basePath||'/'}: ${orientation} inline labels, nested edits, Enter/Escape/blur, one-entry history, empty titles, IME hide/page switch, failure/retry and DnD after rename passed.`);
 }
 
+async function staleTabControls(orientation) {
+  await call('page_add',{title:`Scope A ${orientation}`});const tabs=await group(orientation,null,'Same IDs');
+  const source=await state(),destination={...structuredClone(source),id:`${source.id}-copy`,title:`Scope B ${orientation}`};
+  const book=await page.evaluate(()=>window.tabsApp.getStore().getNotebook());book.pages=[source,destination];book.activePageId=source.id;book.parents={[source.id]:'',[destination.id]:''};
+  await call('import_notebook',{notebook:book});await settled();
+  const baseline=structuredClone((await block(tabs.id)));await page.evaluate(()=>window.tabsApp.setView({sidebarOpen:true}));
+  await header(tabs.ids[1]).press('F2');await page.getByRole('textbox',{name:'Rename tab',exact:true}).evaluate(el=>{window.scopedTitle=el;el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.value='Draft belongs to A';});
+  await page.getByRole('link',{name:`Switch to ${destination.title}`,exact:true}).click();await settled();
+  assert.equal((await state()).id,destination.id);assert.equal(await page.evaluate(()=>window.scopedTitle.isConnected),true);
+  await own(tabs.id).getByRole('button',{name:'Move tab down',exact:true}).click();await settled();
+  await header(tabs.ids[0]).press('End');await settled();
+  await header(tabs.ids[2]).click();await settled();
+  await tablist(tabs.id).getByRole('button',{name:'Add tab',exact:true}).click();await settled();
+  await own(tabs.id).getByRole('button',{name:'Delete tab',exact:true}).click();await page.getByRole('button',{name:'Remove tab',exact:true}).click();await settled();
+  assert.deepEqual(await block(tabs.id),baseline,'stale select/keyboard/add/move/remove never mutate the destination with identical IDs');
+  assert.equal(await page.evaluate(()=>window.scopedTitle.isConnected),true);
+  await page.evaluate(()=>window.scopedTitle.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));await settled();
+  const original=await page.evaluate(id=>window.tabsApp.getStore().getPage(id),source.id);
+  assert.equal(find(original.blocks,tabs.id).tabs.find(t=>t.id===tabs.ids[1]).title,'Draft belongs to A');
+  assert.deepEqual(await block(tabs.id),baseline);await page.evaluate(()=>window.tabsApp.setView({sidebarOpen:false}));
+  console.log(`${engine} ${basePath||'/'}: ${orientation} stale controls scoped to original page despite shared IDs and composition passed.`);
+}
+
 try {
   await new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.once('error',reject);server.once('exit',code=>reject(new Error(`Server exited: ${code}`)));});
   browser=await ({chromium,webkit}[engine]).launch({headless:true});
@@ -119,6 +142,8 @@ try {
   page=await context.newPage();page.on('pageerror',error=>errors.push(error.message));
   await page.goto(url);await ready();
   await mkdir(`${root}/test-results`,{recursive:true});
+
+  for(const orientation of ['horizontal','vertical'])await staleTabControls(orientation);
 
   for(const orientation of ['horizontal','vertical']) {
     await call('page_add',{title:`Drag ${orientation} tabs without losing your work`});
