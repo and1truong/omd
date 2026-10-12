@@ -103,6 +103,20 @@ body[data-content-width=wide] .paper { max-width: none; }
 .block-controls .icon-button { min-width: 27px; min-height: 26px; padding: 4px; }
 .block-controls .ui-icon { width: 16px; height: 16px; }
 .block-drag { cursor: grab; }
+.table-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; font-size: 11px; margin: 8px 0; }
+.table-toolbar label { display: inline-flex; align-items: center; gap: 5px; }
+.table-toolbar input { accent-color: var(--accent); }
+.table-toolbar select { background: var(--paper); border: 1px solid var(--line); border-radius: 4px; }
+.table-scroll { width: 100%; max-width: 100%; max-height: 440px; overflow: auto; overscroll-behavior: contain; border: 1px solid var(--line); border-radius: 5px; margin-bottom: 6px; }
+.data-table { border-spacing: 0; table-layout: fixed; width: max-content; font-size: 13px; }
+.data-table th, .data-table td { width: 160px; min-width: 160px; max-width: 160px; padding: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--paper); vertical-align: top; text-align: left; }
+.data-table .table-cell { width: 100%; min-width: 0; min-height: 40px; padding: 8px; border-radius: 0; overflow-wrap: anywhere; }
+.data-table .table-column-tools th { font-size: 11px; font-weight: normal; color: var(--secondary); padding: 2px 8px; }
+.data-table .table-row-tools, .data-table .table-column-tools>td { width: 40px; min-width: 40px; max-width: 40px; text-align: center; }
+.data-table .table-header th, .data-table .table-header-tool { background: var(--soft); }
+.data-table .table-pinned { position: sticky; z-index: 1; box-shadow: 1px 0 var(--line); }
+.data-table .table-header-pinned th, .data-table .table-header-tool { position: sticky; top: 0; z-index: 2; }
+.data-table .table-header-pinned .table-pinned { z-index: 3; }
 .block-type-heading textarea { font-size: 24px; font-weight: 600; line-height: 1.4; }
 .block-type-text textarea { font-size: 14px; line-height: 1.8; min-height: 25px; }
 .block-type-text>textarea, .block-type-heading>textarea { background: transparent; outline: 0; border-radius: 0; }

@@ -40,6 +40,18 @@ Up/down arrows reorder siblings. Moving or deleting an item carries its children
 
 WebMCP `checklist_add` accepts optional `parentId` and sibling `index`. `checklist_move` accepts optional `parentId`: omit it to keep the current parent, or use an empty string to move to the checklist root. Updates and removal find items at any depth. The shared validator rejects cycles and branches deeper than 4 levels.
 
+## Tables
+
+Choose **Table** in the add-block menu, including inside tabs, expandable blocks and accordion sections. The initial grid has 3 rows and 3 columns; all cells, including the optional first header row, are editable plain text. **+ Row** and **+ Column** append blank cells. Each numbered column and each row has an **…** menu to insert before/after (above/below) that position or delete it. Deletion asks for confirmation and is reversible with notebook undo/redo. At least one row and column remain.
+
+**Header row** switches the first row's semantic header role without changing its text. **Pin header** keeps that row visible during vertical scrolling. **Pin first columns** keeps the selected number of leading columns visible during horizontal scrolling. Wide/tall grids scroll inside the table, not the page; on small screens, pin fewer columns to leave space for other cells.
+
+Tab/Shift+Tab move between cells; Enter moves down one row; Shift+Enter adds a line break; Ctrl/⌘ + arrow keys move to adjacent cells without changing normal arrow-key text editing. Commands do not run during text composition. Cells save through the existing queue, capturing their page, block, row and column IDs; failed writes keep the draft and report an error. Navigation and dimension changes wait for composition/pending edits to finish. Offline storage, JSON backups and notebook undo/redo preserve cells, row/column order and pin settings. Existing notebook versions need no conversion.
+
+Limits: 100 rows, 20 columns, 10,000 characters per cell. The UI, JSON import and WebMCP share grid validation (rectangular cells, unique IDs, plain text and dimensions). This is not a spreadsheet: no formulas, merged cells, sorting/filtering or CSV/Excel import.
+
+WebMCP `add_block` accepts `type: "table"`, optional `rowCount`, `columnCount`, `headerRow`, `pinnedHeader` and `pinnedColumns`. Read the grid with `get_page`/`get_notebook`; `table_cell_update` uses `rowId` + `columnId` + `text`. `table_row_add`/`table_column_add` take a zero-based `index` (omit to append); insert next to a known row/column by deriving its index from that snapshot. Removal takes the corresponding stable ID. `update_block` changes title/header/pin settings. All five table tools accept `pageId` for inactive pages, using the same store as the UI.
+
 ## Diagrams
 
 Add **Mermaid** for editable raw diagram definitions or fenced Mermaid Markdown, with live preview, syntax errors kept beside the source, and theme-aware rendering. Source remains editable/saved even if a diagram has syntax errors.

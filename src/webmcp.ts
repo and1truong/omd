@@ -16,7 +16,7 @@ const bool:JSONSchema = { type: 'boolean' };
 const blockId = text('Block ID from omd_get_notebook.');
 const itemId = text('Item ID from the notebook or a creation result.');
 const tabId = text('Tab ID; also a container ID for adding child blocks.');
-const columnId = text('Kanban column ID.');
+const columnId = text('Table or kanban column ID.');
 const cardId = text('Kanban card ID.');
 const schema = (properties:Record<string,JSONSchema> = {},required:readonly string[] = []):JSONSchema => ({ type: 'object', properties, required, additionalProperties: false });
 const patch = (properties:Record<string,JSONSchema>) => schema(properties);
@@ -37,6 +37,8 @@ export function validateToolInput(value:unknown,definition:JSONSchema,path='inpu
   else if (definition.type === 'boolean' && typeof value !== 'boolean') throw new Error(`${path} must be true or false.`);
   else if (definition.type === 'integer' && (!Number.isInteger(value) || typeof value!=='number' || value < (definition.minimum ?? -Infinity))) throw new Error(`${path} must be a valid integer.`);
   if (definition.enum && !definition.enum.includes(value as string)) throw new Error(`${path} must be one of: ${definition.enum.join(', ')}.`);
+  if(typeof value==='number'&&definition.maximum!==undefined&&value>definition.maximum)throw new Error(`${path} exceeds ${definition.maximum}.`);
+  if(typeof value==='string'&&definition.maxLength!==undefined&&value.length>definition.maxLength)throw new Error(`${path} is too long.`);
 }
 
 export function createTools(store:NotebookStore,ui:WebMCPUI = {}):WebMCPTool[] {
@@ -80,8 +82,8 @@ export function createTools(store:NotebookStore,ui:WebMCPUI = {}):WebMCPTool[] {
     if(Object.keys(content).some(key=>key!=='pageId'))return store.dispatch('set_page',content);
     return {pageId:page.id,theme,revision:store.getRevision()};
   });
-  command('add_block', 'Add a block, including table, Mermaid or Excalidraw. Tables default to 3×3 with an editable header row; rowCount (1–100), columnCount (1–20) and headerRow configure the initial grid. Read row/column IDs with get_page, then edit with table tools. Mermaid accepts raw source or a fenced Markdown mermaid block. Use excalidraw_set_scene for drawing data. containerId defaults to page. Tabs alternate direction, at most two levels. Reminders cannot reliably deliver while closed.', { type: { type: 'string', enum: BLOCK_TYPES }, containerId: text(), index, text: text(), title: text(), rowCount:{type:'integer',minimum:1,maximum:100},columnCount:{type:'integer',minimum:1,maximum:20},headerRow:bool,source:text('Mermaid definition or fenced Markdown.'), orientation: { type: 'string', enum: ['horizontal', 'vertical'] }, dueAt: text('ISO date-time including timezone, e.g. 2026-10-12T16:00:00+10:00.') }, ['type']);
-  command('update_block', 'Edit a block. Text blocks store Markdown in text; headings store plain text. Mermaid uses source for its definition; Excalidraw uses excalidraw_set_scene. Table accepts title/headerRow. Other fields depend on type: title, orientation, open, dueAt, enabled. Tab direction changes preserve the alternating two-level structure.', { blockId, patch: patch({ text: text(), title: text(), headerRow:bool,source:text(), orientation: { type: 'string', enum: ['horizontal', 'vertical'] }, open: bool, dueAt: text(), enabled: bool }) }, ['blockId', 'patch']);
+  command('add_block', 'Add a block, including table, Mermaid or Excalidraw. Tables default to 3×3 with an editable pinned header row; rowCount (1–100), columnCount (1–20), headerRow, pinnedHeader and pinnedColumns configure the grid. Read row/column IDs with get_page, then edit with table tools. Mermaid accepts raw source or a fenced Markdown mermaid block. Use excalidraw_set_scene for drawing data. containerId defaults to page. Tabs alternate direction, at most two levels. Reminders cannot reliably deliver while closed.', { type: { type: 'string', enum: BLOCK_TYPES }, containerId: text(), index, text: text(), title: text(), rowCount:{type:'integer',minimum:1,maximum:100},columnCount:{type:'integer',minimum:1,maximum:20},headerRow:bool,pinnedHeader:bool,pinnedColumns:{type:'integer',minimum:0,maximum:20},source:text('Mermaid definition or fenced Markdown.'), orientation: { type: 'string', enum: ['horizontal', 'vertical'] }, dueAt: text('ISO date-time including timezone, e.g. 2026-10-12T16:00:00+10:00.') }, ['type']);
+  command('update_block', 'Edit a block. Text blocks store Markdown in text; headings store plain text. Mermaid uses source for its definition; Excalidraw uses excalidraw_set_scene. Table accepts title/headerRow/pinnedHeader/pinnedColumns (0 to its column count). Other fields depend on type: title, orientation, open, dueAt, enabled. Tab direction changes preserve the alternating two-level structure.', { blockId, patch: patch({ text: text(), title: text(), headerRow:bool,pinnedHeader:bool,pinnedColumns:{type:'integer',minimum:0,maximum:20},source:text(), orientation: { type: 'string', enum: ['horizontal', 'vertical'] }, open: bool, dueAt: text(), enabled: bool }) }, ['blockId', 'patch']);
   command('table_cell_update','Edit one plain-text table cell (at most 10,000 characters) using stable row and column IDs. Optional pageId targets an inactive page.',{blockId,rowId:text(),columnId,text:{type:'string',maxLength:10000}},['blockId','rowId','columnId','text']);
   command('table_row_add','Insert a blank row at a zero-based index or append. Maximum 100 rows; returns rowId.',{blockId,index},['blockId']);
   command('table_row_remove','Remove a row by ID, keeping at least one row. Reversible with undo.',{blockId,rowId:text()},['blockId','rowId']);

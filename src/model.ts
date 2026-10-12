@@ -44,8 +44,8 @@ export function makeBlock(type:BlockType, options:BlockOptions = {}):Block {
     case 'table': {
       const rows=options.rowCount??3,columns=options.columnCount??3;
       tableSize(rows,MAX_TABLE_ROWS);tableSize(columns,MAX_TABLE_COLUMNS);
-      const headerRow=options.headerRow??true;boolean(headerRow,'Header row');
-      return {...base,type:'table',title:options.title??'A little table',headerRow,columns:Array.from({length:columns},()=>({id:uid()})),rows:Array.from({length:rows},()=>({id:uid(),cells:Array.from({length:columns},()=> '')}))};
+      const headerRow=options.headerRow??true,pinnedHeader=options.pinnedHeader??true,pinnedColumns=options.pinnedColumns??0;boolean(headerRow,'Header row');boolean(pinnedHeader,'Pinned header');integer(pinnedColumns,columns);
+      return {...base,type:'table',title:options.title??'A little table',headerRow,pinnedHeader,pinnedColumns,columns:Array.from({length:columns},()=>({id:uid()})),rows:Array.from({length:rows},()=>({id:uid(),cells:Array.from({length:columns},()=> '')}))};
     }
     case 'mermaid': return { ...base,type:'mermaid', title: options.title ?? 'A diagram in words', source: options.source ?? 'flowchart LR\n  Idea --> Plan\n  Plan --> Do' };
     case 'excalidraw': return { ...base,type:'excalidraw', title: options.title ?? 'A little drawing space', scene: options.scene ?? emptyScene() };
@@ -92,8 +92,9 @@ export function validateNotebook(raw:unknown):Page {
         case 'text': case 'heading': fields(b, ['id', 'type', 'text']); string(b.text, 'Block text'); break;
         case 'divider': fields(b, ['id', 'type']); break;
         case 'table':
-          fields(b,['id','type','title','headerRow','columns','rows']);string(b.title,'Table title');boolean(b.headerRow,'Header row');
+          fields(b,['id','type','title','headerRow','pinnedHeader','pinnedColumns','columns','rows']);string(b.title,'Table title');boolean(b.headerRow,'Header row');boolean(b.pinnedHeader,'Pinned header');
           list(b.rows);list(b.columns);tableSize(b.rows.length,MAX_TABLE_ROWS);tableSize(b.columns.length,MAX_TABLE_COLUMNS);
+          integer(b.pinnedColumns,b.columns.length);
           for(const column of b.columns){fields(column,['id']);id(column.id);}
           for(const row of b.rows){fields(row,['id','cells']);id(row.id);list(row.cells);assert(row.cells.length===b.columns.length,'Table rows must be rectangular.');for(const cell of row.cells){string(cell,'Table cell');assert(cell.length<=MAX_TABLE_CELL_LENGTH,'Table cell is too long.');}}
           break;
@@ -206,13 +207,13 @@ export function mutatePage(doc:Page,action:CommandName,input:InternalInput = {},
     case 'set_page':
       fields(input, ['title', 'subtitle', 'theme', 'notificationMode']); Object.assign(doc, input); break;
     case 'add_block': {
-      fields(input, ['type', 'containerId', 'index', 'text', 'title', 'orientation', 'dueAt','source','scene','rowCount','columnCount','headerRow']);
+      fields(input, ['type', 'containerId', 'index', 'text', 'title', 'orientation', 'dueAt','source','scene','rowCount','columnCount','headerRow','pinnedHeader','pinnedColumns']);
       const container = findContainer(doc, input.containerId);
       const b = makeBlock(input.type!, input); insert(container.blocks, b, input.index); result = { blockId: b.id, block: copy(b) }; break;
     }
     case 'update_block': {
       fields(input, ['blockId', 'patch']); const b = block();
-      const allowed = { text: ['text'], heading: ['text'], checklist: ['title'], table:['title','headerRow'], tabs: ['title', 'orientation'], toggle: ['title', 'open'], accordion: ['title'], reminder: ['title', 'dueAt', 'enabled'], kanban: ['title'], divider: [], mermaid:['title','source'], excalidraw:['title','scene'] };
+      const allowed = { text: ['text'], heading: ['text'], checklist: ['title'], table:['title','headerRow','pinnedHeader','pinnedColumns'], tabs: ['title', 'orientation'], toggle: ['title', 'open'], accordion: ['title'], reminder: ['title', 'dueAt', 'enabled'], kanban: ['title'], divider: [], mermaid:['title','source'], excalidraw:['title','scene'] };
       fields(input.patch, allowed[b.type]); Object.assign(b, input.patch);
       if (b.type === 'reminder' && ('dueAt' in input.patch! || input.patch!.enabled === true)) b.firedAt = null;
       result = { blockId: b.id }; break;
@@ -230,7 +231,7 @@ export function mutatePage(doc:Page,action:CommandName,input:InternalInput = {},
     }
     case 'table_row_remove': fields(input,['blockId','rowId']);{const b=block('table');assert(b.rows.length>1,'Keep at least one table row.');remove(b.rows,input.rowId);}break;
     case 'table_column_remove': {
-      fields(input,['blockId','columnId']);const b=block('table');assert(b.columns.length>1,'Keep at least one table column.');member(b.columns,input.columnId);const index=b.columns.findIndex(column=>column.id===input.columnId);remove(b.columns,input.columnId);for(const row of b.rows)row.cells.splice(index,1);break;
+      fields(input,['blockId','columnId']);const b=block('table');assert(b.columns.length>1,'Keep at least one table column.');member(b.columns,input.columnId);const index=b.columns.findIndex(column=>column.id===input.columnId);remove(b.columns,input.columnId);for(const row of b.rows)row.cells.splice(index,1);b.pinnedColumns=Math.min(b.pinnedColumns,b.columns.length);break;
     }
     case 'move_block': {
       fields(input, ['blockId', 'containerId', 'index']);

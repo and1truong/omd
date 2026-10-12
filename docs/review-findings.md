@@ -23,6 +23,6 @@ Audited PRs #1–#3 and #5–#10 against main at ab4093f6174e3cad0d39322b0f1e22e
 
 ## PR #9 WebMCP coverage
 
-The 50-tool registry includes list_pages, get_page, page_add, page_select, page_update, page_move, page_remove, open_palette, get_view and set_view. Creation and movement accept parentId; movement includes subtree/sibling ordering; deletion removes a subtree; list_pages includes hierarchy/depth/count metadata; set_view controls collapsedPageIds. The shared model enforces cycles, the 32-level hierarchy boundary and at least one surviving page. Existing block tools can target inactive pages through pageId.
+The 55-tool registry includes list_pages, get_page, page_add, page_select, page_update, page_move, page_remove, open_palette, get_view and set_view, plus table_cell_update and table_row/column_add/remove. Creation and movement accept parentId; movement includes subtree/sibling ordering; deletion removes a subtree; list_pages includes hierarchy/depth/count metadata; set_view controls collapsedPageIds. The shared model enforces cycles, the 32-level hierarchy boundary and at least one surviving page. Existing block tools can target inactive pages through pageId.
 
 Notification permission, installation and persistent-storage requests use prepare tools that open the required real user-click flows. Import retains confirmation and backup. These browser requirements are exposed explicitly, rather than claiming automatic permission grants.

@@ -10,7 +10,7 @@ Your notebook stays in your browser. No account, analytics or AI API key is requ
 
 - **Pages and subpages:** organize a notebook with a sidebar, breadcrumbs and Cmd/Ctrl+K search.
 - **Flexible blocks:** Tiptap Markdown text, headings, nested checklists, horizontal/vertical tabs, expandable blocks, accordions and dividers. Shift+Enter continues into a new text block.
-- **Planning:** reminders and kanban boards.
+- **Planning:** editable tables with row/column insertion and pinned headers/columns, reminders and kanban boards.
 - **Diagrams:** Mermaid with live preview and Excalidraw with an editable full-page canvas.
 - **Everyday controls:** undo/redo, JSON import/export, keyboard and touch-friendly reordering, and system-aware light/dark themes.
 - **WebMCP:** supported browsers can let agents read and edit the notebook through the same validated commands as the UI.

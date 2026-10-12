@@ -11,7 +11,7 @@ export interface Scene {elements:SceneElement[];appState:JsonObject;files:Record
 export interface TextBlock {id:ID;type:'text' | 'heading';text:string}
 export interface DividerBlock {id:ID;type:'divider'}
 export interface TableRow {id:ID;cells:string[]}
-export interface TableBlock {id:ID;type:'table';title:string;headerRow:boolean;columns:{id:ID}[];rows:TableRow[]}
+export interface TableBlock {id:ID;type:'table';title:string;headerRow:boolean;pinnedHeader:boolean;pinnedColumns:number;columns:{id:ID}[];rows:TableRow[]}
 export interface ChecklistItem {id:ID;text:string;done:boolean;children?:ChecklistItem[]}
 export interface ChecklistBlock {id:ID;type:'checklist';title:string;items:ChecklistItem[]}
 export interface Tab {id:ID;title:string;blocks:Block[]}
@@ -35,7 +35,7 @@ export interface PageRow {pageId:ID;title:string;subtitle:string;index:number;ac
 export type PartialView = Partial<View>;
 export interface View {sidebarOpen:boolean;contentWidth:'reading'|'wide';collapsedPageIds:ID[];theme:Theme}
 export interface StorageLike {getItem(key:string):string|null;setItem(key:string,value:string):unknown}
-export interface BlockOptions {text?:string;title?:string;orientation?:Orientation;dueAt?:string;source?:string;scene?:Scene;rowCount?:number;columnCount?:number;headerRow?:boolean}
+export interface BlockOptions {text?:string;title?:string;orientation?:Orientation;dueAt?:string;source?:string;scene?:Scene;rowCount?:number;columnCount?:number;headerRow?:boolean;pinnedHeader?:boolean;pinnedColumns?:number}
 export interface BlockPatch extends BlockOptions {open?:boolean;enabled?:boolean}
 export interface CommandInputs {
   set_page:Partial<Pick<Page,'title'|'subtitle'|'theme'|'notificationMode'>>;
