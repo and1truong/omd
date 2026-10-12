@@ -66,6 +66,8 @@ async function inlineRename(group,nested,orientation) {
   assert.equal(await titleOf(group,id),`Inline ${orientation}`);assert.equal((await block(group.id)).activeTabId,active);assert.equal(await titleInput().count(),0);
   assert.equal(await revision(),before+1);assert.equal(await page.evaluate(()=>window.tabsApp.getStore().residency().undoEntries),history+1);
   await page.locator('#undo-button').click();await settled();assert.equal(await titleOf(group,id),old);
+  const noOpRevision=await revision(),noOpHistory=await page.evaluate(()=>window.tabsApp.getStore().residency().undoEntries);await header(active).click();await settled();
+  assert.equal(await revision(),noOpRevision);assert.equal(await page.evaluate(()=>window.tabsApp.getStore().residency().undoEntries),noOpHistory);assert.equal(await page.evaluate(()=>window.tabsApp.getStore().canRedo()),true);
   await page.locator('#redo-button').click();await settled();assert.equal(await titleOf(group,id),`Inline ${orientation}`);
   await header(id).press('F2');await titleInput().fill('Cancelled draft');await titleInput().press('Escape');await focused(id);
   assert.equal(await titleOf(group,id),`Inline ${orientation}`);assert.equal(await revision(),before+3);
