@@ -73,6 +73,7 @@ function writeNative(target:NativeTarget,value:string,label:string) {
 function updateSaveStatus() {
   const drafts=nativeEdits?.list()??[],failed=drafts.filter(draft=>draft.error),status=domId('save-status'),dot=element('span','status-dot');
   const label=failed.length?'Not saved':saveState.pending||drafts.length?'Saving…':saveState.error&&saveState.error!==dismissedSaveError?'Not saved':'Saved';
+  status.dataset.state=label==='Not saved'?'error':label==='Saved'?'saved':'pending';
   status.replaceChildren(dot,document.createTextNode(label));
   if(!recovery){recovery=element('section','draft-recovery');recovery.setAttribute('aria-label','Unsaved edits');document.querySelector('.page-heading')!.after(recovery);}
   recovery.hidden=!failed.length;

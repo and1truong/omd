@@ -43,6 +43,8 @@ select { border: 1px solid var(--line); border-radius: 5px; background: var(--pa
 #app-page-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .save-status { font-size: 11px; color: var(--secondary); display: flex; align-items: center; gap: 6px; margin-right: 5px; white-space: nowrap; }
 .status-dot { height: 5px; width: 5px; background: var(--accent); border-radius: 50%; }
+.save-status[data-state=error] .status-dot { background: var(--danger); }
+.save-status[data-state=pending] .status-dot { background: var(--secondary); }
 .page-menu { position: relative; }
 .page-menu summary { list-style: none; cursor: pointer; }
 .page-menu summary::-webkit-details-marker { display: none; }
