@@ -2,7 +2,7 @@ import type {NotebookStore} from './types.js';
 import type {createCompositionGuard} from './composition.js';
 
 interface Draft {pageId:string;blockId:string;rowId:string;columnId:string;value:string;saving?:Promise<void>}
-export function createTableEdits(store:NotebookStore,composition:ReturnType<typeof createCompositionGuard>) {
+export function createTableEdits(store:NotebookStore,composition:Pick<ReturnType<typeof createCompositionGuard>,'settled'>) {
   const drafts=new Map<string,Draft>();
   const key=(pageId:string,blockId:string,rowId:string,columnId:string)=>JSON.stringify([pageId,blockId,rowId,columnId]);
   async function flush(id:string,draft:Draft):Promise<void> {

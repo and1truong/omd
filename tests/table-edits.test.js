@@ -23,3 +23,12 @@ test('queued edits preserve the latest draft and flush waits through final compo
   input.dispatchEvent(new Event('compositionstart'));let done=false;const flush=edits.flushAll().then(()=>done=true);await Promise.resolve();assert.equal(done,false);
   input.dispatchEvent(new Event('compositionend'));await flush;assert.equal(writes.at(-1).pageId,'captured-page');assert.equal(writes.at(-1).text,'日本語');
 });
+
+test('scoped composition waits do not block unrelated composing editors',async()=>{
+  const composition=createCompositionGuard(),table=new EventTarget(),other=new EventTarget();let writes=0;
+  for(const input of [table,other])composition.track(input,()=>writes++,()=> 'page');
+  other.dispatchEvent(new Event('compositionstart'));await composition.settled(input=>input===table);assert.equal(composition.hasActive(),true);
+  table.dispatchEvent(new Event('compositionstart'));let done=false;const waiting=composition.settled(input=>input===table).then(()=>done=true);
+  await Promise.resolve();assert.equal(done,false);table.dispatchEvent(new Event('compositionend'));await waiting;assert.equal(writes,1);assert.equal(composition.hasActive(),true);
+  other.dispatchEvent(new Event('compositionend'));await composition.settled();assert.equal(writes,2);
+});
