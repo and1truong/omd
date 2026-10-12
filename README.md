@@ -26,6 +26,8 @@ Pushing a `release/vVERSION` branch whose version matches package.json explicitl
 
 ## Pages
 
+Use **+ Add block** above the first block or between existing blocks to insert at that position. Each block's **…** menu also offers **Insert block before** and **Insert block after**. These controls work inside tabs, expandable blocks and accordion sections; **Add a block** at the bottom still appends. After choosing a block type, focus moves to the new block. Undo removes the insertion.
+
 Press Cmd+K on macOS or Ctrl+K elsewhere, or click the page button. Search and switch with arrows/Enter, create a named page, or use the per-page arrows to reorder the notebook. Each page has its own title, content and reminder preferences. All pages and their order/selection export together. Existing single-page storage upgrades automatically, preserving the original bytes in a v1 backup key.
 
 Pages can contain subpages up to 32 levels, counting root pages as level 1. Use a sidebar page menu's **Add subpage**, the current page menu's **New subpage**, or choose **Create under** in Cmd/Ctrl+K. Sidebar branches expand/collapse; breadcrumbs navigate to ancestors. Collapsed branches discard their navigation DOM, while command-palette search still finds every page. Selecting a hidden page reveals its ancestors. Collapse preferences persist separately on this device.

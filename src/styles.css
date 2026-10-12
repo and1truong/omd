@@ -170,7 +170,14 @@ body[data-content-width=wide] .paper { max-width: none; }
 .block-list:not([data-container=page])>.add-block-button { font-size: 11px; padding: 3px 0 6px; }
 .block-type-divider hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
 .drop-slot { height: 4px; }
+.insert-slot { height: auto; }
+.block-insert-button { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 28px; padding: 2px 0; color: var(--secondary); font-size: 11px; text-align: left; }
+.block-insert-button .ui-icon { width: 14px; height: 14px; }
+.block-insert-button::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+.block-insert-button:hover, .block-insert-button:focus-visible { color: var(--accent); }
+.block-insert-button:hover::after, .block-insert-button:focus-visible::after { background: var(--accent); }
 .dragging-block .drop-slot { height: 12px; border: 1px dashed var(--line); border-radius: 3px; }
+.dragging-block .block-insert-button { visibility: hidden; }
 .drop-active { outline: 2px dashed var(--focus); outline-offset: 2px; }
 .dragging { opacity: .45; }
 dialog { border: 1px solid var(--line); background: var(--paper); color: var(--text); border-radius: 10px; box-shadow: 0 12px 60px #0003; padding: 24px; width: min(540px,calc(100% - 32px)); max-height: 85dvh; overflow: auto; }
@@ -287,13 +294,14 @@ h3 { font-size: 13px; margin: 0 0 12px; }
 @media (pointer: coarse) {
   .sidebar-page-more, .row-controls { opacity: 1; }
   .icon-button { min-height: 34px; }
+  .block-insert-button { min-height: 44px; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none!important; scroll-behavior: auto!important; }
 }
 @media print {
   body { background: #fff; color: #000; --nav-offset: 0px; }
-  .app-header, .sidebar, .block-controls, .row-controls, .add-block-button, .add-inline, .tab-editbar, .notices { display: none!important; }
+  .app-header, .sidebar, .block-controls, .row-controls, .add-block-button, .insert-slot, .add-inline, .tab-editbar, .notices { display: none!important; }
   #workspace { margin: 0; padding: 0; }
   .paper { max-width: none; padding: 0; }
   .kanban-board { overflow: visible; flex-wrap: wrap; }
