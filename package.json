@@ -1,0 +1,13 @@
+{
+  "name": "omd",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "oh my day — a local-first notebook",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "start": "node scripts/serve.mjs",
+    "build": "node scripts/build.mjs"
+  },
+  "engines": { "node": ">=22" }
+}
