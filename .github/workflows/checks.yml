@@ -77,3 +77,4 @@ jobs:
       - run: npm run test:checklist
       - run: npm run test:editor
       - run: npm run test:table
+      - run: npm run test:tabs

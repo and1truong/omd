@@ -16,6 +16,7 @@
     "test:checklist": "node tests/checklist-browser.mjs",
     "test:editor": "node tests/text-editor.mjs",
     "test:table": "node tests/table-browser.mjs",
+    "test:tabs": "node tests/tabs-drag.mjs",
     "typecheck": "tsc --noEmit && tsc --project tsconfig.worker.json --noEmit",
     "check:static": "node tests/static-output.mjs",
     "package:release": "node scripts/package-release.mjs",
