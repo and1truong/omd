@@ -1,5 +1,5 @@
 // The same checks run with fake-indexeddb and the browser's actual IndexedDB.
-export async function migrationChecks({sourceRoot,extension='ts',startupVersion}) {
+export async function migrationChecks({sourceRoot,extension='ts',startupVersion,baselineFixtures}) {
   const {openRepository}=await import(`${sourceRoot}repository.${extension}`);
   const {createStore}=await import(`${sourceRoot}store.${extension}`);
   const {startReminders}=await import(`${sourceRoot}reminders.${extension}`);
@@ -52,6 +52,24 @@ export async function migrationChecks({sourceRoot,extension='ts',startupVersion}
     mutate?.(tx,{book,drawing,reminder});await completed;db.close();
   }
   async function rejects(fn,pattern){let error;try{await fn();}catch(e){error=e;}check(error&&pattern.test(error.message),`Expected recovery error ${pattern}, got ${error?.message??'success'}`);}
+  async function restoreSnapshot(dbName,saved){
+    const opening=indexedDB.open(dbName,saved.version);opening.onupgradeneeded=()=>{const db=opening.result;for(const [name,data]of Object.entries(saved.stores)){const store=db.createObjectStore(name,data.keyPath===null?undefined:{keyPath:data.keyPath});for(const index of data.indexes)store.createIndex(index.name,index.keyPath,{unique:index.unique,multiEntry:index.multiEntry});}};
+    const db=await req(opening),tx=db.transaction([...db.objectStoreNames],'readwrite'),completed=done(tx);
+    for(const [name,data]of Object.entries(saved.stores)){const store=tx.objectStore(name),keys=await req(store.getAllKeys());for(const key of keys)if(!data.keys.some(value=>JSON.stringify(value)===JSON.stringify(key)))store.delete(key);data.values.forEach((value,i)=>data.keyPath===null?store.put(value,data.keys[i]):store.put(value));}
+    await completed;db.close();
+  }
+  for(const fixture of baselineFixtures?.cases??[]){
+    const dbName=name(),data=storage();fixture.recoverySources.forEach(([key,value])=>data.setItem(key,value));const sources=data.entries();
+    await restoreSnapshot(dbName,fixture.malformed);const before=await snapshot(dbName);
+    await rejects(()=>createStore(data,{name:dbName,initial:emptyNotebook}),/metadata is invalid.*intact.*nonempty/);
+    equal(await snapshot(dbName),before,'Production baseline import changed during rejected reopen');equal(data.entries(),sources,'Production baseline recovery sources changed');
+    await restoreSnapshot(dbName,fixture.healthy);let grant,requested;const gate=new Promise(resolve=>grant=resolve),waiting=new Promise(resolve=>requested=resolve);let held=false;
+    const locks={request(name,options,callback){if(typeof options==='function'){requested();return gate.then(async()=>{held=true;try{return await options({name});}finally{held=false;}});}return Promise.resolve(callback(null));}};
+    const startup=createStore(data,{name:dbName,initial:emptyNotebook,locks});await waiting;await restoreSnapshot(dbName,fixture.malformed);const raced=await snapshot(dbName);grant();
+    await rejects(()=>startup,/metadata is invalid.*intact.*nonempty/);await new Promise(resolve=>setTimeout(resolve,0));check(!held,'Production baseline race retained history lease');equal(await snapshot(dbName),raced,'Production baseline race changed saved data');equal(data.entries(),sources,'Production baseline race changed recovery bytes');
+    await restoreSnapshot(dbName,fixture.healthy);const retry=await createStore(data,{name:dbName,initial:emptyNotebook});check(retry.listPages().length===2,'Production baseline same-DB repair failed');await retry.close();
+    evidence.push({case:`production import ${baselineFixtures.baseline}: ${fixture.label}, reopen / lease race / exact preservation / same-DB retry`,passed:true});
+  }
   function invalidPage(book,index,id){
     const bad=structuredClone(book);bad.pages[index].id=id;bad.activePageId=bad.pages[0].id;
     bad.parents=Object.fromEntries(bad.pages.map((page,i)=>[page.id,i?bad.pages[0].id:'']));return bad;

@@ -5,6 +5,14 @@ import {emptyNotebook,makeBlock,STORAGE_KEY} from '../src/model.ts';
 import {wrapPage} from '../src/notebook.ts';
 import {metadataBook} from '../src/records.ts';
 const memory=()=>{const values=new Map();return {getItem:k=>values.get(k)??null,setItem:(k,v)=>values.set(k,v)};};
+test('an owner-ID failure after opening the repository closes the startup connection',async()=>{
+  const storage=memory(),live=await createStore(storage,{initial:emptyNotebook}),name=live.databaseName();
+  const {createStore:openStore}=await import('../src/store.ts'),uuid=crypto.randomUUID,close=IDBDatabase.prototype.close;let closed=0;
+  IDBDatabase.prototype.close=function(...args){if(this.name===name)closed++;return close.apply(this,args);};
+  crypto.randomUUID=()=>{throw new Error('Injected owner ID failure');};
+  try{await assert.rejects(()=>openStore(storage,{name}),/Injected owner ID failure/);assert.equal(closed,1);}
+  finally{crypto.randomUUID=uuid;IDBDatabase.prototype.close=close;await live.close();}
+});
 async function databaseSnapshot(name){
   const request=req=>new Promise((resolve,reject)=>{req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});
   const db=await request(indexedDB.open(name)),names=[...db.objectStoreNames],tx=db.transaction(names),completed=new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error);}),stores={};

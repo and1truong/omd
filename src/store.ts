@@ -9,8 +9,9 @@ enablePatches();
 /** Serialized events, immutable selectors, durable record transactions. Only the active page is resident. */
 export async function createStore(storage:StorageLike,options:StoreOptions = {}):Promise<NotebookStore> {
   const repository=await openRepository(storage,{key:STORAGE_KEY,initial:initialNotebook,...options});
-  const owner=crypto.randomUUID(),locks=options.locks??globalThis.navigator?.locks;let releaseLease:(()=>void)|undefined,channel:BroadcastChannel|null=null;
+  let releaseLease:(()=>void)|undefined,channel:BroadcastChannel|null=null;
   try{
+  const owner=crypto.randomUUID(),locks=options.locks??globalThis.navigator?.locks;
   if(locks?.request){
     let readyLease!:()=>void,rejectLease!:(error:unknown)=>void;const ready=new Promise<void>((resolve,reject)=>{readyLease=resolve;rejectLease=reject;});
     locks.request(`${repository.name}.history:${owner}`,()=>{readyLease();return new Promise<void>(resolve=>{releaseLease=resolve;});}).catch(rejectLease);await ready;

@@ -3,6 +3,7 @@ import {spawn} from 'node:child_process';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {chromium,webkit} from 'playwright';
 import {migrationChecks} from './record-migration-checks.js';
+import {baselineFixtures} from './native-v4-baseline.js';
 const engine=process.env.OMD_BROWSER??'chromium',basePath=process.env.OMD_BASE_PATH??'',url=`http://localhost:4326${basePath}/`,sourceRoot=new URL('src/',url).href;
 assert.ok(['chromium','webkit'].includes(engine));
 const server=spawn(process.execPath,['scripts/serve.mjs'],{cwd:new URL('..',import.meta.url).pathname,env:{...process.env,OMD_PORT:'4326',OMD_STATIC_DIR:'dist'},stdio:['ignore','pipe','pipe']});
@@ -23,7 +24,7 @@ try{
     // A passive same-origin document hosts storage checks without initializing the app first.
     await page.route(`${url}?storage-checks`,route=>route.fulfill({contentType:'text/html',body:'<!doctype html><title>IndexedDB migration checks</title>'}));
     await page.goto(`${url}?storage-checks`);
-    const {evidence,startup}=await page.evaluate(migrationChecks,{sourceRoot,extension:'js',startupVersion:version});results.push(...evidence);
+    const {evidence,startup}=await page.evaluate(migrationChecks,{sourceRoot,extension:'js',startupVersion:version,baselineFixtures});results.push(...evidence);
     // Shipped legacy tabs have no versionchange handler and cannot be closed by the new app.
     const legacy=await context.newPage();await legacy.goto(`${url}manifest.webmanifest`);
     await legacy.evaluate(version=>new Promise((resolve,reject)=>{const opening=indexedDB.open('omd.notebook.records.v1',version);opening.onerror=()=>reject(opening.error);opening.onsuccess=()=>{globalThis.legacyDatabase=opening.result;resolve();};}),version);
