@@ -11,7 +11,7 @@ const server=spawn(process.execPath,['scripts/serve.mjs'],{cwd:root,env:{...proc
 let browser,page;const errors=[];
 const ready=()=>page.evaluate(async()=>{window.tabsApp=await import(new URL('./src/app.js',document.baseURI).href);await window.tabsApp.ready;});
 const call=(name,input={})=>page.evaluate(async({name,input})=>window.tabsApp.getStore().dispatch(name,input),{name,input});
-const settled=()=>page.evaluate(async()=>{await window.tabsApp.flushPending();await window.tabsApp.getStore().idle();});
+const settled=(options={})=>page.evaluate(async options=>{await window.tabsApp.flushPending(options);await window.tabsApp.getStore().idle();},options);
 const state=()=>page.evaluate(async()=>window.tabsApp.getStore().getPage());
 const revision=()=>page.evaluate(()=>window.tabsApp.getStore().getRevision());
 function find(blocks,id){for(const block of blocks){if(block.id===id)return block;const child=find(block.blocks??block.tabs?.flatMap(t=>t.blocks)??[],id);if(child)return child;}}
@@ -38,7 +38,7 @@ async function reorder(id,source,target,after,orientation,proof) {
   await startDrag(header(source),header(target).locator('..'),`${after?'after':'before'}-${orientation==='horizontal'?'x':'y'}`);
   assert.equal(await tablist(id).locator('.tab-drop-before,.tab-drop-after').count(),1,'native dragover exposes an insertion marker');
   if(proof)await screenshot(proof);
-  await page.mouse.up();await settled();
+  await page.mouse.up();await settled({settle:false});
   assert.equal(await page.locator('.dragging,.tab-drop-before,.tab-drop-after').count(),0);
 }
 async function group(orientation,containerId,title) {
@@ -93,7 +93,7 @@ async function inlineRename(group,nested,orientation) {
   if(active!==group.ids[0]){await header(group.ids[0]).click();await settled();}
   await header(nested.ids[1]).locator('..').getByRole('button',{name:/Rename/}).click();await titleInput().fill('Nested inline title');await titleInput().press('Enter');await settled();assert.equal((await block(nested.id)).activeTabId,nestedActive);assert.equal(await titleOf(nested,nested.ids[1]),'Nested inline title');
   await header(nested.ids[1]).press('F2');await titleInput().evaluate(el=>{window.hiddenInlineIME=el;el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.value='Nested composition kept';});
-  await header(id).click();await settled();assert.equal(await page.evaluate(()=>window.hiddenInlineIME.isConnected),true);
+  await header(id).click();await settled({settle:false});assert.equal(await page.evaluate(()=>window.hiddenInlineIME.isConnected),true);
   await page.evaluate(()=>window.hiddenInlineIME.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));await settled();assert.equal(await titleOf(nested,nested.ids[1]),'Nested composition kept');
   await header(group.ids[0]).click();await settled();
   if(active!==group.ids[0]){await header(active).click();await settled();}
@@ -101,8 +101,9 @@ async function inlineRename(group,nested,orientation) {
   const sourcePage=(await state()).id,destinationPage=(await call('page_add',{title:`Inline destination ${orientation}`})).pageId;
   await call('page_select',{pageId:sourcePage});await page.evaluate(()=>window.tabsApp.setView({sidebarOpen:true}));
   await header(id).press('F2');await titleInput().evaluate(el=>{window.pageInlineIME=el;el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.value='Saved to original page';});
-  await page.getByRole('link',{name:`Switch to Inline destination ${orientation}`,exact:true}).click();await settled();assert.equal((await state()).id,destinationPage);assert.equal(await page.evaluate(()=>window.pageInlineIME.isConnected),true);
+  await page.getByRole('link',{name:`Switch to Inline destination ${orientation}`,exact:true}).click();await settled({settle:false});assert.equal((await state()).id,sourcePage,'strict navigation waits for inline IME');assert.equal(await page.evaluate(()=>window.pageInlineIME.isConnected),true);
   await page.evaluate(()=>window.pageInlineIME.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));await settled();
+  await page.waitForFunction(id=>window.tabsApp.getStore().getActivePageId()===id,destinationPage);await settled();
   const originalPage=await page.evaluate(pageId=>window.tabsApp.getStore().getPage(pageId),sourcePage);
   assert.equal(originalPage.blocks.find(b=>b.id===group.id).tabs.find(t=>t.id===id).title,'Saved to original page');assert.equal((await state()).blocks.length,0);
   await page.locator(`#sidebar-pages [data-page-id="${sourcePage}"]`).getByRole('link').first().click();await settled();await page.evaluate(()=>window.tabsApp.setView({sidebarOpen:false}));
@@ -121,13 +122,13 @@ async function staleTabControls(orientation) {
   await call('import_notebook',{notebook:book});await settled();
   const baseline=structuredClone((await block(tabs.id)));await page.evaluate(()=>window.tabsApp.setView({sidebarOpen:true}));
   await header(tabs.ids[1]).press('F2');await page.getByRole('textbox',{name:'Rename tab',exact:true}).evaluate(el=>{window.scopedTitle=el;el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.value='Draft belongs to A';});
-  await page.getByRole('link',{name:`Switch to ${destination.title}`,exact:true}).click();await settled();
+  await call('page_select',{pageId:destination.id});await settled({settle:false});
   assert.equal((await state()).id,destination.id);assert.equal(await page.evaluate(()=>window.scopedTitle.isConnected),true);
-  await own(tabs.id).getByRole('button',{name:'Move tab down',exact:true}).click();await settled();
-  await header(tabs.ids[0]).press('End');await settled();
-  await header(tabs.ids[2]).click();await settled();
-  await tablist(tabs.id).getByRole('button',{name:'Add tab',exact:true}).click();await settled();
-  await own(tabs.id).getByRole('button',{name:'Delete tab',exact:true}).click();await page.getByRole('button',{name:'Remove tab',exact:true}).click();await settled();
+  await own(tabs.id).getByRole('button',{name:'Move tab down',exact:true}).click();await settled({settle:false});
+  await header(tabs.ids[0]).press('End');await settled({settle:false});
+  await header(tabs.ids[2]).click();await settled({settle:false});
+  await tablist(tabs.id).getByRole('button',{name:'Add tab',exact:true}).click();await settled({settle:false});
+  await own(tabs.id).getByRole('button',{name:'Delete tab',exact:true}).click();await page.getByRole('button',{name:'Remove tab',exact:true}).click();await settled({settle:false});
   assert.deepEqual(await block(tabs.id),baseline,'stale select/keyboard/add/move/remove never mutate the destination with identical IDs');
   assert.equal(await page.evaluate(()=>window.scopedTitle.isConnected),true);
   await page.evaluate(()=>window.scopedTitle.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));await settled();
@@ -147,6 +148,8 @@ async function failedRenameRecovery(orientation,nested=false) {
   const start=async value=>{await header(id).press('F2');await titleInput().evaluate((el,value)=>{window.failedIME=el;el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.value=value;},value);};
   const end=async()=>{await fail();await page.evaluate(()=>window.failedIME.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));await page.getByRole('button',{name:'Retry tab rename',exact:true}).waitFor();await page.waitForFunction(()=>window.failedIME.isConnected&&!window.failedIME.disabled);await page.evaluate(()=>window.tabsApp.getStore().idle());};
   let draft='Tiếng Việt 世界 — retry';await start(draft);await reorder(tabs.id,tabs.ids[2],tabs.ids[3],true,orientation);
+  // An external store mutation can redraw while a local native move waits for IME.
+  await call('tab_move',{blockId:tabs.id,tabId:tabs.ids[2],index:3});
   const before=await revision(),history=await page.evaluate(()=>window.tabsApp.getStore().residency().undoEntries);await end();
   assert.equal(await titleInput().inputValue(),draft);assert.equal(await titleInput().isVisible(),true);assert.equal(await revision(),before);
   await restore();draft+=' — second composition';await titleInput().evaluate((input,value)=>{input.focus();input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));input.value=value;input.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));},draft);
@@ -159,7 +162,7 @@ async function failedRenameRecovery(orientation,nested=false) {
   await restore();await page.evaluate(()=>{const store=window.tabsApp.getStore();window.retryDispatch=store.dispatch;store.dispatch=(name,...args)=>name==='tab_update'?new Promise(resolve=>{window.completeRetry=()=>resolve(window.retryDispatch(name,...args));}):window.retryDispatch(name,...args);});
   await page.getByRole('button',{name:'Retry tab rename',exact:true}).click();assert.equal(await titleInput().isEnabled(),false);assert.equal(await page.getByRole('button',{name:'Cancel tab rename',exact:true}).isEnabled(),false);
   await page.evaluate(()=>{window.tabsApp.getStore().dispatch=window.retryDispatch;window.completeRetry();});await settled();assert.equal(await titleOf(tabs,id),draft);assert.equal(await revision(),before+1);assert.equal(await page.evaluate(()=>window.tabsApp.getStore().residency().undoEntries),history+1);assert.equal(await page.locator('.tab-title-recovery').count(),0);
-  await start('Cancel this composed draft');const ids=(await block(tabs.id)).tabs.map(t=>t.id);await reorder(tabs.id,ids.at(-1),ids[0],false,orientation);const cancelBefore=await revision();await end();
+  await start('Cancel this composed draft');const ids=(await block(tabs.id)).tabs.map(t=>t.id);await reorder(tabs.id,ids.at(-1),ids[0],false,orientation);await call('tab_move',{blockId:tabs.id,tabId:ids.at(-1),index:0});const cancelBefore=await revision();await end();
   await page.getByRole('button',{name:'Cancel tab rename',exact:true}).click();assert.equal(await titleInput().count(),0);assert.equal(await revision(),cancelBefore);await restore();assert.equal(await titleOf(tabs,id),draft);
   await header(id).press('F2');await titleInput().fill('Disconnected plain draft');const detachedBefore=await revision();await fail();
   await call('page_select',{pageId:destination});await page.getByRole('button',{name:'Retry tab rename',exact:true}).waitFor();assert.equal(await titleInput().inputValue(),'Disconnected plain draft');
