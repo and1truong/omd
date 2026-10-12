@@ -136,6 +136,16 @@ async function styleCases() {
   assert.equal(await fold().getAttribute('aria-expanded'),'true');assert.equal(await row(ids.experience).locator('.checklist-branch-progress').innerText(),'3/7');
   assert.deepEqual(await items(),original,'View changes, reload, and add/remove must preserve original Markdown sources.');
   await call('page_remove',{pageId:another});
+  const imported=await page.evaluate(async({pageId,blockId})=>{
+    const app=await import(new URL('./src/app.js',document.baseURI).href),store=app.getStore(),notebook=JSON.parse(await store.export()),block=notebook.pages.find(page=>page.id===pageId).blocks.find(block=>block.id===blockId);
+    block.id='block\u0000nul';block.items[0].id='parent\u0000nul';await store.import(JSON.stringify(notebook));return {blockId:block.id,itemId:block.items[0].id};
+  },{pageId,blockId});
+  blockId=imported.blockId;
+  const nulRow=page.locator('.check-row').first();await nulRow.locator('.checklist-fold').click();
+  await page.waitForFunction(()=>document.querySelector('.checklist-fold').getAttribute('aria-expanded')==='false');
+  await nulRow.getByRole('button',{name:'Checklist item actions',exact:true}).click();await page.locator('#block-actions-dialog').getByRole('button',{name:'Add child checklist item',exact:true}).click();
+  const nulChild=(await children(imported.itemId)).at(-1).id;await focused(nulChild);
+  assert.equal(await nulRow.locator('.checklist-fold').getAttribute('aria-expanded'),'true');
 }
 
 async function markdownCases() {

@@ -187,7 +187,7 @@ function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
   function focusItem(itemId:string) {
     requestAnimationFrame(()=>{
       if(pageId!==store.getActivePageId())return;
-      const block=document.querySelector<HTMLElement>(`.block-type-checklist[data-block-id="${CSS.escape(b.id)}"]`),target=block?.querySelector<HTMLElement>(`[data-item-id="${CSS.escape(itemId)}"] > .check-row .markdown-editor`);
+      const block=[...document.querySelectorAll<HTMLElement>('.block-type-checklist')].find(block=>block.dataset.blockId===b.id),entry=block&&[...block.querySelectorAll<HTMLElement>('[data-item-id]')].find(entry=>entry.dataset.itemId===itemId),target=entry?.querySelector<HTMLElement>(':scope > .check-row .markdown-editor');
       if(target){revealChecklistItem(target);target.focus();}
     });
   }
