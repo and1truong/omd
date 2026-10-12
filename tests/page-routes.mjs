@@ -31,7 +31,11 @@ export async function verifyPageRoutes({browser,appURL,call,root}) {
     assert.equal(await active(a),second);assert.equal(await active(b),first);
     const link=b.getByRole('link',{name:'Switch to Compare — right page (synced)',exact:true});
     assert.equal(await link.getAttribute('href'),new URL(path(second)).pathname);
-    const opened=context.waitForEvent('page');await link.click({modifiers:['Control']});const third=await opened;await ready(third);
+    await b.bringToFront();await b.keyboard.down('ControlOrMeta');let third;
+    try {
+      [third]=await Promise.all([context.waitForEvent('page'),link.click()]);
+    } finally {await b.keyboard.up('ControlOrMeta');}
+    await ready(third);
     assert.equal(await active(third),second);assert.equal(third.url(),path(second));assert.equal(await active(b),first);await third.close();
     await link.click();await b.waitForURL(path(second));
     const text=(await call('add_block',{type:'text',text:'Before browser history'},b)).block;
