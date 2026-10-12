@@ -83,3 +83,49 @@ test('non-settling flush skips native preedit but strict barriers still wait for
   let done=false;const strict=edits.flushAll().then(()=>done=true);await Promise.resolve();assert.equal(done,false);
   edits.stage(target,'Final 日本語','Page title');finish();await strict;assert.deepEqual(writes,[{pageId:'captured',title:'Final 日本語'}]);assert.equal(edits.list().length,0);
 });
+
+test('an in-flight native write never recursively commits preedit or clears its pending draft',async()=>{
+  for(const target of [{kind:'page',pageId:'page',field:'title'},{kind:'title',pageId:'page',blockId:'block'},{kind:'cell',pageId:'page',blockId:'block',rowId:'row',columnId:'column'}]){
+    let release,started,composing=false;const gate=new Promise(resolve=>release=resolve),first=new Promise(resolve=>started=resolve),writes=[];
+    const edits=createNativeEdits({dispatch:async(name,input)=>{writes.push(input);if(writes.length===1){started();await gate;}},idle:async()=>{}},{settled:async()=>{},isComposingTarget:()=>composing});
+    const saving=edits.write(target,'Before IME','Native field');await first;composing=true;edits.stage(target,'PREEDIT','Native field');release();await saving;
+    assert.equal(writes.length,1);assert.equal(edits.value(target,'saved'),'PREEDIT');assert.equal(edits.list().length,1);
+    await edits.flushAll({settle:false});assert.equal(writes.length,1);
+    await edits.write(target,'Final Việt 日本語','Native field');assert.equal(writes.length,2);assert.equal(edits.list().length,0);composing=false;await edits.flushAll();assert.equal(writes.length,2);
+  }
+});
+
+test('a final value queued behind a prior write remains committable during the next composition',async()=>{
+  let release,started,composing=false;const gate=new Promise(resolve=>release=resolve),first=new Promise(resolve=>started=resolve),writes=[];
+  const edits=createNativeEdits({dispatch:async(name,input)=>{writes.push(input.title);if(writes.length===1){started();await gate;}},idle:async()=>{}},{settled:async()=>{},isComposingTarget:()=>composing}),target={kind:'page',pageId:'page',field:'title'};
+  const saving=edits.write(target,'Before','Page title');await first;composing=true;edits.stage(target,'First preedit','Page title');const final=edits.write(target,'First final','Page title');
+  edits.stage(target,'Second PREEDIT','Page title');release();await Promise.all([saving,final]);assert.deepEqual(writes,['Before','First final']);assert.equal(edits.value(target,'saved'),'Second PREEDIT');
+  await edits.write(target,'Second final','Page title');assert.deepEqual(writes,['Before','First final','Second final']);assert.equal(edits.list().length,0);
+});
+
+test('same-text preedit stays dirty and compositionend commits while the real guard is finishing',async()=>{
+  let releaseBefore,releaseFinal,startBefore,startFinal;
+  const before=new Promise(resolve=>releaseBefore=resolve),final=new Promise(resolve=>releaseFinal=resolve),beforeStarted=new Promise(resolve=>startBefore=resolve),finalStarted=new Promise(resolve=>startFinal=resolve),writes=[];
+  const composition=createCompositionGuard(),input=new EventTarget(),target={kind:'page',pageId:'captured',field:'title'};
+  const edits=createNativeEdits({dispatch:async(name,value)=>{writes.push(value.title);if(writes.length===1){startBefore();await before;}else{startFinal();await final;}},idle:async()=>{}},{settled:composition.settled,isComposingTarget:()=>composition.isComposing(input)});
+  let value='Before';composition.track(input,()=>edits.write(target,value,'Page title'),()=>target.pageId);
+  const saving=edits.write(target,value,'Page title');await beforeStarted;input.dispatchEvent(new Event('compositionstart'));edits.stage(target,value,'Page title');releaseBefore();await saving;
+  assert.deepEqual(writes,['Before']);assert.equal(edits.list().length,1);assert.equal(composition.isComposing(input),true);
+  value='Final';input.dispatchEvent(new Event('compositionend'));await finalStarted;assert.equal(composition.isComposing(input),true);assert.equal(edits.list().length,1);
+  let done=false;const barrier=edits.flushAll().then(()=>done=true);await Promise.resolve();assert.equal(done,false);releaseFinal();await barrier;
+  assert.deepEqual(writes,['Before','Final']);assert.equal(edits.list().length,0);assert.equal(composition.isComposing(input),false);
+});
+
+test('new same-text composition during a pending final commit cannot be cleared by its acknowledgement',async()=>{
+  for(const same of [true,false]){
+    let release,started,finishing;const pending=new Promise(resolve=>release=resolve),began=new Promise(resolve=>started=resolve),writes=[];
+    const composition=createCompositionGuard(),input=new EventTarget(),target={kind:'page',pageId:'captured',field:'title'};
+    const edits=createNativeEdits({dispatch:async(name,value)=>{writes.push(value.title);if(writes.length===1){started();await pending;}},idle:async()=>{}},{settled:composition.settled,isComposingTarget:()=>composition.isComposing(input)});
+    let value='First final';composition.track(input,()=>finishing=edits.write(target,value,'Page title'),()=>target.pageId);
+    input.dispatchEvent(new Event('compositionstart'));input.dispatchEvent(new Event('compositionend'));await began;
+    input.dispatchEvent(new Event('compositionstart'));value=same?'First final':'New PREEDIT';edits.stage(target,value,'Page title');release();await finishing;
+    assert.deepEqual(writes,['First final']);assert.equal(edits.list().length,1);assert.equal(edits.value(target,'saved'),value);assert.equal(composition.isComposing(input),true);
+    value='Second final';input.dispatchEvent(new Event('compositionend'));await composition.settled();await edits.flushAll();
+    assert.deepEqual(writes,['First final','Second final']);assert.equal(edits.list().length,0);
+  }
+});
