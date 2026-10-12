@@ -48,7 +48,7 @@ async function historyBarrier() {
   await call(page,'add_block',{type:'divider'});await page.evaluate(()=>lifecycleStore.undo());
   const before=await page.evaluate(()=>lifecycleStore.getRevision());
   await failWrites(page,table);await page.locator(`[data-block-id="${table}"] .table-cell`).fill('Table draft must precede history');
-  await page.waitForFunction(()=>document.getElementById('save-status').textContent==='Not saved');
+  await page.waitForFunction(()=>document.getElementById('save-status').textContent.startsWith('Not saved'));
   for(const key of ['Control+z','Control+Shift+z']) {
     const notices=await page.locator('#notices .notice').count();await editor(page,f.itemId).press(key);
     await page.waitForFunction(count=>document.querySelectorAll('#notices .notice').length>count,notices);
@@ -93,12 +93,14 @@ async function deletedDrafts(removePage=false) {
   await call(peer,removePage?'page_remove':'remove_block',removePage?{pageId:f.pageId}:{blockId:f.blockId});
   await editor(page,f.itemId).waitFor({state:'detached'});await restoreWrites(page);
   await assert.rejects(()=>flush(page),/not found/i);assert.equal(await page.getByRole('textbox',{name:'Unsaved Markdown draft',exact:true}).inputValue(),draft);
+  assert.equal(await page.evaluate(()=>{const event=new Event('beforeunload',{cancelable:true});window.dispatchEvent(event);return event.defaultPrevented;}),true);
   const downloadEvent=page.waitForEvent('download');await page.getByRole('button',{name:'Download unsaved Markdown draft',exact:true}).click();
   const download=await downloadEvent,stream=await download.createReadStream();assert.equal(Buffer.concat(await stream.toArray()).toString(),draft);
   assert.equal(await page.locator('#save-status').innerText(),'Not saved');
   await page.getByRole('button',{name:'Recover Markdown draft as a new note',exact:true}).click();await page.getByRole('textbox',{name:'Unsaved Markdown draft',exact:true}).waitFor({state:'detached'});
   assert.equal(await page.evaluate(draft=>lifecycleStore.getState().blocks.filter(block=>block.type==='text'&&block.text===draft).length,draft),1);
   await flush(page);await screenshot(page,removePage?'page-recovered':'checklist-recovered');
+  assert.equal(await page.evaluate(()=>{const event=new Event('beforeunload',{cancelable:true});window.dispatchEvent(event);return event.defaultPrevented;}),false);
   await page.reload();await page.evaluate(async()=>{await (await import(new URL('./src/app.js',document.baseURI).href)).ready;});
   assert.equal(await page.locator('[data-text-editor] .markdown-editor').filter({hasText:draft}).count(),1);
   await context.close();
