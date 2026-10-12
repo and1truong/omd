@@ -102,6 +102,7 @@ body[data-content-width=wide] .paper { max-width: none; }
 .block-drag { cursor: grab; }
 .block-type-heading textarea { font-size: 24px; font-weight: 600; line-height: 1.4; }
 .block-type-text textarea { font-size: 14px; line-height: 1.8; min-height: 25px; }
+.block-type-text>textarea, .block-type-heading>textarea { background: transparent; outline: 0; border-radius: 0; }
 .block-title { font-size: 13px; font-weight: 600; padding: 4px 0; }
 .block-heading { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
 .block-heading .block-title { flex: 1; }
