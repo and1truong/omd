@@ -4,9 +4,9 @@ import type {createCompositionGuard} from './composition.js';
 import {errorOf} from './dom.js';
 
 /** Visible Markdown controls own a Tiptap instance; persisted content stays Markdown. */
-export function createTextEditors(store:NotebookStore,{composition,notify,createNext}:{composition:ReturnType<typeof createCompositionGuard>;notify:Notify;createNext:(blockId:string,pageId:string)=>Promise<unknown>}) {
+export function createTextEditors(store:NotebookStore,{composition,notify,createNext}:{composition:ReturnType<typeof createCompositionGuard>;notify:Notify;createNext:(blockId:string,pageId:string)=>Promise<string|undefined>}) {
   type ItemKeyDown=(event:KeyboardEvent)=>boolean;
-  interface Entry {host:HTMLDivElement;editor:Editor;pageId:string;blockId:string;itemId?:string;onKeyDown?:ItemKeyDown;source:string;serialized:string;pending:string|null;saving?:Promise<unknown>;creating:boolean}
+  interface Entry {host:HTMLDivElement;editor:Editor;pageId:string;blockId:string;itemId?:string;onKeyDown?:ItemKeyDown;source:string;serialized:string;pending:string|null;saving?:Promise<unknown>;creating:boolean;provisional?:boolean;creation?:Promise<void>}
   const entries=new Map<string,Entry>(),key=(pageId:string,blockId:string,itemId?:string)=>JSON.stringify([pageId,blockId,itemId]);
   function write(entry:Entry,text:string) {
     return entry.itemId
@@ -14,7 +14,7 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
       :store.dispatch('update_block',{pageId:entry.pageId,blockId:entry.blockId,patch:{text}},{quiet:true});
   }
   async function flush(entry:Entry):Promise<void> {
-    if(composition.isComposing(entry.editor.view.dom)||entry.pending===null)return;
+    if(entry.provisional||composition.isComposing(entry.editor.view.dom)||entry.pending===null)return;
     if(entry.saving){await entry.saving;return flush(entry);}
     const text=entry.pending;
     try {
@@ -35,6 +35,36 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
   async function history(redo:boolean) {
     try {await manager.flushAll();if(redo)await store.redo();else await store.undo();}
     catch(error){notify(errorOf(error).message,'error',true);}
+  }
+  function continueIntoNext(source:Entry) {
+    source.creating=true;
+    // Receive native input immediately in a real rich editor. Waiting for IDB
+    // before focusing lets the next key edit the source paragraph instead.
+    const id=crypto.randomUUID(),host=mount({id,type:'text',text:''},source.pageId),next=entries.get(key(source.pageId,id))!;
+    next.provisional=true;next.creating=true;host.dataset.pendingBlock='true';source.host.append(host);
+    next.editor.view.focus();host.scrollIntoView({block:'nearest'});
+    const retry=document.createElement('button');retry.type='button';retry.textContent='Retry creating block';retry.hidden=true;host.querySelector('.markdown-toolbar')!.append(retry);
+    let running=false,created:string|undefined;
+    async function finish() {
+      if(running)return;running=true;retry.hidden=true;
+      try {
+        if(!next.provisional){await flush(next);retry.remove();return;}
+        created??=await createNext(source.blockId,source.pageId);
+        if(!created)throw new Error('The page changed before the next block could be created. Your text remains in the pending editor.');
+        // Adopt the same DOM/editor, including its caret, after any IME final
+        // acknowledgement. Never move an active composition to another view.
+        await composition.settled(input=>input===next.editor.view.dom);
+        const target=entries.get(key(source.pageId,created));
+        if(!target?.host.isConnected)throw new Error('The next block is no longer visible. Your text remains in the pending editor.');
+        const focused=document.activeElement===next.editor.view.dom;
+        target.editor.destroy();target.host.replaceWith(host);entries.delete(key(source.pageId,created));entries.delete(key(source.pageId,id));
+        next.blockId=created;next.provisional=false;next.creating=false;host.dataset.textEditor=created;delete host.dataset.pendingBlock;next.editor.view.dom.id=`${created}-text`;
+        entries.set(key(source.pageId,created),next);
+        if(focused)next.editor.view.focus();capture(next);await flush(next);retry.remove();
+      }catch(error){retry.hidden=false;notify(errorOf(error).message,'error',true);}
+      finally{source.creating=false;running=false;}
+    }
+    retry.addEventListener('click',()=>{next.creation=Promise.resolve().then(finish);});next.creation=Promise.resolve().then(finish);
   }
   function mount(block:TextBlock,pageId:string,item?:ChecklistItem,onKeyDown?:ItemKeyDown) {
     const source=item?.text??block.text,id=key(pageId,block.id,item?.id);let entry=entries.get(id);
@@ -71,8 +101,7 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
           if(item&&event.key==='Tab')return false;
           if(!item&&event.key==='Enter'&&event.shiftKey&&!event.ctrlKey&&!event.metaKey&&!event.altKey) {
             if(!entry!.creating&&!event.repeat) {
-              entry!.creating=true;
-              void createNext(block.id,pageId).catch(error=>notify(errorOf(error).message,'error',true)).finally(()=>{entry!.creating=false;});
+              continueIntoNext(entry!);
             }
             return true;
           }
@@ -88,6 +117,7 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
       try {
         // Let ProseMirror consume the final DOM mutation before saving composed text.
         await new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()));
+        if(entry!.provisional){capture(entry!);return;}
         // The guard remains active until this write resolves, so flush directly here.
         if(entry!.saving)await entry!.saving;
         for(;;) {
@@ -131,7 +161,7 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
   }
   const manager={mount,
     mountChecklist(blockId:string,item:ChecklistItem,pageId:string,onKeyDown:ItemKeyDown){return mount({id:blockId,type:'text',text:item.text},pageId,item,onKeyDown);},
-    end(){for(const [id,entry] of entries)if(entry.pageId!==store.getActivePageId()||!entry.host.isConnected){entry.editor.destroy();entries.delete(id);}},
+    end(){for(const [id,entry] of entries)if(!entry.provisional&&(entry.pageId!==store.getActivePageId()||!entry.host.isConnected)){entry.editor.destroy();entries.delete(id);}},
     captureFocus(){const entry=[...entries.values()].find(e=>e.editor.view.dom===document.activeElement);return entry?key(entry.pageId,entry.blockId,entry.itemId):null;},
     restoreFocus(id:string|null){const entry=id&&entries.get(id);if(entry&&entry.host.isConnected)entry.editor.view.focus();},
     focus(blockId:string){
@@ -140,7 +170,11 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
       // directly instead of Tiptap's delayed React focus path.
       entry.editor.commands.setTextSelection(1);entry.editor.view.focus();entry.editor.view.dom.scrollIntoView({block:'nearest'});
     },
-    async flushAll(){await Promise.all([...entries.values()].map(flush));await store.idle();},
+    hasPending(){return [...entries.values()].some(entry=>entry.provisional||entry.pending!==null||entry.saving);},
+    async flushAll({waitForTransitions=true}:{waitForTransitions?:boolean}={}){
+      if(waitForTransitions){await Promise.all([...entries.values()].map(entry=>entry.creation));if([...entries.values()].some(entry=>entry.provisional))throw new Error('The next block has not been saved. Retry creating block before leaving this page.');}
+      await Promise.all([...entries.values()].map(flush));await store.idle();
+    },
     destroy(){for(const entry of entries.values())entry.editor.destroy();entries.clear();}
   };return manager;
 }

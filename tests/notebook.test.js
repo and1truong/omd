@@ -2,9 +2,27 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createStore } from './store-helper.js';
 import { emptyNotebook, STORAGE_KEY } from '../src/model.ts';
-import { parseBook } from '../src/notebook.ts';
+import { parseBook, wrapPage, listPages } from '../src/notebook.ts';
 import { startReminders } from '../src/reminders.ts';
 const memory = () => { const m = new Map(); return { getItem:k=>m.get(k)??null, setItem:(k,v)=>m.set(k,v) }; };
+test('all imported page IDs are validated before listing the hierarchy', () => {
+  for (const version of [2, 3]) for (const index of [0, 1]) for (const id of ['', null, 42, {}, []]) {
+    const book = wrapPage(emptyNotebook());
+    book.pages.push(emptyNotebook());
+    book.pages[index].id = id;
+    book.activePageId = book.pages[0].id;
+    book.parents = Object.fromEntries(book.pages.map(page => [page.id, '']));
+    const {parents, ...v2} = book;
+    const raw = JSON.stringify(version === 2 ? {...v2, version} : book);
+    assert.throws(() => parseBook(raw), /Notebook ID must be (nonempty )?text/);
+  }
+  assert.throws(() => wrapPage({...emptyNotebook(), id: ''}), /nonempty/);
+  const book = wrapPage({...emptyNotebook(), id: 'p:á/"一'});
+  const child = {...emptyNotebook(), id: '__proto__'};
+  book.pages.push(child); book.parents = {...book.parents, [child.id]: book.pages[0].id};
+  assert.deepEqual(listPages(parseBook(JSON.stringify(book))).map(row => [row.pageId, row.depth]), [[book.pages[0].id, 0], [child.id, 1]]);
+});
+
 test('v1 migration preserves page IDs, content, settings and original bytes', async () => {
   const data=memory(), legacy=emptyNotebook(); legacy.title='Existing work'; legacy.theme='dark';
   const raw=JSON.stringify(legacy); data.setItem(STORAGE_KEY,raw);

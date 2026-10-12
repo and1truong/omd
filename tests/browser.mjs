@@ -15,7 +15,7 @@ const consoleErrors=[];
 const engineRequests=[];
 try {
   await new Promise((resolve,reject) => { server.stdout.once('data', resolve); server.once('error', reject); server.once('exit', code => reject(new Error(`Server exited: ${code}`))); });
-  browser = await chromium.launch({ headless: true, args: ['--enable-features=WebMCP,WebMCPTesting', '--enable-experimental-web-platform-features'] });
+  browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--enable-features=WebMCP,WebMCPTesting', '--enable-experimental-web-platform-features'] });
   const context = await browser.newContext({ viewport: { width: 1440, height: 1100 }, colorScheme: 'light' });
   page = await context.newPage(); page.on('pageerror', error => errors.push(error.message));page.on('console',msg=>{if(msg.type()==='error')consoleErrors.push(msg.text());});
   page.on('request',request=>{if(/\/(?:excalidraw|mermaid)-engine\.(?:js|css)/.test(request.url()))engineRequests.push(request.url());});
@@ -33,6 +33,7 @@ try {
     if (typeof value === 'string') { try { return JSON.parse(value); } catch { return value; } } return value;
   }, { name, input });
   const settle=(target=page)=>target.evaluate(async()=>{const app=await import(new URL('./src/app.js',document.baseURI).href);await app.flushDiagrams();await app.getStore().idle();});
+  const pollStore=async(target,predicate,input)=>{await target.evaluate(async()=>{window.omdPollingStore=(await import(new URL('./src/app.js',document.baseURI).href)).getStore();});await target.waitForFunction(predicate,input);};
   let notebook = await call('get_notebook');
   for (const b of notebook.blocks) await call('remove_block', { blockId: b.id });
   await call('set_page', { title: 'My verified day', notificationMode: 'toast' });
@@ -160,11 +161,10 @@ try {
   await page.evaluate(id=>{const input=document.getElementById(id);window.omdComposing=input;input.focus();input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));input.replaceChildren(Object.assign(document.createElement('p'),{textContent:'Đang chọn chữ'}));input.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));},composeItem.id);
   await call('checklist_update',{blockId:checklist.id,itemId:composeItem.id,patch:{done:false}});
   assert.deepEqual(await page.evaluate(()=>[window.omdComposing.isConnected,window.omdComposing.innerText]),[true,'Đang chọn chữ']);
-  await page.evaluate(()=>window.omdComposing.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));await settle();
-  await page.evaluate(async()=>{window.omdCompositionStore=(await import(new URL('./src/app.js',document.baseURI).href)).getStore();});
-  await page.waitForFunction(({checklistId,itemId})=>!document.getElementById(itemId).editor.view.composing&&window.omdCompositionStore.getState().blocks.find(b=>b.id===checklistId).items[0].text==='Đang chọn chữ',{checklistId:checklist.id,itemId:composeItem.id});
+  await page.evaluate(()=>window.omdComposing.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));
+  await pollStore(page,({blockId,itemId})=>!document.getElementById(itemId).editor.view.composing&&window.omdPollingStore.getState().blocks.find(b=>b.id===blockId)?.items[0]?.text==='Đang chọn chữ',{blockId:checklist.id,itemId:composeItem.id});await settle();
   assert.equal((await call('get_notebook')).blocks.find(b=>b.id===checklist.id).items[0].text,'Đang chọn chữ');
-  await call('checklist_update',{blockId:checklist.id,itemId:composeItem.id,patch:{text:composeItem.text,done:composeItem.done}});await page.evaluate(()=>{delete window.omdComposing;delete window.omdCompositionStore;});
+  await call('checklist_update',{blockId:checklist.id,itemId:composeItem.id,patch:{text:composeItem.text,done:composeItem.done}});await page.evaluate(()=>delete window.omdComposing);
   await page.evaluate(()=>{const input=document.getElementById('page-title');input.focus();input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));input.value='Tiêu đề đang chọn';input.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));});
   await call('card_update',{blockId:board.id,cardId:card,patch:{description:'Background edit during title composition'}});assert.equal(await page.locator('#page-title').inputValue(),'Tiêu đề đang chọn');
   await page.locator('#page-title').dispatchEvent('compositionend');await settle();assert.equal((await call('get_notebook')).title,'Tiêu đề đang chọn');await call('set_page',{title:'Written by a person'});
@@ -215,7 +215,7 @@ try {
   // The left 200px is Excalidraw's shape-properties panel, not the drawing area.
   const drawX=bounds.x+bounds.width*.55,drawY=bounds.y+bounds.height*.45;
   await page.mouse.move(drawX,drawY);await page.mouse.down();await page.mouse.move(drawX+160,drawY+100,{steps:6});await page.mouse.up();
-  await page.waitForFunction(async id=>(await import(new URL('./src/app.js',document.baseURI).href)).getStore().getRenderState().blocks.some(b=>b.id===id&&b.scene?.elements.length>0),drawing.id);
+  await pollStore(page,id=>window.omdPollingStore.getRenderState().blocks.some(b=>b.id===id&&b.scene?.elements.length>0),drawing.id);
   await mkdir(`${root}/test-results`,{recursive:true});await page.screenshot({path:`${root}/test-results/full-canvas.png`,fullPage:true});
   await page.getByRole('button',{name:'Back to notebook',exact:true}).click();await settle();
   assert.ok((await call('get_notebook')).blocks.find(b=>b.id===drawing.id).scene.elements.length>0);
@@ -305,13 +305,13 @@ try {
   releaseEngine();await racePage.locator('.excalidraw canvas').first().waitFor();
   // A rendered initial scene is normalized and saved by onChange. The normalized
   // data must still be the agent's newest shape, never the old empty snapshot.
-  await racePage.waitForFunction(async id=>{const b=(await import(new URL('./src/app.js',document.baseURI).href)).getStore().getRenderState().blocks.find(b=>b.id===id);return b.scene.elements[0]?.id==='edited-during-download'&&b.scene.elements[0]?.version!==undefined;},drawing.id);
+  await pollStore(racePage,id=>{const b=window.omdPollingStore.getRenderState().blocks.find(b=>b.id===id);return b.scene.elements[0]?.id==='edited-during-download'&&b.scene.elements[0]?.version!==undefined;},drawing.id);
   // Other native tabs reload committed data through BroadcastChannel and keep only the destination page resident.
   const peer=await raceContext.newPage();peer.on('pageerror',error=>errors.push(error.message));await peer.goto(appURL);await peer.waitForFunction(()=>document.getElementById('agent-status').textContent.includes('55 tools'));
   await call('set_page',{title:'Shared IndexedDB edit'},racePage);await peer.waitForFunction(()=>document.getElementById('page-title').value==='Shared IndexedDB edit');
   const residentFirst=(await call('get_notebook',{},racePage)).id;
   const residentSecond=(await call('page_add',{title:'Hydrated destination'},racePage)).pageId;
-  await peer.waitForFunction(async()=> (await import(new URL('./src/app.js',document.baseURI).href)).getStore().listPages().some(p=>p.title==='Hydrated destination'));
+  await pollStore(peer,()=>window.omdPollingStore.listPages().some(p=>p.title==='Hydrated destination'));
   assert.equal(await peer.locator('#page-title').inputValue(),'Shared IndexedDB edit');
   await call('page_select',{pageId:residentSecond},peer);
   assert.deepEqual(await peer.evaluate(async()=>{const store=(await import(new URL('./src/app.js',document.baseURI).href)).getStore();const {pageId,recordCount}=store.residency();return {pageId,recordCount};}),{pageId:residentSecond,recordCount:2});
@@ -336,7 +336,9 @@ try {
   await edgePage.evaluate(()=>{const input=document.getElementById('page-title');input.focus();input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));input.value='Original-page IME edit';});
   await call('page_select',{pageId:'a'},edgePage);await edgePage.locator('#page-title').dispatchEvent('compositionend');await settle(edgePage);assert.equal((await call('get_page',{pageId:'quoted-page'},edgePage)).title,'Original-page IME edit');assert.equal((await call('get_notebook',{},edgePage)).id,'a');
   await edgeContext.close();
-  await verifyPageRoutes({browser,appURL,call,root});
+  const routeRepeats=Number(process.env.OMD_ROUTE_REPEATS??1);
+  assert.ok(Number.isSafeInteger(routeRepeats)&&routeRepeats>0&&routeRepeats<=100);
+  for(let attempt=0;attempt<routeRepeats;attempt++)await verifyPageRoutes({browser,appURL,call,root});
   assert.deepEqual(errors.filter(error => error !== 'Tabs are limited to two levels.'), []);
   console.log(`Static base ${basePath||'/'} passed.`);
   console.log('Native WebMCP, app shell/sidebar, view persistence, mobile drawer/focus/menu, lazy engine loading/teardown, block identity, theme, reminders, import/export, and offline reload passed.');

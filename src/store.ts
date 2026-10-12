@@ -9,18 +9,19 @@ enablePatches();
 /** Serialized events, immutable selectors, durable record transactions. Only the active page is resident. */
 export async function createStore(storage:StorageLike,options:StoreOptions = {}):Promise<NotebookStore> {
   const repository=await openRepository(storage,{key:STORAGE_KEY,initial:initialNotebook,...options});
-  const owner=crypto.randomUUID(),locks=options.locks??globalThis.navigator?.locks;let releaseLease:(()=>void)|undefined;
+  let releaseLease:(()=>void)|undefined,channel:BroadcastChannel|null=null;
+  try{
+  const owner=crypto.randomUUID(),locks=options.locks??globalThis.navigator?.locks;
   if(locks?.request){
     let readyLease!:()=>void,rejectLease!:(error:unknown)=>void;const ready=new Promise<void>((resolve,reject)=>{readyLease=resolve;rejectLease=reject;});
     locks.request(`${repository.name}.history:${owner}`,()=>{readyLease();return new Promise<void>(resolve=>{releaseLease=resolve;});}).catch(rejectLease);await ready;
-    for(const previous of await repository.historyOwners())await locks.request(`${repository.name}.history:${previous}`,{ifAvailable:true},async lock=>{if(lock)await repository.pruneOwner(previous);});
   }
   let loaded=await repository.read(undefined,options.activePageId),materialize=makeMaterializer();
   validateNotebook(materialize(loaded!.records!,loaded!.meta.activePageId));
   interface State {meta:Notebook;records:Records;options:ChangeEvent;page:Page}
   const state=createZustandStore<State>()(subscribeWithSelector<State>(()=>({meta:loaded!.meta,records:new Map(),options:{},page:{...loaded!.meta.pages.find(p=>p.id===loaded!.meta.activePageId)!,blocks:[]}})));
   state.setState({meta:freeze(loaded!.meta,true),records:loaded!.records!,page:freeze(materialize(loaded!.records!,loaded!.meta.activePageId),true)});loaded=null;
-  const undoStack:string[]=[],redoStack:string[]=[],afterChange=new Set<()=>void>();let queue:Promise<unknown>=Promise.resolve();let closed=false,pending=0,navigations=0,lastError:Error|null=null;const statusListeners=new Set<(status:SaveStatus)=>void>();
+  const undoStack:string[]=[],redoStack:string[]=[],afterChange=new Set<()=>void>();let queue:Promise<unknown>=Promise.resolve();let closed=true,pending=0,navigations=0,lastError:Error|null=null;const statusListeners=new Set<(status:SaveStatus)=>void>();
   function status(){return {pending,navigating:navigations>0,error:lastError};}
   function notifyStatus(){for(const fn of statusListeners)fn(status());}
   function enqueue<T>(fn:()=>Promise<T>,navigate=false):Promise<T>{pending++;if(navigate)navigations++;notifyStatus();const task=queue.then(fn).catch(error=>{lastError=errorOf(error);throw error;}).finally(()=>{pending--;if(navigate)navigations--;notifyStatus();});queue=task.catch(()=>{});return task;}
@@ -45,7 +46,7 @@ export async function createStore(storage:StorageLike,options:StoreOptions = {})
     else records=hydrated!;
     publish(next,records,event);channel?.postMessage(next.revision);
   }
-  let channel=typeof window!=='undefined'&&typeof BroadcastChannel!=='undefined'?new BroadcastChannel(`${repository.name}.changes`):null;
+  channel=typeof window!=='undefined'&&typeof BroadcastChannel!=='undefined'?new BroadcastChannel(`${repository.name}.changes`):null;
   const api:NotebookStore={
     databaseName:()=>repository.name,
     getRevision:()=>state.getState().meta.revision,
@@ -115,5 +116,11 @@ export async function createStore(storage:StorageLike,options:StoreOptions = {})
     publish(next,resident);channel?.postMessage(next.revision);return true;
   });}
   if(channel)channel.onmessage=()=>{if(!closed)api.reload().catch(()=>{});};
+  if(locks?.request)for(const previous of await repository.historyOwners())await locks.request(`${repository.name}.history:${previous}`,{ifAvailable:true},async lock=>{if(lock)await repository.pruneOwner(previous);});
+  closed=false;
   return api;
+  }catch(error){
+    try{channel?.close();}finally{try{releaseLease?.();}finally{repository.close();}}
+    throw error;
+  }
 }

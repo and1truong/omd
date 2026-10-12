@@ -12,7 +12,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm install --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
@@ -38,12 +38,14 @@ jobs:
             base_path: '/omd'
     env:
       OMD_BASE_PATH: ${{ matrix.base_path }}
+      OMD_ROUTE_REPEATS: 3
+      OMD_ROUTE_CPU_SLOWDOWN: 4
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run typecheck
       - run: npm run build
       - run: npm run check:static
@@ -72,7 +74,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run build
       - run: npm run test:startup
       - run: npm run test:migration
@@ -80,5 +82,7 @@ jobs:
       - run: npm run test:insertion
       - run: npm run test:checklist
       - run: npm run test:editor
+      - run: npm run test:transition
+      - run: npm run test:diagrams
       - run: npm run test:table
       - run: npm run test:tabs

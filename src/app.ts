@@ -26,7 +26,7 @@ let tabTitleEdit:{flush:()=>Promise<unknown>}|undefined;
 export const openPalette = () => {shell?.closeMobile();palette?.open();};
 export const getView = () => shell!.getView();
 export const setView = async (patch:PartialView) => {if(patch.sidebarOpen)await beforeNavigate();return shell!.setView(patch);};
-export async function flushPending(){await tabTitleEdit?.flush();await tableEdits?.flushAll();await textEditors?.flushAll();await diagrams?.flushAll();}
+export async function flushPending({waitForTransitions=true}:{waitForTransitions?:boolean}={}){await tabTitleEdit?.flush();await tableEdits?.flushAll();await textEditors?.flushAll({waitForTransitions});await diagrams?.flushAll();}
 export const flushDiagrams=flushPending;
 async function beforeNavigate(){await tabTitleEdit?.flush();await tableEdits?.flushAll();await textEditors?.flushAll();await diagrams?.beforeNavigate();}
 export async function openCanvas(blockId:string,pageId?:string) {
@@ -63,13 +63,14 @@ function editable(value:string,aria:string,fn:(value:string,pageId:string)=>unkn
   if (multiline) input.dataset.autofit = 'true'; return input;
 }
 function fit(el:HTMLElement) { el.style.height = 'auto'; el.style.height = `${el.scrollHeight}px`; }
-async function createTextAfter(blockId:string,pageId:string) {
-  await flushPending();
+async function createTextAfter(blockId:string,pageId:string,focus=true) {
+  await flushPending({waitForTransitions:false});
   const page=store.getRenderState();if(page.id!==pageId)return;
   const source=findBlock(page,blockId),containerId=renderer.containerFor(blockId);
   if(!containerId)throw new Error('The editing block is no longer visible.');
   const result=await store.dispatch('add_block',{pageId,type:'text',containerId,index:source.siblings.findIndex(block=>block.id===blockId)+1});
-  if(store.getActivePageId()===pageId)textEditors!.focus(result.blockId);
+  if(focus&&store.getActivePageId()===pageId)textEditors!.focus(result.blockId);
+  return result.blockId;
 }
 function title(b:Extract<Block,{title:string}>,glyph:string) {
   const head = element('div', 'block-heading'); const glyphIcon=icon(b.type);glyphIcon.classList.add('type-glyph');
@@ -490,7 +491,7 @@ async function boot() {
   for (const close of document.querySelectorAll('[data-close]')) close.addEventListener('click', () => close.closest('dialog')!.close());
   for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', e => { if (e.target === dialog) { const rect = dialog.getBoundingClientRect(); if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) dialog.close(); } });
   diagrams=createDiagramManager(store,{notify});
-  textEditors=createTextEditors(store,{composition,notify,createNext:createTextAfter});
+  textEditors=createTextEditors(store,{composition,notify,createNext:(blockId,pageId)=>createTextAfter(blockId,pageId,false)});
   tableEdits=createTableEdits(store,{settled:()=>composition.settled(input=>input instanceof Element&&input.classList.contains('table-cell'))});
   const dirtyContainers=new Set<string>();
   renderer=createRenderCache({makeBlock:renderBlock,makeList:makeBlockList,
@@ -516,7 +517,7 @@ async function boot() {
   setupRoutes(store,{beforeNavigate,onError:error=>notify(error.message,'error',true)});
   let fitFrame=0;window.addEventListener('resize',()=>{cancelAnimationFrame(fitFrame);fitFrame=requestAnimationFrame(()=>{for(const el of document.querySelectorAll<HTMLElement>('[data-autofit],.auto-height'))fit(el);});});
   domId('canvas-stage-close').addEventListener('click',closeCanvas);domId('canvas-stage-pages').addEventListener('click',openPalette);
-  window.addEventListener('pagehide',event=>{flushPending().then(()=>{if(!event.persisted){textEditors!.destroy();return store.close();}}).catch(error=>notify(errorOf(error).message,'error',true));});window.addEventListener('beforeunload',flushPending);
+  window.addEventListener('pagehide',event=>{flushPending().then(()=>{if(!event.persisted){textEditors!.destroy();return store.close();}}).catch(error=>notify(errorOf(error).message,'error',true));});window.addEventListener('beforeunload',event=>{if(textEditors?.hasPending()){event.preventDefault();event.returnValue='';}void flushPending().catch(()=>{});});
   for (const [selector, key] of [['#page-title', 'title'], ['#page-subtitle', 'subtitle']]) {
     const el=$<HTMLInputElement|HTMLTextAreaElement>(selector);
     const write = (pageId:string) => {const saved=action('set_page', {pageId,[key]:el.value}, {quiet:true});fit(el);return saved;};

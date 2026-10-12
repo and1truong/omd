@@ -3,7 +3,80 @@ import assert from 'node:assert/strict';
 import {createStore,failWrites} from './store-helper.js';
 import {emptyNotebook,makeBlock,STORAGE_KEY} from '../src/model.ts';
 import {wrapPage} from '../src/notebook.ts';
+import {metadataBook} from '../src/records.ts';
 const memory=()=>{const values=new Map();return {getItem:k=>values.get(k)??null,setItem:(k,v)=>values.set(k,v)};};
+test('an owner-ID failure after opening the repository closes the startup connection',async()=>{
+  const storage=memory(),live=await createStore(storage,{initial:emptyNotebook}),name=live.databaseName();
+  const {createStore:openStore}=await import('../src/store.ts'),uuid=crypto.randomUUID,close=IDBDatabase.prototype.close;let closed=0;
+  IDBDatabase.prototype.close=function(...args){if(this.name===name)closed++;return close.apply(this,args);};
+  crypto.randomUUID=()=>{throw new Error('Injected owner ID failure');};
+  try{await assert.rejects(()=>openStore(storage,{name}),/Injected owner ID failure/);assert.equal(closed,1);}
+  finally{crypto.randomUUID=uuid;IDBDatabase.prototype.close=close;await live.close();}
+});
+async function databaseSnapshot(name){
+  const request=req=>new Promise((resolve,reject)=>{req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});
+  const db=await request(indexedDB.open(name)),names=[...db.objectStoreNames],tx=db.transaction(names),completed=new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error);}),stores={};
+  await Promise.all(names.map(async name=>{const store=tx.objectStore(name),[keys,values]=await Promise.all([request(store.getAllKeys()),request(store.getAll())]);stores[name]={keyPath:store.keyPath,indexes:[...store.indexNames].map(i=>[i,store.index(i).keyPath]),keys,values};}));
+  await completed;const state={version:db.version,stores};db.close();return state;
+}
+test('failed startup after async lease releases its connection, leaves every saved byte intact, and retries same DB',async()=>{
+  for(const index of [0,1]){
+    const root={...emptyNotebook(),id:'healthy-root'},child={...emptyNotebook(),id:'healthy-child'},book=wrapPage(root);book.pages.push(child);book.parents={[root.id]:'',[child.id]:root.id};
+    const storage=memory(),source=JSON.stringify(book),backup='unchanged backup bytes';storage.setItem(STORAGE_KEY,source);storage.setItem(`${STORAGE_KEY}.v3-backup`,backup);
+    const live=await createStore(storage,{initial:()=>book});await live.dispatch('set_page',{title:'Keep history'});
+    const healthy=metadataBook(await live.getNotebook()),dbName=live.databaseName();
+    async function writeMetadata(value){await new Promise((resolve,reject)=>{const opening=indexedDB.open(dbName);opening.onerror=()=>reject(opening.error);opening.onsuccess=()=>{const db=opening.result,tx=db.transaction('meta','readwrite');tx.objectStore('meta').put(value,'book');tx.oncomplete=()=>{db.close();resolve();};tx.onabort=()=>reject(tx.error);};});}
+    const open=IDBFactory.prototype.open,close=IDBDatabase.prototype.close,connections=[];let grant,notify;const requested=new Promise(resolve=>notify=resolve),gate=new Promise(resolve=>grant=resolve);let held=false;
+    const locks={request(name,options,callback){if(typeof options==='function'){notify();return gate.then(async()=>{held=true;try{return await options({name});}finally{held=false;}});}return Promise.resolve(callback(null));}};
+    IDBFactory.prototype.open=function(...args){const opening=open.apply(this,args);if(args[0]===dbName)opening.addEventListener('success',()=>connections.push({db:opening.result,closed:0}));return opening;};
+    IDBDatabase.prototype.close=function(...args){const connection=connections.find(c=>c.db===this);if(connection)connection.closed++;return close.apply(this,args);};
+    try{
+      const startup=createStore(storage,{name:dbName,locks});await requested;
+      const bad=structuredClone(healthy);bad.pages[index].id='';bad.parents=index===0?{'':'',[child.id]:''}:{[root.id]:'','':root.id};if(index===0)bad.activePageId='';
+      await writeMetadata(bad);const before=await databaseSnapshot(dbName);grant();
+      await assert.rejects(startup,/metadata is invalid.*intact.*Recover.*Notebook ID must be nonempty/);
+      await new Promise(resolve=>setTimeout(resolve,0));assert.equal(held,false,'Failed startup kept its Web Lock lease');assert.equal(connections[0].closed,1,'Failed startup kept its IDB connection');
+      assert.deepEqual(await databaseSnapshot(dbName),before,'Failed startup changed metadata, records, history or ledger');
+      assert.equal(storage.getItem(STORAGE_KEY),source);assert.equal(storage.getItem(`${STORAGE_KEY}.v3-backup`),backup);
+      await writeMetadata(healthy);const retry=await createStore(storage,{name:dbName,locks});assert.deepEqual(retry.listPages().map(p=>p.pageId),[root.id,child.id]);assert.equal(retry.getState().title,'Keep history');await retry.close();
+    }finally{grant?.();IDBFactory.prototype.open=open;IDBDatabase.prototype.close=close;await writeMetadata(healthy);await live.close();}
+  }
+});
+test('later startup failure closes its BroadcastChannel, lease and IDB connection without pruning history',async()=>{
+  const storage=memory(),live=await createStore(storage,{initial:emptyNotebook});await live.dispatch('set_page',{title:'Preserved'});
+  const dbName=live.databaseName(),before=await databaseSnapshot(dbName),open=IDBFactory.prototype.open,close=IDBDatabase.prototype.close,previousWindow=globalThis.window,previousChannel=globalThis.BroadcastChannel;
+  let connection,closed=0,held=false,channel;
+  const locks={request(name,options,callback){if(typeof options==='function'){held=true;return Promise.resolve(options({name})).finally(()=>{held=false;});}return Promise.resolve(callback(null));}};
+  IDBFactory.prototype.open=function(...args){const opening=open.apply(this,args);if(args[0]===dbName)opening.addEventListener('success',()=>{connection=opening.result;});return opening;};
+  IDBDatabase.prototype.close=function(...args){if(this===connection)closed++;return close.apply(this,args);};
+  globalThis.window={};globalThis.BroadcastChannel=class{constructor(){channel=this;}set onmessage(_){throw new Error('Channel setup failed');}close(){this.closed=true;}};
+  try{
+    await assert.rejects(()=>createStore(storage,{name:dbName,locks}),/Channel setup failed/);
+    await new Promise(resolve=>setTimeout(resolve,0));assert.equal(held,false);assert.equal(closed,1);assert.equal(channel?.closed,true);
+    assert.deepEqual(await databaseSnapshot(dbName),before,'Failed channel setup must not prune durable or transient rows');
+  }finally{globalThis.window=previousWindow;globalThis.BroadcastChannel=previousChannel;IDBFactory.prototype.open=open;IDBDatabase.prototype.close=close;await live.close();}
+  const retry=await createStore(storage,{name:dbName});assert.equal(retry.getState().title,'Preserved');await retry.close();
+});
+test('v4 startup and same-revision reload reject inactive invalid IDs before hydration or history leases',async()=>{
+  const root={...emptyNotebook(),id:'p:á/"一'},child={...emptyNotebook(),id:'__proto__'},book=wrapPage(root);
+  book.pages.push(child);book.parents={...book.parents,[child.id]:root.id};
+  const data=memory(),live=await createStore(data,{initial:()=>book});
+  async function metadata(value){await new Promise((resolve,reject)=>{const opening=indexedDB.open(live.databaseName());opening.onerror=()=>reject(opening.error);opening.onsuccess=()=>{const db=opening.result,tx=db.transaction('meta','readwrite');tx.objectStore('meta').put(value,'book');tx.oncomplete=()=>{db.close();resolve();};tx.onabort=()=>reject(tx.error);};});}
+  try{
+    for(const id of ['',null,42,{},[]]){
+      const bad=structuredClone(book);bad.pages[1].id=id;bad.parents=Object.fromEntries([[root.id,''],[id,root.id]]);await metadata(bad);
+      const writes=trace(live);let leases=0;
+      try{
+        const locks={request(){leases++;throw new Error('Validation must precede history leases.');}};
+        await assert.rejects(()=>createStore(data,{locks,activePageId:root.id}),/metadata is invalid.*intact.*Recover.*reload.*Notebook ID/);
+        await assert.rejects(()=>live.reload(),/metadata is invalid.*intact/);
+        assert.equal(leases,0);assert.deepEqual(writes.reads,[]);assert.deepEqual(writes.puts,[]);
+        assert.deepEqual(live.listPages().map(row=>row.pageId),[root.id,child.id]);
+      }finally{writes.stop();}
+      await metadata(book);const retry=await createStore(data,{activePageId:child.id});assert.equal(retry.getActivePageId(),child.id);assert.deepEqual(retry.listPages().map(row=>row.pageId),[root.id,child.id]);await retry.close();
+    }
+  }finally{await metadata(book);await live.close();}
+});
 test('selection is tab-local, writes no revision/history and reload hydrates the same tab page',async()=>{
   const data=memory(),a=await createStore(data,{initial:emptyNotebook}),first=a.getActivePageId();
   const second=(await a.dispatch('page_add',{title:'Second'})).pageId;
