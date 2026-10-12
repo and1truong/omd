@@ -96,6 +96,25 @@ export async function migrationChecks({sourceRoot,extension='ts',startupVersion}
   }
   evidence.push({case:'native v4 valid special IDs / preferred tab-local selection / lazy residency / export and listing',passed:true});
   if(startupVersion===4){
+    for(const index of [0,1]){
+      const f=fixture(),dbName=name(),badName=name(),data=storage();await seed(dbName,4,f);const valid=await snapshot(dbName);
+      const corrupted={...f,book:invalidPage(f.book,index,'')};corrupted.book.activePageId=f.book.pages[1-index].id;
+      await seed(badName,4,corrupted);const invalid=await snapshot(badName);data.setItem(STORAGE_KEY,JSON.stringify(f.book));data.setItem(`${STORAGE_KEY}.v3-backup`,'unaltered backup');const sources=data.entries();
+      let enter,grant;const waiting=new Promise(resolve=>enter=resolve),gate=new Promise(resolve=>grant=resolve);let held=false;
+      const locks={request(name,options,callback){if(typeof options==='function'){enter();return gate.then(async()=>{held=true;try{return await options({name});}finally{held=false;}});}return Promise.resolve(callback(null));}};
+      const open=IDBFactory.prototype.open,close=IDBDatabase.prototype.close,connections=[];
+      IDBFactory.prototype.open=function(...args){const opening=open.apply(this,args);if(args[0]===dbName)opening.addEventListener('success',()=>connections.push({db:opening.result,closed:0}));return opening;};
+      IDBDatabase.prototype.close=function(...args){const connection=connections.find(c=>c.db===this);if(connection)connection.closed++;return close.apply(this,args);};
+      try{
+        const startup=createStore(data,{name:dbName,initial:emptyNotebook,locks});startup.catch(()=>{});await waiting;
+        await repair(dbName,valid,invalid);const before=await snapshot(dbName);equal(before,invalid,'Legacy tab corruption fixture was not coherent');grant();
+        await rejects(()=>startup,/metadata is invalid.*intact.*Notebook ID must be nonempty/);
+        await new Promise(resolve=>setTimeout(resolve,0));check(!held,'Startup rejection kept its history lease');check(connections[0]?.closed===1,'Startup rejection kept its IDB connection');
+        equal(await snapshot(dbName),before,'Rejected startup after lease changed schema, records, metadata, history or ledger');equal(data.entries(),sources,'Rejected startup after lease changed recovery source or backup');
+        await repair(dbName,before,valid);const retry=await createStore(data,{name:dbName,initial:emptyNotebook,locks});equal(await retry.getNotebook(),f.book,'Same-DB retry after startup failure did not restore the notebook');check(retry.listPages().length===2,'Retry did not list the hierarchy');await retry.close();
+      }finally{grant?.();IDBFactory.prototype.open=open;IDBDatabase.prototype.close=close;}
+    }
+    evidence.push({case:'native v4 root/inactive child corrupted during async lease / exact source/history/ledger preservation / released lease+connection / same-DB recovery retry',cases:2,passed:true});
     const f=fixture();f.book.activePageId=f.book.pages[0].id;const healthyName=name();await seed(healthyName,4,f);const healthy=await snapshot(healthyName),bad={...f,book:invalidPage(f.book,1,'')};
     await seed('omd.notebook.records.v1',4,bad);localStorage.setItem(STORAGE_KEY,JSON.stringify(f.book));for(const v of [1,2,3])localStorage.setItem(`${STORAGE_KEY}.v${v}-backup`,`untouched v${v} backup`);
     return {evidence,startup:f.book,v4:{before:await snapshot('omd.notebook.records.v1'),healthy,sources:Object.entries(localStorage)}};
