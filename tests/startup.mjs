@@ -120,6 +120,7 @@ try{
   await page.waitForFunction(()=>document.getElementById('save-status').textContent==='Not saved');
   assert.equal(await title.inputValue(),retryTitle);assert.ok(await titleFocused());assert.deepEqual(await snapshot(),beforeFailure);
   assert.match(await page.locator('#notices').innerText(),/Injected title save failure/);
+  await page.screenshot({path:new URL(`../test-results/title-enter-failure-${engine}-${basePath?'omd':'root'}.png`,import.meta.url).pathname,fullPage:true});
   await page.evaluate(()=>window.omdRestoreDispatch());await title.press('Enter');
   await page.waitForFunction(()=>document.activeElement!==document.getElementById('page-title'));
   assert.equal((await snapshot()).page.title,retryTitle);
