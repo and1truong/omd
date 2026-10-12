@@ -1,8 +1,9 @@
 import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
-const root = resolve(new URL('..', import.meta.url).pathname);
+const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const output = resolve(root, 'dist');
 await rm(output, { recursive: true, force: true }); await mkdir(output, { recursive: true });
 for (const name of ['index.html', 'icon.svg', 'manifest.webmanifest', 'icons']) await cp(resolve(root, name), resolve(output, name), { recursive: true });
