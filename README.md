@@ -2,7 +2,11 @@
 
 **oh my day** — a simple, local-first, single-page notebook.
 
-This first layer defines the shared document model and write-through browser storage. The next stacked PR builds the interface; the final layer adds installable offline PWA behavior and WebMCP.
+One page with editable text and headings, checklists, horizontal and vertical tabs, expandable blocks, accordions, reminders, and kanban boards. System-aware light/dark themes. Keyboard and touch-friendly ordering controls alongside drag-and-drop.
+
+## Run
+
+Node 22 or newer. Run `npm start` and open localhost port 3000. No dependency installation or runtime dependencies. Serve the repository root from any static HTTPS host for production. Offline PWA and WebMCP integration are in the next stacked PR.
 
 ## Model
 
@@ -15,7 +19,7 @@ This first layer defines the shared document model and write-through browser sto
 
 ## Verification
 
-Node 22 or newer. Run `npm test`. No runtime dependencies.
+Run `npm test`. Tests cover atomic actions, tabs, unlimited content quantities, import/export, storage failures, cross-window conflicts, reminder catch-up, single delivery under Web Locks, and undo/redo.
 
 ## Product constraints
 

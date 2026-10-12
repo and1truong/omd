@@ -21,7 +21,7 @@ export function createStore(storage, { key = STORAGE_KEY, initial = demoNotebook
   function emit(options) { for (const fn of listeners) fn(state, options ?? {}); }
   function commit(next, { history = true, ...options } = {}) {
     validateNotebook(next); persist(next);
-    if (history) { undoStack.push(structuredClone(state)); if (undoStack.length > 50) undoStack.shift(); redoStack.length = 0; }
+    if (history) { undoStack.push(structuredClone(state)); redoStack.length = 0; }
     state = next; emit(options);
   }
   return {
@@ -33,7 +33,7 @@ export function createStore(storage, { key = STORAGE_KEY, initial = demoNotebook
     subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     export: () => JSON.stringify(state, null, 2),
     import(raw, options) { return this.dispatch('import_notebook', { notebook: parseImport(raw) }, options); },
-    reload() { const next = read(); if (!next) throw new Error('Saved notebook is missing. Export the open page before reloading.'); state = next; undoStack.length = redoStack.length = 0; emit({}); },
+    reload() { const next = read(); if (!next) throw new Error('Saved notebook is missing. Export the open page before reloading.'); if (next.id === state.id && next.revision === state.revision) return; state = next; undoStack.length = redoStack.length = 0; emit({}); },
     canUndo: () => undoStack.length > 0,
     canRedo: () => redoStack.length > 0,
     undo() {
@@ -41,13 +41,13 @@ export function createStore(storage, { key = STORAGE_KEY, initial = demoNotebook
       const next = { ...structuredClone(undoStack.at(-1)), revision: state.revision + 1, updatedAt: new Date().toISOString() };
       // Delivery records are not undoable: editing another block must not redeliver reminders.
       preserveDelivery(state, next);
-      const previous = structuredClone(state); commit(next, { history: false }); undoStack.pop(); redoStack.push(previous); return true;
+      const previous = structuredClone(state); validateNotebook(next); persist(next); undoStack.pop(); redoStack.push(previous); state = next; emit({}); return true;
     },
     redo() {
       if (!redoStack.length) return false;
       const next = { ...structuredClone(redoStack.at(-1)), revision: state.revision + 1, updatedAt: new Date().toISOString() };
       preserveDelivery(state, next);
-      const previous = structuredClone(state); commit(next, { history: false }); redoStack.pop(); undoStack.push(previous); return true;
+      const previous = structuredClone(state); validateNotebook(next); persist(next); redoStack.pop(); undoStack.push(previous); state = next; emit({}); return true;
     }
   };
 }
