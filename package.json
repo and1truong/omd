@@ -10,6 +10,7 @@
     "build": "node scripts/build.mjs",
     "test:browser": "node tests/browser.mjs",
     "test:startup": "node tests/startup.mjs",
+    "test:theme": "node tests/theme-browser.mjs",
     "test:insertion": "node tests/block-insertion.mjs",
     "test:checklist": "node tests/checklist-browser.mjs",
     "test:editor": "node tests/text-editor.mjs",

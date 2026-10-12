@@ -31,7 +31,7 @@ export type PageMetadata = Omit<Page,'blocks'>;
 export interface Notebook {format:'omd-notebook';version:3;id:ID;revision:number;activePageId:ID;updatedAt:string;pages:Page[];parents:Record<ID,ID>}
 export interface PageRow {pageId:ID;title:string;subtitle:string;index:number;active:boolean;parentId:ID;depth:number;childCount:number;siblingCount:number;descendantCount:number}
 export type PartialView = Partial<View>;
-export interface View {sidebarOpen:boolean;contentWidth:'reading'|'wide';collapsedPageIds:ID[]}
+export interface View {sidebarOpen:boolean;contentWidth:'reading'|'wide';collapsedPageIds:ID[];theme:Theme}
 export interface StorageLike {getItem(key:string):string|null;setItem(key:string,value:string):unknown}
 export interface BlockOptions {text?:string;title?:string;orientation?:Orientation;dueAt?:string;source?:string;scene?:Scene}
 export interface BlockPatch extends BlockOptions {open?:boolean;enabled?:boolean}
