@@ -674,7 +674,7 @@ async function boot() {
   setupRoutes(store,{beforeNavigate,onError:error=>notify(error.message,'error',true)});
   let fitFrame=0;window.addEventListener('resize',()=>{cancelAnimationFrame(fitFrame);fitFrame=requestAnimationFrame(()=>{for(const el of document.querySelectorAll<HTMLElement>('[data-autofit],.auto-height'))fit(el);});});
   domId('canvas-stage-close').addEventListener('click',closeCanvas);domId('canvas-stage-pages').addEventListener('click',openPalette);
-  window.addEventListener('pagehide',event=>{flushPending().then(()=>{if(!event.persisted){textEditors!.destroy();return store.close();}}).catch(error=>notify(errorOf(error).message,'error',true));});window.addEventListener('beforeunload',event=>{if(nativeEdits!.list().length||composition.hasActive()){event.preventDefault();event.returnValue='';}flushPending().catch(error=>notify(errorOf(error).message,'error',true));});
+  window.addEventListener('pagehide',event=>{flushPending().then(()=>{if(!event.persisted){textEditors!.destroy();return store.close();}}).catch(error=>notify(errorOf(error).message,'error',true));});window.addEventListener('beforeunload',event=>{if(nativeEdits!.list().length||textEditors!.hasPending()||composition.hasActive()){event.preventDefault();event.returnValue='';}flushPending().catch(error=>notify(errorOf(error).message,'error',true));});
   for (const key of ['title','subtitle'] as const) {
     const el=domId(key==='title'?'page-title':'page-subtitle');
     const target=(pageId:string):NativeTarget=>({kind:'page',pageId,field:key}),label=key==='title'?'Page title':'Page description';
