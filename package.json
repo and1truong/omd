@@ -18,6 +18,7 @@
     "test:editor-lifecycle": "node tests/editor-lifecycle.mjs",
     "test:table": "node tests/table-browser.mjs",
     "test:tabs": "node tests/tabs-drag.mjs",
+    "test:tabs-final": "node tests/tabs-final.mjs",
     "typecheck": "tsc --noEmit && tsc --project tsconfig.worker.json --noEmit",
     "check:static": "node tests/static-output.mjs",
     "package:release": "node scripts/package-release.mjs",

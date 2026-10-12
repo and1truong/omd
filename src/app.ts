@@ -43,13 +43,13 @@ function revealChecklistItem(target:HTMLElement) {
   const block=target.closest('.block');if(block)syncChecklistFolds(block);
 }
 interface InsertionAnchor {blockId:string;side:'before'|'after'}
-interface DragData {containerId?:string;kind:'block'|'card'|'column'|'tab';blockId:string;cardId?:string;columnId?:string;tabId?:string;pageId?:string}
+interface DragData {containerId?:string;kind:'block'|'card'|'column'|'tab';blockId:string;cardId?:string;columnId?:string;tabId?:string;pageId:string}
 let suppressTabClick=false;
-let tabTitleEdit:{flush:()=>Promise<unknown>}|undefined;
+let tabTitleEdit:{flush:(options?:{settle?:boolean;pageId?:string})=>Promise<unknown>;status:()=> 'saved'|'dirty'|'pending'}|undefined;
 export const openPalette = () => {shell?.closeMobile();palette?.open();};
 export const getView = () => shell!.getView();
 export const setView = async (patch:PartialView) => {if(patch.sidebarOpen)await beforeNavigate();return shell!.setView(patch);};
-export async function flushPending(options:{settle?:boolean}={}){await tabTitleEdit?.flush();await nativeEdits?.flushAll(options);await textEditors?.flushAll(options);await diagrams?.flushAll();await nativeEdits?.flushAll(options);}
+export async function flushPending(options:{settle?:boolean}={}){await tabTitleEdit?.flush(options);await nativeEdits?.flushAll(options);await textEditors?.flushAll(options);await diagrams?.flushAll();await nativeEdits?.flushAll(options);}
 export const flushDiagrams=flushPending;
 async function beforeNavigate(){await tabTitleEdit?.flush();await nativeEdits?.flushAll();await textEditors?.flushAll();await diagrams?.beforeNavigate();await nativeEdits?.flushAll();}
 export async function openCanvas(blockId:string,pageId?:string) {
@@ -114,7 +114,8 @@ function writeNative(target:NativeTarget,value:string,label:string) {
 }
 function updateSaveStatus() {
   const drafts=nativeEdits?.list()??[],failed=drafts.filter(draft=>draft.error),status=domId('save-status'),dot=element('span','status-dot');
-  const label=failed.length?'Not saved':saveState.pending||drafts.length?'Saving…':(saveState.error&&saveState.error!==dismissedSaveError)||textEditors?.hasPending()?'Not saved':'Saved';
+  const tabStatus=tabTitleEdit?.status();
+  const label=failed.length||tabStatus==='dirty'?'Not saved':saveState.pending||drafts.length||tabStatus==='pending'?'Saving…':(saveState.error&&saveState.error!==dismissedSaveError)||textEditors?.hasPending()?'Not saved':'Saved';
   status.dataset.state=label==='Not saved'?'error':label==='Saved'?'saved':'pending';
   status.replaceChildren(dot,document.createTextNode(label));
   if(!recovery){recovery=element('section','draft-recovery');recovery.setAttribute('aria-label','Unsaved edits');document.querySelector('.page-heading')!.after(recovery);}
@@ -181,14 +182,16 @@ function endDrag() {
   dragData = null; document.body.classList.remove('dragging-block'); for (const el of document.querySelectorAll('.dragging,.drop-active,.tab-drop-before,.tab-drop-after')) el.classList.remove('dragging', 'drop-active', 'tab-drop-before', 'tab-drop-after');
   setTimeout(()=>{suppressTabClick=false;},0);
 }
-function draggable(handle:HTMLElement,data:DragData) {
-  handle.draggable = true; handle.addEventListener('dragstart', event => { event.stopPropagation(); dragData = data; event.dataTransfer!.effectAllowed = 'move'; event.dataTransfer!.setData('application/x-omd', JSON.stringify(data)); (data.kind==='tab'?handle:handle.closest('.block,.kanban-card,.kanban-column'))?.classList.add('dragging'); if (data.kind === 'block') requestAnimationFrame(()=>{if(dragData===data)document.body.classList.add('dragging-block');}); if(data.kind==='tab')suppressTabClick=true; });
+function draggable(handle:HTMLElement,input:Omit<DragData,'pageId'>&{pageId?:string}) {
+  const data:DragData={...input,pageId:input.pageId??store.getActivePageId()};
+  handle.draggable = true; handle.addEventListener('dragstart', event => { event.stopPropagation();if(data.pageId!==store.getActivePageId()){event.preventDefault();endDrag();return;} dragData = data; event.dataTransfer!.effectAllowed = 'move'; event.dataTransfer!.setData('application/x-omd', JSON.stringify(data)); (data.kind==='tab'?handle:handle.closest('.block,.kanban-card,.kanban-column'))?.classList.add('dragging'); if (data.kind === 'block') requestAnimationFrame(()=>{if(dragData===data)document.body.classList.add('dragging-block');}); if(data.kind==='tab')suppressTabClick=true; });
   handle.addEventListener('dragend', endDrag);
 }
 function dropTarget(el:HTMLElement,canDrop:(data:DragData)=>boolean,drop:(data:DragData)=>unknown) {
-  el.addEventListener('dragover', event => { if (dragData && canDrop(dragData)) { event.preventDefault(); event.stopPropagation(); event.dataTransfer!.dropEffect = 'move'; el.classList.add('drop-active'); } });
+  const pageId=store.getActivePageId(),accept=(data:DragData)=>data.pageId===pageId&&store.getActivePageId()===pageId&&canDrop(data);
+  el.addEventListener('dragover', event => { if (dragData && accept(dragData)) { event.preventDefault(); event.stopPropagation(); event.dataTransfer!.dropEffect = 'move'; el.classList.add('drop-active'); } });
   el.addEventListener('dragleave', event => { if (!el.contains(event.relatedTarget as Node|null)) el.classList.remove('drop-active'); });
-  el.addEventListener('drop', event => { if (dragData && canDrop(dragData)) { event.preventDefault(); event.stopPropagation(); el.classList.remove('drop-active'); drop(dragData); } });
+  el.addEventListener('drop', event => { if (dragData && accept(dragData)) { event.preventDefault(); event.stopPropagation(); el.classList.remove('drop-active'); drop(dragData); } });
 }
 
 function makeBlockList(blocks:Block[],containerId:string,nodes:HTMLElement[]) {
@@ -204,12 +207,12 @@ function makeBlockList(blocks:Block[],containerId:string,nodes:HTMLElement[]) {
     dropTarget(el, data => data.kind === 'block', data => {
       const source = findBlock(store.getRenderState(), data.blockId); let targetIndex = index;
       if (source.siblings.some(b => b.id === data.blockId) && data.containerId === containerId && source.siblings.findIndex(b => b.id === data.blockId) < index) targetIndex--;
-      action('move_block', { blockId: data.blockId, containerId, index: targetIndex });
+      action('move_block', { pageId:data.pageId, blockId: data.blockId, containerId, index: targetIndex });
     }); return el;
   }
   const children=[];nodes.forEach((node, i) => { children.push(slot(i), node); }); children.push(slot(blocks.length));
   const add = button('Add a block', 'Add a block here', () => openPicker(containerId), 'add-block-button'); children.push(add);
-  dropTarget(add, data => data.kind === 'block', data => action('move_block', { blockId: data.blockId, containerId })); return {node:list,children};
+  dropTarget(add, data => data.kind === 'block', data => action('move_block', { pageId:data.pageId, blockId: data.blockId, containerId })); return {node:list,children};
 }
 function renderBlock(b:Block,containerId:string,index:number,count:number) {
   const shell = element('section', `block block-type-${b.type}`); shell.dataset.blockId = b.id;
@@ -432,12 +435,22 @@ function renderTabs(shell:HTMLElement,b:BlockOf<'tabs'>) {
       if(header.querySelector('input')||store.getActivePageId()!==pageId)return;
       let value:string;try{value=findBlock(store.getRenderState(),b.id,'tabs').block.tabs.find(tab=>tab.id===t.id)!.title;}catch{return;}
       const input=element('input','tab-title-input');input.type='text';input.value=value;input.id=`${t.id}-label`;input.setAttribute('aria-label','Rename tab');input.size=Math.max(5,input.value.length);
-      const original=input.value;let finished=false,requested=false,failed=false,pending:Promise<void>|undefined;
+      const original=input.value;let finished=false,requested=false,failed=false,pending:Promise<void>|undefined,saveError:Error|undefined;
       let editHeader:HTMLElement=header;let editTab=tab,editRename=rename,recovery:HTMLElement|undefined,notice:HTMLElement|undefined;
-      const session={flush:()=>finish()};
+      const session={status:(): 'saved'|'dirty'|'pending'=>finished?'saved':pending?'pending':failed||input.value!==original?'dirty':'saved',flush:async({settle=true,pageId:targetPageId}:{settle?:boolean;pageId?:string}={})=>{
+        if(targetPageId&&targetPageId!==pageId)return;
+        if(composition.isComposing(input)){
+          if(!settle)return;
+          requested=true;await composition.settled(target=>target===input);
+          if(failed&&!finished)throw saveError;
+        }
+        await finish();
+      }};
       function close(focus=false) {
         finished=true;observer.disconnect();if(tabTitleEdit===session)tabTitleEdit=undefined;
+        if(saveState.error===saveError)dismissedSaveError=saveState.error;
         input.remove();recovery?.remove();notice?.remove();editHeader.style.removeProperty('flex-wrap');editHeader.removeAttribute('role');for(const name of ['aria-label','aria-selected','aria-controls'])editHeader.removeAttribute(name);editTab.hidden=editRename.hidden=false;if(focus&&editTab.isConnected)editTab.focus();
+        updateSaveStatus();
       }
       function recover() {
         if(!recovery){
@@ -465,10 +478,11 @@ function renderTabs(shell:HTMLElement,b:BlockOf<'tabs'>) {
           recovery?.querySelectorAll('button').forEach(button=>button.disabled=true);
           if(value!==original)await store.dispatch('tab_update',{pageId,blockId:b.id,tabId:t.id,title:value},{quiet:true});
           editTab.textContent=value||'Untitled';editTab.setAttribute('aria-label',`Open ${value||'tab'}`);editRename.setAttribute('aria-label',`Rename ${value||'Untitled'} tab`);close(focus);
-        }).catch(error=>{requested=false;input.disabled=false;recovery?.querySelectorAll('button').forEach(button=>button.disabled=false);failed=true;recover();notify(errorOf(error).message,'error',true);throw error;}).finally(()=>{pending=undefined;});return pending;
+        }).catch(error=>{saveError=errorOf(error);requested=false;input.disabled=false;recovery?.querySelectorAll('button').forEach(button=>button.disabled=false);failed=true;recover();notify(saveError.message,'error',true);throw error;}).finally(()=>{pending=undefined;updateSaveStatus();});updateSaveStatus();return pending;
       }
       const observer=new MutationObserver(()=>{if(failed&&!finished)recover();else if(!input.isConnected)void finish().catch(()=>{});});observer.observe(document.body,{childList:true,subtree:true});
       composition.track(input,()=>requested?finish(false,true).catch(()=>{}):undefined,()=>pageId);
+      input.addEventListener('input',updateSaveStatus);
       input.addEventListener('blur',()=>{if(!failed)void finish().catch(()=>{});});
       input.addEventListener('keydown',event=>{
         event.stopPropagation();if(event.isComposing||event.keyCode===229||composition.isComposing(input))return;
@@ -534,11 +548,11 @@ function renderKanban(shell:HTMLElement,b:BlockOf<'kanban'>) {
       b.columns.forEach(c => { const o = element('option'); o.value = c.id; o.textContent = `→ ${c.title || 'Untitled'}`; select.append(o); }); select.value = col.id;
       select.addEventListener('change', () => action('card_move', { blockId: b.id, cardId: card.id, columnId: select.value }));
       tools.append(handle, select, rowsControls(() => action('card_move', { blockId: b.id, cardId: card.id, columnId: col.id, index: i - 1 }), () => action('card_move', { blockId: b.id, cardId: card.id, columnId: col.id, index: i + 1 }), () => action('card_remove', { blockId: b.id, cardId: card.id }), i === 0, i === col.cards.length - 1, 'card'));
-      el.append(tools); dropTarget(el, data => data.kind === 'card' && data.blockId === b.id && data.cardId !== card.id, data => { let index = i; if (data.columnId === col.id && col.cards.findIndex(c => c.id === data.cardId) < i) index--; action('card_move', { blockId: b.id, cardId: data.cardId!, columnId: col.id, index }); }); cards.append(el);
+      el.append(tools); dropTarget(el, data => data.kind === 'card' && data.blockId === b.id && data.cardId !== card.id, data => { let index = i; if (data.columnId === col.id && col.cards.findIndex(c => c.id === data.cardId) < i) index--; action('card_move', { pageId:data.pageId, blockId: b.id, cardId: data.cardId!, columnId: col.id, index }); }); cards.append(el);
     });
     const add = button('+ Add a card', 'Add card to column', async () => { const r = await action('card_add', { blockId: b.id, columnId: col.id }); if (r) requestAnimationFrame(() => domId(r.cardId)?.focus()); }, 'add-inline');
-    dropTarget(cards, data => data.kind === 'card' && data.blockId === b.id, data => action('card_move', { blockId: b.id, cardId: data.cardId!, columnId: col.id }));
-    dropTarget(column, data => data.kind === 'column' && data.blockId === b.id && data.columnId !== col.id, data => action('column_move', { blockId: b.id, columnId: data.columnId!, index: ci })); column.append(cards, add); board.append(column);
+    dropTarget(cards, data => data.kind === 'card' && data.blockId === b.id, data => action('card_move', { pageId:data.pageId, blockId: b.id, cardId: data.cardId!, columnId: col.id }));
+    dropTarget(column, data => data.kind === 'column' && data.blockId === b.id && data.columnId !== col.id, data => action('column_move', { pageId:data.pageId, blockId: b.id, columnId: data.columnId!, index: ci })); column.append(cards, add); board.append(column);
   }); shell.append(board);
 }
 
@@ -589,6 +603,7 @@ function applyTheme(theme:Page['theme']) {
 }
 let renderPageId:string;
 function render(state:Page, { quiet = false, reminderBlockId, reminderPageId, changedBlockId, changedPageId, reset=false }:ChangeEvent={}) {
+  if(dragData&&dragData.pageId!==state.id)endDrag();
   if(composition.hasActive()){deferredRender=true;return;}
   applyTheme(shell!.getView().theme); domId('notification-mode').value = state.notificationMode;
   if(renderPageId!==state.id&&domId('picker').open)domId('picker').close();
@@ -674,7 +689,7 @@ async function boot() {
   setupRoutes(store,{beforeNavigate,onError:error=>notify(error.message,'error',true)});
   let fitFrame=0;window.addEventListener('resize',()=>{cancelAnimationFrame(fitFrame);fitFrame=requestAnimationFrame(()=>{for(const el of document.querySelectorAll<HTMLElement>('[data-autofit],.auto-height'))fit(el);});});
   domId('canvas-stage-close').addEventListener('click',closeCanvas);domId('canvas-stage-pages').addEventListener('click',openPalette);
-  window.addEventListener('pagehide',event=>{flushPending().then(()=>{if(!event.persisted){textEditors!.destroy();return store.close();}}).catch(error=>notify(errorOf(error).message,'error',true));});window.addEventListener('beforeunload',event=>{if(nativeEdits!.list().length||textEditors!.hasPending()||composition.hasActive()){event.preventDefault();event.returnValue='';}flushPending().catch(error=>notify(errorOf(error).message,'error',true));});
+  window.addEventListener('pagehide',event=>{flushPending().then(()=>{if(!event.persisted){textEditors!.destroy();return store.close();}}).catch(error=>notify(errorOf(error).message,'error',true));});window.addEventListener('beforeunload',event=>{if(nativeEdits!.list().length||textEditors!.hasPending()||composition.hasActive()||(tabTitleEdit&&tabTitleEdit.status()!=='saved')){event.preventDefault();event.returnValue='';}flushPending().catch(error=>notify(errorOf(error).message,'error',true));});
   for (const key of ['title','subtitle'] as const) {
     const el=domId(key==='title'?'page-title':'page-subtitle');
     const target=(pageId:string):NativeTarget=>({kind:'page',pageId,field:key}),label=key==='title'?'Page title':'Page description';
