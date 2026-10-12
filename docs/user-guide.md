@@ -34,7 +34,9 @@ Text content is saved as Markdown in JSON backups and WebMCP's `text` field. Exi
 
 ## Checklists
 
-Checklist items can contain children up to 4 levels, counting root items as level 1. Open an item's **…** menu to **Add child checklist item**, **Indent checklist item** under its previous sibling, or **Outdent checklist item** after its parent. While editing item text, Tab indents and Shift+Tab outdents when available; Enter adds the next sibling and focuses it. These shortcuts wait until text composition finishes.
+Checklist item text supports the same Markdown editor at every nesting level, without a formatting toolbar. Type Markdown shortcuts for **bold**, *italic* and `code`, or paste Markdown links and lists. Links open safely in a new tab. Item text stays a Markdown source string in JSON backups and WebMCP; loading or importing an existing checklist does not rewrite it.
+
+Checklist items can contain children up to 4 levels, counting root items as level 1. Open an item's **…** menu to **Add child checklist item**, **Indent checklist item** under its previous sibling, or **Outdent checklist item** after its parent. While editing item text, Tab indents and Shift+Tab outdents when available; Enter or Shift+Enter adds the next checklist sibling and focuses it (not a text block or a line inside a Markdown list). Pasted multiline Markdown can remain inside one item. These shortcuts wait until text composition finishes.
 
 Up/down arrows reorder siblings. Moving or deleting an item carries its children; undo restores the whole branch. Nesting actions are disabled when any descendant would exceed level 4. Each checkbox is independent, and progress counts all items, including children. Existing flat checklists remain compatible; nested items persist offline and in JSON backups.
 

@@ -170,18 +170,17 @@ function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
       const entry=element('div','checklist-item');entry.setAttribute('role','listitem');entry.dataset.itemId=item.id;entry.dataset.level=String(level);
       const row=element('div',`check-row ${item.done?'done':''}`),check=element('input');check.type='checkbox';check.checked=item.done;check.setAttribute('aria-label',`Complete ${item.text||'item'}`);
       check.addEventListener('change',()=>action('checklist_update',{blockId:b.id,itemId:item.id,patch:{done:check.checked}}));
-      const text=editable(item.text,'Checklist item',(value,pageId)=>action('checklist_update',{pageId,blockId:b.id,itemId:item.id,patch:{text:value}},{quiet:true}),{placeholder:'A little thing to do',id:item.id});
-      text.setAttribute('aria-keyshortcuts','Enter Tab Shift+Tab');
       const canIndent=index>0&&level+checklistHeight(item)<=MAX_CHECKLIST_LEVELS;
       const indent=()=>action('checklist_move',{blockId:b.id,itemId:item.id,parentId:items[index-1].id,index:items[index-1].children?.length??0},{focus:item.id});
       const outdent=()=>{
         const grandparent=ancestors.at(-2),siblings=grandparent?.children??b.items;
         return action('checklist_move',{blockId:b.id,itemId:item.id,parentId:grandparent?.id??'',index:siblings.findIndex(sibling=>sibling.id===parent!.id)+1},{focus:item.id});
       };
-      text.addEventListener('keydown',event=>{
-        const key=event as KeyboardEvent;if(key.isComposing||composition.isComposing(text)||key.ctrlKey||key.metaKey||key.altKey)return;
-        if(key.key==='Enter'){key.preventDefault();void addItem(parent?.id,index+1);}
-        if(key.key==='Tab'&&((key.shiftKey&&parent)||(!key.shiftKey&&canIndent))){key.preventDefault();void (key.shiftKey?outdent():indent());}
+      const text=textEditors!.mountChecklist(b.id,item,store.getActivePageId(),key=>{
+        if(key.ctrlKey||key.metaKey||key.altKey)return false;
+        if(key.key==='Enter'){if(!key.repeat)void addItem(parent?.id,index+1);return true;}
+        if(key.key==='Tab'&&((key.shiftKey&&parent)||(!key.shiftKey&&canIndent))){if(!key.repeat)void (key.shiftKey?outdent():indent());return true;}
+        return false;
       });
       const controls=rowsControls(()=>action('checklist_move',{blockId:b.id,itemId:item.id,index:index-1},{focus:item.id}),()=>action('checklist_move',{blockId:b.id,itemId:item.id,index:index+1},{focus:item.id}),()=>action('checklist_remove',{blockId:b.id,itemId:item.id}),index===0,index===items.length-1,'checklist item');
       const more=button('…','Checklist item actions',()=>showMenu('block-actions-dialog','Checklist item actions',[

@@ -43,7 +43,7 @@ Route regression coverage uses two tabs sharing IndexedDB and native WebMCP to c
 
 `npm run test:theme` checks legacy theme migration, page switching/creation/import, same-context tab synchronization, live OS appearance, reload/reopen, diagrams/canvas, unchanged notebook revisions/history and invalid/failed storage writes. Run with `OMD_BROWSER=chromium` or `webkit` and `OMD_BASE_PATH=/omd` for project hosting; CI runs all four combinations. This suite exercises the real WebMCP adapter without inventing a browser registry; `test:browser` separately proves native registration.
 
-The checklist browser suite checks four-level nesting, sibling ordering, Enter/Tab/Shift+Tab, composition, focus, independent checkboxes, undo/redo, persistence and touch controls. CI runs it on Chromium and WebKit at both the origin root and `/omd/`.
+The checklist browser suite checks Markdown/no-toolbar at every depth, unchanged source import/export, safe links, paste/lists, editor identity/caret and teardown, storage-failure draft retry, four-level nesting, sibling ordering, Enter/Shift+Enter/Tab/Shift+Tab, composition through the final save, independent checkboxes, undo/redo, reload and touch controls. Composition events simulate the lifecycle, not an actual OS IME. CI runs it on Chromium and WebKit at both the origin root and `/omd/`.
 
 The editor browser suite covers Tiptap Markdown rendering, formatting, paste, Shift+Enter insertion and cursor transfer, ordinary Enter, nested containers, history, selection, composition, safe rendering, persistence and touch controls. It stops the real server to verify offline reopening and editing with cached libraries. CI runs it on Chromium and WebKit at the origin root and `/omd/`.
 
