@@ -135,7 +135,7 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
   const manager={mount,
     checklistId,
     focusChecklist(blockId:string,itemId:string,pageId:string){
-      const entry=entries.get(key(pageId,blockId,itemId));if(store.getActivePageId()===pageId&&entry?.host.isConnected)entry.editor.view.focus();
+      const entry=entries.get(key(pageId,blockId,itemId));if(store.getActivePageId()===pageId&&entry?.host.isConnected&&document.activeElement!==entry.editor.view.dom)entry.editor.view.focus();
     },
     mountChecklist(blockId:string,item:ChecklistItem,pageId:string,onKeyDown:ItemKeyDown){return mount({id:blockId,type:'text',text:item.text},pageId,item,onKeyDown);},
     end(){for(const [id,entry] of entries)if((entry.pageId!==store.getActivePageId()||!entry.host.isConnected)&&entry.pending===null&&!entry.saving&&!composition.isComposing(entry.editor.view.dom)){entry.editor.destroy();entries.delete(id);}onDraftsChange();},
@@ -150,7 +150,7 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
       if(entry.pending===text)entry.pending=null;manager.end();
     },
     captureFocus(){const entry=[...entries.values()].find(e=>e.editor.view.dom===document.activeElement);return entry?key(entry.pageId,entry.blockId,entry.itemId):null;},
-    restoreFocus(id:string|null){const entry=id&&entries.get(id);if(entry&&entry.host.isConnected)entry.editor.view.focus();},
+    restoreFocus(id:string|null){const entry=id&&entries.get(id);if(entry&&entry.host.isConnected&&document.activeElement!==entry.editor.view.dom)entry.editor.view.focus();},
     focus(blockId:string){
       const entry=entries.get(key(store.getActivePageId(),blockId));if(!entry?.host.isConnected)return;
       // These vanilla views are mounted synchronously. Focus the new selection

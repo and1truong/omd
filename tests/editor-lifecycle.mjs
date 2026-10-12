@@ -233,6 +233,32 @@ async function importedFocus() {
   await screenshot(page,'imported-focus');await context.close();
 }
 
+async function deferredChecklistFocus() {
+  const {context,page}=await fresh(),f=await fixture(page),second=(await call(page,'checklist_add',{blockId:f.blockId,text:'Second task'})).itemId,target=editor(page,second);
+  await target.focus();await page.evaluate(()=>{window.deferredFrames=[];window.realFocusRAF=requestAnimationFrame;window.requestAnimationFrame=callback=>{deferredFrames.push(callback);return 1;};});
+  await target.press('Tab');await page.waitForFunction(second=>lifecycleStore.getState().blocks[0].items[0].children?.some(item=>item.id===second),second,{polling:50});
+  const selection=await target.evaluate(el=>{
+    el.focus();const node=el.querySelector('p').firstChild;getSelection().setBaseAndExtent(node,node.length,node,node.length);
+    const before=getSelection().anchorOffset;window.requestAnimationFrame=realFocusRAF;const callbacks=deferredFrames.splice(0);callbacks.forEach(callback=>callback(performance.now()));
+    return {before,after:getSelection().anchorOffset,active:document.activeElement===el,callbacks:callbacks.length};
+  });
+  assert.ok(selection.callbacks>0);assert.deepEqual({...selection,callbacks:0},{before:11,after:11,active:true,callbacks:0});
+  await page.keyboard.type(' APPENDED');await flush(page);assert.equal(await text(page,{...f,itemId:second}),'Second task APPENDED');
+  await context.close();
+}
+async function activeRestoreFocus() {
+  const {context,page}=await fresh();const selection=await page.evaluate(async()=>{
+    const {createCompositionGuard}=await import(new URL('./src/composition.js',document.baseURI).href),{createTextEditors}=await import(new URL('./src/text-editors.js',document.baseURI).href);
+    const manager=createTextEditors(lifecycleStore,{composition:createCompositionGuard(),notify:()=>{},createNext:async()=>{},flushPending:async()=>{}});
+    const host=manager.mount({id:'restore-native-caret',type:'text',text:'Existing text'},lifecycleStore.getActivePageId());document.body.append(host);
+    const input=host.querySelector('.markdown-editor');input.focus();const id=manager.captureFocus(),node=input.querySelector('p').firstChild;
+    getSelection().setBaseAndExtent(node,node.length,node,node.length);const before=getSelection().anchorOffset;manager.restoreFocus(id);
+    const result={before,after:getSelection().anchorOffset,active:document.activeElement===input};
+    input.blur();manager.restoreFocus(id);result.refocused=document.activeElement===input;manager.destroy();host.remove();return result;
+  });
+  assert.deepEqual(selection,{before:13,after:13,active:true,refocused:true});await context.close();
+}
+
 async function scopedSettlement() {
   const {context,page}=await fresh();await page.evaluate(async()=>{
     const {createCompositionGuard}=await import(new URL('./src/composition.js',document.baseURI).href),{createTextEditors}=await import(new URL('./src/text-editors.js',document.baseURI).href);
@@ -261,6 +287,6 @@ try {
   await historyBarrier();await retainedDrafts('checklist');await retainedDrafts('text');await deletedDrafts();await deletedDrafts(true);
   await compositionBarrier('checklist');await compositionBarrier('text');
   for(const type of ['checklist','text']){for(const mode of ['preedit','same','finishing','failure'])await overlappingCompositions(type,mode);await immediateCompositionRestart(type);}
-  await importedFocus();await scopedSettlement();await composingDeletion();assert.deepEqual(errors,[]);
+  await importedFocus();await deferredChecklistFocus();await activeRestoreFocus();await scopedSettlement();await composingDeletion();assert.deepEqual(errors,[]);
   console.log(`${engine} ${basePath||'/'}: history/draft recovery, strict scoped composition/export, original-page navigation and imported focus identity passed.`);
 } finally {await browser?.close();server.kill();}
