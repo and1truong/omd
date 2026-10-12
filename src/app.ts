@@ -194,10 +194,10 @@ function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
   shell.append(button('+ Add an item', 'Add checklist item', async () => { const r = await action('checklist_add', { blockId: b.id }); if (r) requestAnimationFrame(() => domId(r.itemId)?.focus()); }, 'add-inline'));
 }
 function renderTable(shell:HTMLElement,b:BlockOf<'table'>) {
-  const pageId=store.getActivePageId(),cellId=(r:number,c:number)=>`${b.id}-${b.rows[r].id}-${b.columns[c].id}`;
+  const pageId=store.getActivePageId(),cellKey=(rowId:string,columnId:string)=>`table-cell-${encodeURIComponent(JSON.stringify([b.id,rowId,columnId]))}`,cellId=(r:number,c:number)=>cellKey(b.rows[r].id,b.columns[c].id);
   const toolbar=element('div','table-toolbar'),size=element('span','muted');size.textContent=`${b.rows.length} rows × ${b.columns.length} columns`;
-  const addRow=async(index?:number)=>{const result=await action('table_row_add',{pageId,blockId:b.id,index});if(result)requestAnimationFrame(()=>document.getElementById(`${b.id}-${result.rowId}-${b.columns[0].id}`)?.focus());};
-  const addColumn=async(index?:number)=>{const result=await action('table_column_add',{pageId,blockId:b.id,index});if(result)requestAnimationFrame(()=>document.getElementById(`${b.id}-${b.rows[0].id}-${result.columnId}`)?.focus());};
+  const addRow=async(index?:number)=>{const result=await action('table_row_add',{pageId,blockId:b.id,index});if(result)requestAnimationFrame(()=>document.getElementById(cellKey(result.rowId,b.columns[0].id))?.focus());};
+  const addColumn=async(index?:number)=>{const result=await action('table_column_add',{pageId,blockId:b.id,index});if(result)requestAnimationFrame(()=>document.getElementById(cellKey(b.rows[0].id,result.columnId))?.focus());};
   const rowButton=button('+ Row','Add table row',()=>addRow(),'add-inline'),columnButton=button('+ Column','Add table column',()=>addColumn(),'add-inline');
   rowButton.disabled=b.rows.length>=MAX_TABLE_ROWS;columnButton.disabled=b.columns.length>=MAX_TABLE_COLUMNS;
   const checkbox=(label:string,checked:boolean,patch:'headerRow'|'pinnedHeader')=>{
