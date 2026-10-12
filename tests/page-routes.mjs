@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
 
 export async function verifyPageRoutes({browser,appURL,call,root}) {
   const context=await browser.newContext({viewport:{width:1280,height:900}}),a=await context.newPage(),b=await context.newPage();
@@ -39,11 +40,12 @@ export async function verifyPageRoutes({browser,appURL,call,root}) {
       window.omdRouteClick=null;
       window.addEventListener('click',event=>{window.omdRouteClick={ctrl:event.ctrlKey,meta:event.metaKey,button:event.button,trusted:event.isTrusted,prevented:event.defaultPrevented,href:event.target.closest('a')?.getAttribute('href'),focused:document.hasFocus(),active:document.activeElement===node};},{once:true});
     });
-    await b.keyboard.down('ControlOrMeta');let third;
+    await b.keyboard.down('ControlOrMeta');let third,clickCompleted=false;
     try {
-      [third]=await Promise.all([context.waitForEvent('page'),link.click({modifiers:['ControlOrMeta'],delay:50})]);
+      [third]=await Promise.all([context.waitForEvent('page'),link.click({modifiers:['ControlOrMeta'],delay:50}).then(()=>{clickCompleted=true;})]);
     } catch(error) {
-      error.message+=`\nNative link diagnostics: ${JSON.stringify(await b.evaluate(()=>({url:location.href,click:window.omdRouteClick})))}`;throw error;
+      const snapshot=await b.evaluate(()=>({url:location.href,click:window.omdRouteClick})).catch(snapshotError=>({error:String(snapshotError)}));
+      throw new Error(`Native link diagnostics: ${JSON.stringify({snapshot,clickCompleted,pages:context.pages().map(page=>page.url())})}`,{cause:error});
     } finally {await b.keyboard.up('ControlOrMeta');}
     assert.deepEqual(await b.evaluate(()=>window.omdRouteClick),{ctrl:process.platform!=='darwin',meta:process.platform==='darwin',button:0,trusted:true,prevented:false,href:new URL(path(second)).pathname,focused:true,active:true});
     await ready(third);
@@ -92,7 +94,7 @@ export async function verifyPageRoutes({browser,appURL,call,root}) {
     const fallbackContext=await browser.newContext({serviceWorkers:'block'}),fallback=await fallbackContext.newPage();
     try {
       await fallback.addInitScript(book=>localStorage.setItem('omd.notebook.v1',JSON.stringify(book)),imported);
-      const html=await (await context.request.get(new URL('404.html',appURL).href)).text();
+      const html=await readFile(`${root}/dist/404.html`,'utf8');
       await fallback.route(path(second),route=>route.fulfill({status:404,contentType:'text/html',body:html}));
       await fallback.goto(path(second));await ready(fallback);assert.equal(await active(fallback),second);assert.equal(fallback.url(),path(second));
       assert.equal(await fallback.evaluate(()=>document.baseURI),appURL);

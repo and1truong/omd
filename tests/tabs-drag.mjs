@@ -163,9 +163,11 @@ try {
     await page.evaluate(()=>window.composingTitle.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'Tên đang nhập'})));await settled();
     assert.equal((await block(outer.id)).tabs.find(t=>t.id===a).title,'Tên đang nhập');
     await editor.evaluate(el=>{window.composingEditor=el;el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));});
-    await editor.fill('Nội dung đang nhập');await reorder(outer.id,b,a,true,orientation);
+    await editor.fill('Nội dung đang nhập');await startDrag(header(b),header(a).locator('..'),`after-${orientation==='horizontal'?'x':'y'}`);await page.mouse.up();
+    const composingDragFlush=settled();
     assert.equal(await page.evaluate(()=>window.composingEditor.isConnected),true);
     await page.evaluate(()=>window.composingEditor.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));
+    await composingDragFlush;
     await page.evaluate(()=>{window.tabsStore=window.tabsApp.getStore();});
     await page.waitForFunction(id=>window.tabsStore.getState().blocks.some(b=>b.type==='tabs'&&b.tabs.some(t=>t.blocks.some(x=>x.id===id&&x.text==='Nội dung đang nhập'))),outer.texts[0]);await settled();
     assert.equal((await block(outer.texts[0])).text,'Nội dung đang nhập');

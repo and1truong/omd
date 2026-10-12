@@ -44,6 +44,12 @@ contents on a static HTTPS host. Do not open index.html directly with file://.
 Localhost/HTTPS enables service workers, notifications and offline app reopening.
 WebMCP needs a browser/extension that supports the native API; editing works without it.
 
+For a local prefix, use OMD_BASE_PATH=/apps/page/demo node start.mjs and open
+http://localhost:3000/apps/page/demo/. The launcher supplies the explicit base.
+On static hosts, prefixes containing /page/ cannot be inferred unambiguously:
+configure an explicit HTML base before building, or have the host insert it into
+both index.html and 404.html responses. Root and /omd/ hosting infer their base.
+
 Notebook data stays in browser storage for the origin you use. Use JSON export/import
 to transfer your notebook between localhost and https://and1truong.github.io/omd/.
 DOCUMENTATION.md contains feature details. DEPENDENCIES.json and

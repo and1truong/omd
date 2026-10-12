@@ -47,7 +47,7 @@ export const getView = () => shell!.getView();
 export const setView = async (patch:PartialView) => {if(patch.sidebarOpen)await beforeNavigate();return shell!.setView(patch);};
 export async function flushPending(){await tabTitleEdit?.flush();await tableEdits?.flushAll();await textEditors?.flushAll();await diagrams?.flushAll();}
 export const flushDiagrams=flushPending;
-async function beforeNavigate(){await tabTitleEdit?.flush();await tableEdits?.flushAll();await textEditors?.flushAll();await diagrams?.beforeNavigate();}
+async function beforeNavigate(){await tabTitleEdit?.flush();await tableEdits?.flushAll();await textEditors?.flushAll({settle:false});await diagrams?.beforeNavigate();}
 export async function openCanvas(blockId:string,pageId?:string) {
   const page=await store.getPage(pageId);findBlock(page,blockId,'excalidraw');await flushPending();
   shell?.closeMobile();
@@ -57,19 +57,46 @@ export async function openCanvas(blockId:string,pageId?:string) {
 }
 export const closeCanvas = async () => {await flushPending();diagrams?.closeFocus();};
 let deferredRender=false;
-const composition=createCompositionGuard({onSettled:()=>{if(deferredRender){deferredRender=false;render(store.getRenderState(),{reset:true});}}});
+const composition=createCompositionGuard({onSettled:()=>{if(deferredRender){deferredRender=false;render(store.getRenderState(),{reset:true});}else textEditors?.end();}});
 const themeQuery = matchMedia('(prefers-color-scheme: dark)');
 export function notify(message:string,kind = '', persistent = false) {
   const el = element('div', `notice ${kind}`); const text = element('span'); text.textContent = message;
   const close = button('×', 'Dismiss message', () => el.remove()); el.append(text, close); domId('notices').append(el);
   if (!persistent) setTimeout(() => el.remove(), kind === 'error' ? 12000 : 5000);
 }
+const editorDraftNotices=new Map<string,HTMLElement>();
+let savePending=0,saveError:Error|null=null;
+function updateSaveStatus() {
+  const status=domId('save-status'),dot=element('span','status-dot');status.replaceChildren(dot,document.createTextNode(savePending?'Saving…':saveError||textEditors?.hasPending()?'Not saved':'Saved'));
+}
+function editorDraftsChanged() {
+  const drafts=textEditors?.drafts()??[],ids=new Set(drafts.map(draft=>draft.id));
+  for(const [id,notice] of editorDraftNotices)if(!ids.has(id)){notice.remove();editorDraftNotices.delete(id);}
+  for(const draft of drafts) {
+    let notice=editorDraftNotices.get(draft.id);
+    if(!notice) {
+      notice=element('div','notice error');notice.dataset.editorDraft=draft.id;
+      const content=element('div'),message=element('p');message.textContent='Unsaved Markdown draft kept in this tab. Retry saving or recover it before closing.';
+      const preview=element('textarea','page-subtitle');preview.readOnly=true;preview.rows=3;preview.setAttribute('aria-label','Unsaved Markdown draft');
+      const run=(operation:()=>Promise<unknown>)=>{retry.disabled=recover.disabled=true;void operation().catch(error=>notify(errorOf(error).message,'error',true)).finally(()=>{retry.disabled=recover.disabled=false;});};
+      const retry=button('Retry save','Retry Markdown draft save',()=>run(()=>textEditors!.retry(draft.id)),'secondary-button');
+      const recover=button('Recover as note','Recover Markdown draft as a new note',()=>run(()=>textEditors!.recover(draft.id)),'secondary-button');
+      const download=button('Download draft','Download unsaved Markdown draft',()=>{
+        const current=textEditors!.drafts().find(item=>item.id===draft.id);if(!current)return;
+        const url=URL.createObjectURL(new Blob([current.text],{type:'text/markdown;charset=utf-8'})),link=element('a');link.href=url;link.download='omd-unsaved-draft.md';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+      },'secondary-button');
+      content.append(message,preview,retry,recover,download);notice.append(content);domId('notices').append(notice);editorDraftNotices.set(draft.id,notice);
+    }
+    notice.querySelector('textarea')!.value=draft.text;
+  }
+  updateSaveStatus();
+}
 function element<T extends keyof HTMLElementTagNameMap>(tag:T,className = '') { const el = document.createElement(tag); el.className = className; return el; }
 function button(label:string,aria:string,fn:(event:MouseEvent)=>unknown,className = 'icon-button') {
   const b = element('button', className); b.type = 'button'; if(labelIcon[label])b.append(icon(labelIcon[label]));else b.textContent=label; b.title = aria; b.setAttribute('aria-label', aria); b.addEventListener('click', fn); return b;
 }
-async function action<K extends CommandName>(name:K,input:CommandInput<K>,{quiet=false,focus}: {quiet?:boolean;focus?:string}={}):Promise<MutationResult<K>|null> {
-  try { input={...input,pageId:input.pageId??store.getActivePageId()}; domId('save-status').textContent='Saving…'; if(!quiet)await flushPending(); const result = await store.dispatch(name, input, { quiet }); if (focus) requestAnimationFrame(()=>document.getElementById(focus)?.focus()); return result; }
+async function action<K extends CommandName>(name:K,input:CommandInput<K>,{quiet=false,focus}: {quiet?:boolean;focus?:string|(()=>void)}={}):Promise<MutationResult<K>|null> {
+  try { input={...input,pageId:input.pageId??store.getActivePageId()}; domId('save-status').textContent='Saving…'; if(!quiet)await flushPending(); const result = await store.dispatch(name, input, { quiet }); if (focus) requestAnimationFrame(()=>typeof focus==='function'?focus():document.getElementById(focus)?.focus()); return result; }
   catch (error) { domId('save-status').textContent = 'Not saved'; notify(errorOf(error).message, 'error', true); return null; }
 }
 function editable(value:string,aria:string,fn:(value:string,pageId:string)=>unknown,{multiline=false,className='',placeholder='',id}: {multiline?:boolean;className?:string;placeholder?:string;id?:string}={}) {
@@ -188,7 +215,7 @@ function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
     requestAnimationFrame(()=>{
       if(pageId!==store.getActivePageId())return;
       const block=[...document.querySelectorAll<HTMLElement>('.block-type-checklist')].find(block=>block.dataset.blockId===b.id),entry=block&&[...block.querySelectorAll<HTMLElement>('[data-item-id]')].find(entry=>entry.dataset.itemId===itemId),target=entry?.querySelector<HTMLElement>(':scope > .check-row .markdown-editor');
-      if(target){revealChecklistItem(target);target.focus();}
+      if(target){revealChecklistItem(target);textEditors!.focusChecklist(b.id,itemId,pageId);}
     });
   }
   async function addItem(parentId?:string,index?:number) {const result=await action('checklist_add',{pageId,blockId:b.id,parentId,index});if(result)focusItem(result.itemId);}
@@ -227,7 +254,7 @@ function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
         const grandparent=ancestors.at(-2),siblings=grandparent?.children??b.items;
         return moveItem(item.id,grandparent?.id??'',siblings.findIndex(sibling=>sibling.id===parent!.id)+1);
       };
-      const text=textEditors!.mountChecklist(b.id,item,store.getActivePageId(),key=>{
+      const text=textEditors!.mountChecklist(b.id,item,pageId,key=>{
         if(key.ctrlKey||key.metaKey||key.altKey)return false;
         if(key.key==='Enter'){if(!key.repeat)void addItem(parent?.id,index+1);return true;}
         if(key.key==='Tab'&&((key.shiftKey&&parent)||(!key.shiftKey&&canIndent))){if(!key.repeat)void (key.shiftKey?outdent():indent());return true;}
@@ -245,7 +272,7 @@ function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
         {label:'Move checklist item up',icon:'up',disabled:index===0,run:()=>moveItem(item.id,undefined,index-1)},
         {label:'Move checklist item down',icon:'down',disabled:index===items.length-1,run:()=>moveItem(item.id,undefined,index+1)},
         {label:'Delete checklist item',icon:'trash',danger:true,run:()=>action('checklist_remove',{pageId,blockId:b.id,itemId:item.id})}
-      ],more));more.id=checklistControlId(checklistViewKey(pageId,b.id,item.id),'menu');controls.append(more);
+      ],more));more.id=textEditors!.checklistId(b.id,item.id,pageId,'menu');controls.append(more);
       if(item.children?.length) {
         const children=renderItems(item.children,[...ancestors,item]),viewKey=checklistViewKey(pageId,b.id,item.id),collapsed=collapsedChecklistItems.has(viewKey);
         children.id=checklistControlId(viewKey,'children');children.hidden=collapsed;
@@ -554,7 +581,7 @@ async function boot() {
   for (const close of document.querySelectorAll('[data-close]')) close.addEventListener('click', () => close.closest('dialog')!.close());
   for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', e => { if (e.target === dialog) { const rect = dialog.getBoundingClientRect(); if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) dialog.close(); } });
   diagrams=createDiagramManager(store,{notify});
-  textEditors=createTextEditors(store,{composition,notify,createNext:createTextAfter});
+  textEditors=createTextEditors(store,{composition,notify,createNext:createTextAfter,flushPending,onDraftsChange:editorDraftsChanged});
   tableEdits=createTableEdits(store,{settled:()=>composition.settled(input=>input instanceof Element&&input.classList.contains('table-cell'))});
   const dirtyContainers=new Set<string>();
   renderer=createRenderCache({makeBlock:renderBlock,makeList:makeBlockList,
@@ -575,7 +602,7 @@ async function boot() {
   });
   shell=setupShell(store,{beforeNavigate,openPalette,confirm:confirmAction,onError:error=>notify(errorOf(error).message,'error',true),onThemeChange:applyTheme});
   store.subscribe(render); render(store.getRenderState());
-  store.subscribeStatus(({pending,navigating,error})=>{domId('page-title').disabled=navigating&&!composition.isComposing(domId('page-title'));domId('page-subtitle').disabled=navigating&&!composition.isComposing(domId('page-subtitle'));domId('notebook').inert=navigating&&!composition.hasActive();const status=domId('save-status');status.replaceChildren();const dot=element('span','status-dot');status.append(dot,document.createTextNode(pending?'Saving…':error?'Not saved':'Saved'));});
+  store.subscribeStatus(({pending,navigating,error})=>{domId('page-title').disabled=navigating&&!composition.isComposing(domId('page-title'));domId('page-subtitle').disabled=navigating&&!composition.isComposing(domId('page-subtitle'));domId('notebook').inert=navigating&&!composition.hasActive();savePending=pending;saveError=error;updateSaveStatus();});
   palette = setupPalette(store, { onError: error => notify(errorOf(error).message, 'error', true), beforeOpen:()=>shell!.closeMobile(), beforeNavigate });
   setupRoutes(store,{beforeNavigate,onError:error=>notify(error.message,'error',true)});
   let fitFrame=0;window.addEventListener('resize',()=>{cancelAnimationFrame(fitFrame);fitFrame=requestAnimationFrame(()=>{for(const el of document.querySelectorAll<HTMLElement>('[data-autofit],.auto-height'))fit(el);});});
