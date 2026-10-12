@@ -43,7 +43,7 @@ function revealChecklistItem(target:HTMLElement) {
   const block=target.closest('.block');if(block)syncChecklistFolds(block);
 }
 interface InsertionAnchor {blockId:string;side:'before'|'after'}
-interface DragData {containerId?:string;kind:'block'|'card'|'column'|'tab';blockId:string;cardId?:string;columnId?:string;tabId?:string;pageId?:string}
+interface DragData {containerId?:string;kind:'block'|'card'|'column'|'tab';blockId:string;cardId?:string;columnId?:string;tabId?:string;pageId:string}
 let suppressTabClick=false;
 let tabTitleEdit:{flush:(options?:{settle?:boolean;pageId?:string})=>Promise<unknown>;status:()=> 'saved'|'dirty'|'pending'}|undefined;
 export const openPalette = () => {shell?.closeMobile();palette?.open();};
@@ -182,14 +182,16 @@ function endDrag() {
   dragData = null; document.body.classList.remove('dragging-block'); for (const el of document.querySelectorAll('.dragging,.drop-active,.tab-drop-before,.tab-drop-after')) el.classList.remove('dragging', 'drop-active', 'tab-drop-before', 'tab-drop-after');
   setTimeout(()=>{suppressTabClick=false;},0);
 }
-function draggable(handle:HTMLElement,data:DragData) {
-  handle.draggable = true; handle.addEventListener('dragstart', event => { event.stopPropagation(); dragData = data; event.dataTransfer!.effectAllowed = 'move'; event.dataTransfer!.setData('application/x-omd', JSON.stringify(data)); (data.kind==='tab'?handle:handle.closest('.block,.kanban-card,.kanban-column'))?.classList.add('dragging'); if (data.kind === 'block') requestAnimationFrame(()=>{if(dragData===data)document.body.classList.add('dragging-block');}); if(data.kind==='tab')suppressTabClick=true; });
+function draggable(handle:HTMLElement,input:Omit<DragData,'pageId'>&{pageId?:string}) {
+  const data:DragData={...input,pageId:input.pageId??store.getActivePageId()};
+  handle.draggable = true; handle.addEventListener('dragstart', event => { event.stopPropagation();if(data.pageId!==store.getActivePageId()){event.preventDefault();endDrag();return;} dragData = data; event.dataTransfer!.effectAllowed = 'move'; event.dataTransfer!.setData('application/x-omd', JSON.stringify(data)); (data.kind==='tab'?handle:handle.closest('.block,.kanban-card,.kanban-column'))?.classList.add('dragging'); if (data.kind === 'block') requestAnimationFrame(()=>{if(dragData===data)document.body.classList.add('dragging-block');}); if(data.kind==='tab')suppressTabClick=true; });
   handle.addEventListener('dragend', endDrag);
 }
 function dropTarget(el:HTMLElement,canDrop:(data:DragData)=>boolean,drop:(data:DragData)=>unknown) {
-  el.addEventListener('dragover', event => { if (dragData && canDrop(dragData)) { event.preventDefault(); event.stopPropagation(); event.dataTransfer!.dropEffect = 'move'; el.classList.add('drop-active'); } });
+  const pageId=store.getActivePageId(),accept=(data:DragData)=>data.pageId===pageId&&store.getActivePageId()===pageId&&canDrop(data);
+  el.addEventListener('dragover', event => { if (dragData && accept(dragData)) { event.preventDefault(); event.stopPropagation(); event.dataTransfer!.dropEffect = 'move'; el.classList.add('drop-active'); } });
   el.addEventListener('dragleave', event => { if (!el.contains(event.relatedTarget as Node|null)) el.classList.remove('drop-active'); });
-  el.addEventListener('drop', event => { if (dragData && canDrop(dragData)) { event.preventDefault(); event.stopPropagation(); el.classList.remove('drop-active'); drop(dragData); } });
+  el.addEventListener('drop', event => { if (dragData && accept(dragData)) { event.preventDefault(); event.stopPropagation(); el.classList.remove('drop-active'); drop(dragData); } });
 }
 
 function makeBlockList(blocks:Block[],containerId:string,nodes:HTMLElement[]) {
@@ -205,12 +207,12 @@ function makeBlockList(blocks:Block[],containerId:string,nodes:HTMLElement[]) {
     dropTarget(el, data => data.kind === 'block', data => {
       const source = findBlock(store.getRenderState(), data.blockId); let targetIndex = index;
       if (source.siblings.some(b => b.id === data.blockId) && data.containerId === containerId && source.siblings.findIndex(b => b.id === data.blockId) < index) targetIndex--;
-      action('move_block', { blockId: data.blockId, containerId, index: targetIndex });
+      action('move_block', { pageId:data.pageId, blockId: data.blockId, containerId, index: targetIndex });
     }); return el;
   }
   const children=[];nodes.forEach((node, i) => { children.push(slot(i), node); }); children.push(slot(blocks.length));
   const add = button('Add a block', 'Add a block here', () => openPicker(containerId), 'add-block-button'); children.push(add);
-  dropTarget(add, data => data.kind === 'block', data => action('move_block', { blockId: data.blockId, containerId })); return {node:list,children};
+  dropTarget(add, data => data.kind === 'block', data => action('move_block', { pageId:data.pageId, blockId: data.blockId, containerId })); return {node:list,children};
 }
 function renderBlock(b:Block,containerId:string,index:number,count:number) {
   const shell = element('section', `block block-type-${b.type}`); shell.dataset.blockId = b.id;
@@ -546,11 +548,11 @@ function renderKanban(shell:HTMLElement,b:BlockOf<'kanban'>) {
       b.columns.forEach(c => { const o = element('option'); o.value = c.id; o.textContent = `→ ${c.title || 'Untitled'}`; select.append(o); }); select.value = col.id;
       select.addEventListener('change', () => action('card_move', { blockId: b.id, cardId: card.id, columnId: select.value }));
       tools.append(handle, select, rowsControls(() => action('card_move', { blockId: b.id, cardId: card.id, columnId: col.id, index: i - 1 }), () => action('card_move', { blockId: b.id, cardId: card.id, columnId: col.id, index: i + 1 }), () => action('card_remove', { blockId: b.id, cardId: card.id }), i === 0, i === col.cards.length - 1, 'card'));
-      el.append(tools); dropTarget(el, data => data.kind === 'card' && data.blockId === b.id && data.cardId !== card.id, data => { let index = i; if (data.columnId === col.id && col.cards.findIndex(c => c.id === data.cardId) < i) index--; action('card_move', { blockId: b.id, cardId: data.cardId!, columnId: col.id, index }); }); cards.append(el);
+      el.append(tools); dropTarget(el, data => data.kind === 'card' && data.blockId === b.id && data.cardId !== card.id, data => { let index = i; if (data.columnId === col.id && col.cards.findIndex(c => c.id === data.cardId) < i) index--; action('card_move', { pageId:data.pageId, blockId: b.id, cardId: data.cardId!, columnId: col.id, index }); }); cards.append(el);
     });
     const add = button('+ Add a card', 'Add card to column', async () => { const r = await action('card_add', { blockId: b.id, columnId: col.id }); if (r) requestAnimationFrame(() => domId(r.cardId)?.focus()); }, 'add-inline');
-    dropTarget(cards, data => data.kind === 'card' && data.blockId === b.id, data => action('card_move', { blockId: b.id, cardId: data.cardId!, columnId: col.id }));
-    dropTarget(column, data => data.kind === 'column' && data.blockId === b.id && data.columnId !== col.id, data => action('column_move', { blockId: b.id, columnId: data.columnId!, index: ci })); column.append(cards, add); board.append(column);
+    dropTarget(cards, data => data.kind === 'card' && data.blockId === b.id, data => action('card_move', { pageId:data.pageId, blockId: b.id, cardId: data.cardId!, columnId: col.id }));
+    dropTarget(column, data => data.kind === 'column' && data.blockId === b.id && data.columnId !== col.id, data => action('column_move', { pageId:data.pageId, blockId: b.id, columnId: data.columnId!, index: ci })); column.append(cards, add); board.append(column);
   }); shell.append(board);
 }
 
@@ -601,6 +603,7 @@ function applyTheme(theme:Page['theme']) {
 }
 let renderPageId:string;
 function render(state:Page, { quiet = false, reminderBlockId, reminderPageId, changedBlockId, changedPageId, reset=false }:ChangeEvent={}) {
+  if(dragData&&dragData.pageId!==state.id)endDrag();
   if(composition.hasActive()){deferredRender=true;return;}
   applyTheme(shell!.getView().theme); domId('notification-mode').value = state.notificationMode;
   if(renderPageId!==state.id&&domId('picker').open)domId('picker').close();

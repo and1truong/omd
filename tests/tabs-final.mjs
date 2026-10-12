@@ -13,6 +13,7 @@ async function fresh(orientation='horizontal',nested=false) {
   const ids=await page.evaluate(async({orientation,nested})=>{
     window.app=await import(new URL('./src/app.js',document.baseURI));await app.ready;window.store=app.getStore();
     const {createTools}=await import(new URL('./src/webmcp.js',document.baseURI));window.tools=createTools(store,{flushPending:app.flushPending});
+    await store.dispatch('page_add',{title:'Final safety fixture'});
     let blockId=(await store.dispatch('add_block',{type:'tabs',title:'Final tab safety',orientation})).blockId;
     if(nested){const parent=store.getRenderState().blocks.find(b=>b.id===blockId);blockId=(await store.dispatch('add_block',{type:'tabs',containerId:parent.tabs[0].id,title:'Nested final safety',orientation:orientation==='horizontal'?'vertical':'horizontal'})).blockId;}
     const find=blocks=>{for(const block of blocks){if(block.id===blockId)return block;const child=find(block.tabs?.flatMap(t=>t.blocks)??[]);if(child)return child;}};
@@ -103,11 +104,76 @@ async function unload(orientation,nested) {
   await h.page.locator(`[id="${h.tabId}-button"]`).press('F2');await h.page.reload();assert.equal(healthyDialogs.length,1,'unchanged open editor does not cause an unload warning');
   await h.context.close();
 }
+async function dragFixture(keepTabs=false) {
+  const f=await fresh(),{page}=f;
+  const data=await page.evaluate(async keepTabs=>{
+    if(!keepTabs)await store.dispatch('remove_block',{blockId:finalIds.blockId});
+    const one=(await store.dispatch('add_block',{type:'text',text:'one'})).blockId,two=(await store.dispatch('add_block',{type:'text',text:'two'})).blockId;
+    const board=(await store.dispatch('add_block',{type:'kanban'})).blockId,columns=store.getRenderState().blocks.find(b=>b.id===board).columns;
+    const first=(await store.dispatch('card_add',{blockId:board,columnId:columns[0].id,title:'First card'})).cardId,second=(await store.dispatch('card_add',{blockId:board,columnId:columns[1].id,title:'Second card'})).cardId;
+    const source=store.getRenderState(),destination={...structuredClone(source),id:`${source.id}-copy`,title:'Same IDs page B'},notebook=await store.getNotebook();
+    notebook.pages=[source,destination];notebook.activePageId=source.id;notebook.parents={[source.id]:'',[destination.id]:''};await store.dispatch('import_notebook',{notebook});
+    return {one,two,board,first,second,source:source.id,destination:destination.id,columns:columns.map(c=>c.id)};
+  },keepTabs);
+  const col=i=>page.locator(`[data-block-id="${data.board}"] .kanban-column`).nth(i),card=id=>page.locator(`[data-card-id="${id}"]`),block=id=>page.locator(`[data-block-id="${id}"] > .block-controls`).getByRole('button',{name:'Drag block',exact:true});
+  const paths=[
+    ['block-slot',()=>block(data.two),()=>page.locator('.block-list[data-container="page"] > .drop-slot').first()],
+    ['block-append',()=>block(data.one),()=>page.locator('.block-list[data-container="page"] > .add-block-button')],
+    ['card-sibling',()=>card(data.first).getByRole('button',{name:'Drag card',exact:true}),()=>card(data.second)],
+    ['card-append',()=>card(data.first).getByRole('button',{name:'Drag card',exact:true}),()=>col(2).locator('.cards')],
+    ['column',()=>col(0).getByRole('button',{name:'Drag column',exact:true}),()=>col(2)]
+  ];
+  return {...f,data,paths};
+}
+async function pointerStart(page,source,target) {
+  await source.scrollIntoViewIfNeeded();await target.scrollIntoViewIfNeeded();await source.hover();const a=await source.boundingBox();assert.ok(a);
+  await source.evaluate(el=>{window.dragSource=null;el.addEventListener('dragstart',event=>{window.dragSource=JSON.parse(event.dataTransfer.getData('application/x-omd'));},{once:true});});
+  await page.mouse.move(a.x+a.width/2,a.y+a.height/2);await page.mouse.down();await page.mouse.move(a.x+a.width/2+10,a.y+a.height/2);
+  await pointerOver(page,target);await pointerOver(page,target);
+  assert.ok(await page.evaluate(()=>!!window.dragSource),'trusted pointer starts a native source drag');
+}
+async function pointerOver(page,target) {
+  const b=await target.boundingBox();assert.ok(b);await page.mouse.move(b.x+b.width/2,b.y+b.height/2,{steps:12});await page.mouse.move(b.x+b.width/2,b.y+b.height/2);
+}
+const pages=f=>f.page.evaluate(async data=>({source:(await store.getPage(data.source)).blocks,destination:(await store.getPage(data.destination)).blocks}),f.data);
+async function dragScope() {
+  const f=await dragFixture(),{page,context,data}=f,baseline=await pages(f);
+  for(const [kind,source,target] of f.paths) {
+    for(const back of [false,true]) {
+      await tool(page,'page_select',{pageId:data.source});await pointerStart(page,source(),target());
+      assert.equal(await page.evaluate(()=>dragSource.pageId),data.source,'native source payload captures page identity');
+      assert.equal(await target().evaluate(el=>el.classList.contains('drop-active')),true,`${kind} is a real native valid drag before switching`);
+      await tool(page,'page_select',{pageId:data.destination});if(back)await tool(page,'page_select',{pageId:data.source});
+      const revision=await page.evaluate(()=>store.getRevision());await pointerOver(page,target());
+      assert.equal(await target().evaluate(el=>el.classList.contains('drop-active')),false);
+      await page.mouse.up();await idle(page);assert.equal(await page.evaluate(()=>store.getRevision()),revision);assert.deepEqual(await pages(f),baseline,`${kind} switch${back?' and back':''} never changes either page`);
+    }
+    await tool(page,'page_select',{pageId:data.source});await pointerStart(page,source(),target());await page.mouse.up();await page.evaluate(()=>app.flushPending());await idle(page);
+    const moved=await pages(f);assert.notDeepEqual(moved.source,baseline.source,`${kind} still works on its own page`);assert.deepEqual(moved.destination,baseline.destination);
+    await page.evaluate(()=>store.undo());assert.deepEqual(await pages(f),baseline);
+  }
+  await context.close();
+  for(let i=0;i<5;i++) {
+    const f=await dragFixture(true),{page,data}=f,[kind,source,target]=f.paths[i],baseline=await pages(f);
+    await rename(f,`Pending ${kind} belongs to source`,true);await pointerStart(page,source(),target());await page.mouse.up();await tick(page);
+    assert.deepEqual((await pages(f)).source,baseline.source,'move waits for strict inline composition');
+    await page.evaluate(pageId=>store.dispatch('page_select',{pageId}),data.destination);
+    await end(page);await page.evaluate(()=>app.flushPending());await idle(page);
+    const moved=await pages(f);assert.deepEqual(moved.destination,baseline.destination,`${kind} pending action cannot retarget identical IDs on B`);
+    assert.notDeepEqual(moved.source,baseline.source);assert.equal(await title(page),`Pending ${kind} belongs to source`);
+    await page.evaluate(()=>store.undo());assert.equal(await title(page),`Pending ${kind} belongs to source`,'undo removes move, not the preceding confirmed rename');
+    await f.context.close();
+  }
+  console.log(`${engine} ${base||'/'}: native block/card/column slots+append reject page switch/round-trip and retain pending source IDs; own-page and undo paths passed.`);
+}
 try {
   await new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.once('error',reject);server.once('exit',code=>reject(new Error(`Server exited ${code}`)));});
   browser=await ({chromium,webkit}[engine]).launch({headless:true,...(engine==='chromium'?{channel:'chromium'}:{})});
   await mkdir(`${root}/test-results`,{recursive:true});
-  for(const orientation of ['horizontal','vertical'])for(const nested of [false,true])await strictIME(orientation,nested);
-  for(const orientation of ['horizontal','vertical'])for(const nested of [false,true])await unload(orientation,nested);
+  if(!process.env.OMD_DRAG_ONLY) {
+    for(const orientation of ['horizontal','vertical'])for(const nested of [false,true])await strictIME(orientation,nested);
+    for(const orientation of ['horizontal','vertical'])for(const nested of [false,true])await unload(orientation,nested);
+  }
+  await dragScope();
   assert.deepEqual(errors,[]);
 } finally {await browser?.close();server.kill();}
