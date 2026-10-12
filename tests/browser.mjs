@@ -30,7 +30,7 @@ try {
     const value = await registry.executeTool(tool, major < 155 ? JSON.stringify(input) : input);
     if (typeof value === 'string') { try { return JSON.parse(value); } catch { return value; } } return value;
   }, { name, input });
-  const settle=()=>page.evaluate(async()=>{const app=await import('/src/app.js');await app.flushDiagrams();await app.getStore().idle();});
+  const settle=(target=page)=>target.evaluate(async()=>{const app=await import('/src/app.js');await app.flushDiagrams();await app.getStore().idle();});
   let notebook = await call('get_notebook');
   for (const b of notebook.blocks) await call('remove_block', { blockId: b.id });
   await call('set_page', { title: 'My verified day', notificationMode: 'toast' });
@@ -138,6 +138,18 @@ try {
   await call('update_block',{blockId:nestedText.id,patch:{text:'Updated without rebuilding ancestors'}});
   assert.ok(await page.evaluate(()=>window.omdIdentity.outer.isConnected&&window.omdIdentity.inner.isConnected&&window.omdIdentity.checklist.isConnected&&!window.omdIdentity.input.isConnected));
   await page.evaluate(()=>delete window.omdIdentity);
+  // Composition keeps the real DOM control connected through an external edit of the same block.
+  const composeItem=(await call('get_notebook')).blocks.find(b=>b.id===checklist.id).items[0];
+  await page.evaluate(id=>{const input=document.getElementById(id);window.omdComposing=input;input.focus();input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));input.value='Đang chọn chữ';input.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));},composeItem.id);
+  await call('checklist_update',{blockId:checklist.id,itemId:composeItem.id,patch:{done:false}});
+  assert.deepEqual(await page.evaluate(()=>[window.omdComposing.isConnected,window.omdComposing.value]),[true,'Đang chọn chữ']);
+  await page.evaluate(()=>window.omdComposing.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));await settle();
+  assert.equal((await call('get_notebook')).blocks.find(b=>b.id===checklist.id).items[0].text,'Đang chọn chữ');
+  await call('checklist_update',{blockId:checklist.id,itemId:composeItem.id,patch:{text:composeItem.text,done:composeItem.done}});await page.evaluate(()=>delete window.omdComposing);
+  await page.evaluate(()=>{const input=document.getElementById('page-title');input.focus();input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));input.value='Tiêu đề đang chọn';input.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));});
+  await call('card_update',{blockId:board.id,cardId:card,patch:{description:'Background edit during title composition'}});assert.equal(await page.locator('#page-title').inputValue(),'Tiêu đề đang chọn');
+  await page.locator('#page-title').dispatchEvent('compositionend');await settle();assert.equal((await call('get_notebook')).title,'Tiêu đề đang chọn');await call('set_page',{title:'Written by a person'});
+
   // The engines have never been imported, even when hidden scenes are edited.
   const hiddenDiagram=(await call('add_block',{type:'mermaid',source:'flowchart LR\n Lazy --> Visible',containerId:outer.tabs[1].id})).block;
   const hiddenDrawing=(await call('add_block',{type:'excalidraw',containerId:outer.tabs[1].id})).block;
@@ -167,6 +179,7 @@ try {
   assert.ok(await page.locator(`[data-block-id="${diagram.id}"]`).textContent().then(text=>text.includes('One')));
   await page.getByRole('textbox',{name:'Mermaid Markdown source'}).fill('not a diagram');
   await page.locator(`[data-block-id="${diagram.id}"] .diagram-error`).filter({hasText:'Diagram syntax:'}).waitFor();
+  await page.getByRole('textbox',{name:'Mermaid Markdown source'}).fill('');await settle();await page.waitForFunction(id=>document.querySelector(`[data-block-id="${CSS.escape(id)}"] .diagram-error`).textContent==='',diagram.id);
   await call('update_block',{blockId:diagram.id,patch:{source:'flowchart LR\n  Offline --> Works'}});
   await page.locator(`[data-block-id="${diagram.id}"] [data-mermaid-preview] svg`).waitFor();
   const drawing=(await call('add_block',{type:'excalidraw',title:'My canvas'})).block;
@@ -233,6 +246,11 @@ try {
   await call('set_view',{sidebarOpen:true});await page.screenshot({path:`${root}/test-results/mobile-page-tree.png`});await call('set_view',{sidebarOpen:false});await call('page_remove',{pageId:mobileChild});await call('page_select',{pageId:firstPage});
   await call('set_view',{sidebarOpen:true});await page.keyboard.press('Escape');assert.ok(await page.locator('#sidebar').isHidden());
   await page.locator('#page-menu > summary').click();await settle();await page.locator('#wide-page').check();await settle();assert.equal((await call('get_view')).contentWidth,'wide');await page.locator('#wide-page').uncheck();await settle();await page.locator('#page-menu > summary').click();await settle();
+  // A failed localStorage preference write must restore the already-changed checkbox.
+  await page.locator('#page-menu > summary').click();await settle();
+  await page.evaluate(async()=>{const {VIEW_KEY}=await import('/src/view.js');window.omdOriginalSet=Storage.prototype.setItem;Storage.prototype.setItem=function(key,value){if(key===VIEW_KEY)throw new DOMException('quota','QuotaExceededError');return window.omdOriginalSet.call(this,key,value);};});
+  await page.locator('#wide-page').check();await settle();assert.equal(await page.locator('#wide-page').isChecked(),false);assert.equal(await page.locator('body').getAttribute('data-content-width'),'reading');
+  await page.evaluate(()=>{Storage.prototype.setItem=window.omdOriginalSet;delete window.omdOriginalSet;});await page.locator('#page-menu > summary').click();await settle();
   const menuBlock=(await call('add_block',{type:'text',text:'Context menu fixture'})).block;
   const menuShell=page.locator(`[data-block-id="${menuBlock.id}"]`);
   await menuShell.getByRole('button',{name:'Block actions',exact:true}).click();await settle();await page.locator('#block-actions-dialog').getByRole('button',{name:'Move block up',exact:true}).click();await settle();
@@ -280,7 +298,24 @@ try {
   await call('page_select',{pageId:residentFirst},racePage);await peer.waitForFunction(()=>document.getElementById('page-title').value==='Shared IndexedDB edit');
   assert.ok((await call('get_notebook',{},peer)).blocks[0].scene.elements.length>0);
   await peer.close();
+  // Large palettes reveal the highlighted keyboard option without moving focus away from search.
+  for(let i=0;i<35;i++)await call('page_add',{title:`Palette page ${i}`},racePage);
+  await call('open_palette',{},racePage);await racePage.locator('#page-search').fill('Palette page');
+  for(let i=0;i<28;i++)await racePage.locator('#page-search').press('ArrowDown');
+  assert.ok(await racePage.evaluate(()=>{const list=document.getElementById('palette-pages'),id=document.getElementById('page-search').getAttribute('aria-activedescendant'),row=document.getElementById(id).getBoundingClientRect(),bounds=list.getBoundingClientRect();return row.top>=bounds.top-1&&row.bottom<=bounds.bottom+1&&document.activeElement===document.getElementById('page-search');}));
   await raceContext.close();
+  // Import arbitrary IDs, including a tuple that used to collide and quoted CSS-selector characters.
+  const edgeContext=await browser.newContext({serviceWorkers:'block'}),edgePage=await edgeContext.newPage();edgePage.on('pageerror',error=>errors.push(error.message));
+  const edgeBook=JSON.parse(exported),template=edgeBook.pages[0],edgeScene={elements:[],appState:{},files:{}};
+  edgeBook.id='edge-notebook';edgeBook.activePageId='a:b';edgeBook.pages=[['a:b','c'],['a','b:c'],['quoted-page','quote"\\canvas']].map(([id,blockId])=>({...template,id,title:id,blocks:[{id:blockId,type:'excalidraw',title:'ID fixture',scene:edgeScene}]}));edgeBook.parents=Object.fromEntries(edgeBook.pages.map(p=>[p.id,'']));
+  await edgePage.addInitScript(book=>localStorage.setItem('omd.notebook.v1',JSON.stringify(book)),edgeBook);await edgePage.goto('http://localhost:4317/');await edgePage.waitForFunction(()=>document.getElementById('agent-status').textContent.includes('50 tools'));await edgePage.locator('.excalidraw canvas').first().waitFor();
+  await call('page_select',{pageId:'a'},edgePage);await edgePage.locator('.excalidraw canvas').first().waitFor();await call('excalidraw_set_scene',{blockId:'b:c',json:JSON.stringify(latestScene)},edgePage);await settle(edgePage);
+  assert.equal((await call('get_page',{pageId:'a:b'},edgePage)).blocks[0].scene.elements.length,0);assert.equal((await call('get_page',{pageId:'a'},edgePage)).blocks[0].scene.elements[0].id,'edited-during-download');
+  await call('open_canvas',{pageId:'quoted-page',blockId:'quote"\\canvas'},edgePage);await edgePage.locator('#canvas-stage .excalidraw canvas').first().waitFor();await call('close_canvas',{},edgePage);assert.ok(await edgePage.locator('#canvas-stage').isHidden());
+  // An agent page switch during header composition still saves the final text to its original page.
+  await edgePage.evaluate(()=>{const input=document.getElementById('page-title');input.focus();input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));input.value='Original-page IME edit';});
+  await call('page_select',{pageId:'a'},edgePage);await edgePage.locator('#page-title').dispatchEvent('compositionend');await settle(edgePage);assert.equal((await call('get_page',{pageId:'quoted-page'},edgePage)).title,'Original-page IME edit');assert.equal((await call('get_notebook',{},edgePage)).id,'a');
+  await edgeContext.close();
   assert.deepEqual(errors.filter(error => error !== 'Tabs are limited to two levels.'), []);
   console.log('Native WebMCP, app shell/sidebar, view persistence, mobile drawer/focus/menu, lazy engine loading/teardown, block identity, theme, reminders, import/export, and offline reload passed.');
 } catch(error) {

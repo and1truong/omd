@@ -28,7 +28,7 @@ export function setupShell(store,{beforeNavigate,openPalette,confirm,onError}) {
     if(patch.sidebarOpen&&document.body.classList.contains('canvas-focused'))beforeNavigate().catch(onError);
     sync();if(patch.collapsedPageIds)render(store.getRenderState());return getView();
   }
-  function safeView(patch){try{setView(patch);}catch(error){onError(error);}}
+  function safeView(patch){try{setView(patch);}catch(error){sync();onError(error);}}
   function render(state,{actionName}={}){
     const focused=pages.contains(document.activeElement)?document.activeElement:null;
     const pageList=store.listPages(),byId=new Map(pageList.map(p=>[p.pageId,p])),ancestors=pageAncestors(pageList,state.id),activePath=JSON.stringify([...ancestors.map(p=>p.pageId),state.id]);

@@ -1,4 +1,4 @@
-import { emptyNotebook, demoNotebook, uid, validateNotebook, parseImport, applyAction } from './model.js';
+import { emptyNotebook, demoNotebook, uid, upgradePageDates, validateNotebook, parseImport, applyAction } from './model.js';
 export const NOTEBOOK_VERSION = 3;
 export const MAX_PAGE_LEVELS = 32;
 const clone = value => structuredClone(value);
@@ -33,6 +33,7 @@ export function parseBook(raw) {
   assert(typeof raw === 'string', 'Import must be JSON text.');
   let value; try { value = JSON.parse(raw); } catch { throw new Error('This file is not valid JSON.'); }
   if (value?.format === 'omd' && value.version === 1) return wrapPage(parseImport(raw));
+  if(value?.format==='omd-notebook'&&[2,3].includes(value.version)&&Array.isArray(value.pages))for(const page of value.pages)upgradePageDates(page);
   if(value?.format==='omd-notebook'&&value.version===2){fields(value,['format','version','id','revision','activePageId','updatedAt','pages']);return validateBook({...value,version:NOTEBOOK_VERSION,parents:Object.fromEntries(value.pages.map(p=>[p.id,'']))});}
   return validateBook(value);
 }
