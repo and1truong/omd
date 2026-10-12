@@ -74,10 +74,11 @@ export type BlockMetadata = Exclude<Block,TabsBlock|ToggleBlock|AccordionBlock|E
 export interface ContainerRecord {id:ID;blockIds:ID[]}
 export type RecordData = {page:PageMetadata;block:BlockMetadata;container:ContainerRecord;scene:Omit<Scene,'files'>;files:Scene['files']};
 export type RecordKind = keyof RecordData;
-export type StoredRecord = {[K in RecordKind]:{kind:K;pageId:ID;key?:string;data:RecordData[K]}}[RecordKind];
+export type RecordKey = [pageId:ID,kind:RecordKind,id:ID];
+export type StoredRecord = {[K in RecordKind]:{kind:K;pageId:ID;id:ID;data:RecordData[K]}}[RecordKind];
 export type Records = Map<string,StoredRecord>;
-export interface RecordChange {key:string;before:StoredRecord|null;after:StoredRecord|null}
+export interface RecordChange {key:RecordKey;before:StoredRecord|null;after:StoredRecord|null}
 export type Notify = (message:string,kind?:string,sticky?:boolean)=>void;
 export type ErrorHandler = (error:Error)=>void;
-export interface Journal {owner:string;before:Notebook;after:Notebook;changes:{key:string;forward:import('immer').Patch[];inverse:import('immer').Patch[]}[]}
+export interface Journal {owner:string;before:Notebook;after:Notebook;changes:{key:RecordKey;forward:import('immer').Patch[];inverse:import('immer').Patch[]}[]}
 export interface StoreOptions {key?:string;name?:string;indexedDB?:IDBFactory;initial?:()=>Notebook|Page;locks?:LockManager}
