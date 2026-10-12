@@ -65,7 +65,7 @@ async function styleCases() {
   await add('engines','Đối chiếu trên Chromium và WebKit','testing',true);
   await add('themes','Xem *light/dark* và bố cục mobile','testing');
   await add('publish','Viết ghi chú phát hành ngắn gọn');
-  const block=page.locator(`[data-block-id="${blockId}"]`),fold=()=>row(ids.experience).locator('.checklist-fold'),branch=()=>page.locator(`[id="${ids.experience}-children"]`);
+  const block=page.locator(`[data-block-id="${blockId}"]`),fold=()=>row(ids.experience).locator('.checklist-fold'),branch=()=>page.locator(`[data-item-id="${ids.experience}"] > .checklist-items`);
   const exportNotebook=()=>page.evaluate(async()=>{const app=await import(new URL('./src/app.js',document.baseURI).href);await app.flushPending();return app.getStore().export();});
   const snapshot=await exportNotebook(),original=await items();
   assert.equal(await block.locator('.checklist-progress').innerText(),'4 / 12');
@@ -82,7 +82,7 @@ async function styleCases() {
   assert.equal(await block.locator('.checklist-progress').innerText(),'5 / 12');assert.equal(await row(ids.experience).getByRole('checkbox').isChecked(),false);
   const another=(await call('page_add',{title:'Independent view'})).pageId;await call('page_select',{pageId});assert.equal(await fold().getAttribute('aria-expanded'),'false');
   const secondTab=await page.context().newPage();await secondTab.goto(page.url());await secondTab.evaluate(async()=>await (await import(new URL('./src/app.js',document.baseURI).href)).ready);
-  assert.equal(await secondTab.locator(`[id="${ids.experience}-fold"]`).getAttribute('aria-expanded'),'true');await secondTab.close();
+  assert.equal(await secondTab.locator(`[data-item-id="${ids.experience}"] > .check-row .checklist-fold`).getAttribute('aria-expanded'),'true');await secondTab.close();
   await fold().click();await branch().waitFor({state:'visible'});
   await call('checklist_update',{blockId,itemId:ids.long,patch:{done:false}});
   await block.getByRole('button',{name:'Collapse checklist branches',exact:true}).click();await branch().waitFor({state:'hidden'});
@@ -97,7 +97,7 @@ async function styleCases() {
   await page.emulateMedia({media:'print'});assert.equal(await block.locator('.check-row:visible').count(),12);await page.emulateMedia({media:'screen'});
   await block.getByRole('button',{name:'Expand checklist branches',exact:true}).click();await input(ids.long).waitFor({state:'visible'});
   await page.evaluate(async()=>{const app=await import(new URL('./src/app.js',document.baseURI).href);await app.setView({theme:'light',sidebarOpen:false});});
-  await page.setViewportSize({width:1280,height:1100});await input(ids.long).blur();await page.mouse.move(0,0);
+  await page.setViewportSize({width:1280,height:1100});await page.evaluate(()=>document.activeElement?.blur());await page.mouse.move(0,0);
   await page.screenshot({path:`${root}/test-results/checklist-style-${engine}-light.png`,fullPage:true});
   await page.evaluate(async()=>await (await import(new URL('./src/app.js',document.baseURI).href)).setView({theme:'dark'}));
   await page.screenshot({path:`${root}/test-results/checklist-style-${engine}-dark.png`,fullPage:true});

@@ -20,13 +20,13 @@ let store:NotebookStore,palette:ReturnType<typeof setupPalette>|undefined,diagra
 let textEditors:ReturnType<typeof createTextEditors>|undefined;
 const collapsedChecklistItems=new Set<string>();
 const checklistViewKey=(pageId:string,blockId:string,itemId:string)=>JSON.stringify([pageId,blockId,itemId]);
+const checklistControlId=(viewKey:string,part:'fold'|'children'|'menu')=>`checklist-${encodeURIComponent(viewKey)}-${part}`;
 function syncChecklistFolds(scope:ParentNode) {
   const button=scope.querySelector<HTMLButtonElement>('.checklist-fold-all');if(!button)return;
   const folds=[...scope.querySelectorAll<HTMLButtonElement>('.checklist-fold')],collapse=folds.some(fold=>fold.getAttribute('aria-expanded')==='true');
   button.hidden=folds.length===0;button.textContent=collapse?'Collapse branches':'Expand branches';button.setAttribute('aria-label',collapse?'Collapse checklist branches':'Expand checklist branches');
 }
-function focusChecklistItem(id:string) {
-  const target=document.getElementById(id);if(!target)return;
+function revealChecklistItem(target:HTMLElement) {
   let list=target.closest<HTMLElement>('.checklist-items');
   while(list) {
     const parent=list.parentElement;
@@ -35,7 +35,7 @@ function focusChecklistItem(id:string) {
     if(fold){list.hidden=false;fold.setAttribute('aria-expanded','true');fold.title='Collapse checklist branch';fold.setAttribute('aria-label',fold.title);collapsedChecklistItems.delete(fold.dataset.viewKey!);}
     list=parent.parentElement?.closest<HTMLElement>('.checklist-items')??null;
   }
-  const block=target.closest('.block');if(block)syncChecklistFolds(block);target.focus();
+  const block=target.closest('.block');if(block)syncChecklistFolds(block);
 }
 let tableEdits:ReturnType<typeof createTableEdits>|undefined;
 interface InsertionAnchor {blockId:string;side:'before'|'after'}
@@ -69,7 +69,7 @@ function button(label:string,aria:string,fn:(event:MouseEvent)=>unknown,classNam
   const b = element('button', className); b.type = 'button'; if(labelIcon[label])b.append(icon(labelIcon[label]));else b.textContent=label; b.title = aria; b.setAttribute('aria-label', aria); b.addEventListener('click', fn); return b;
 }
 async function action<K extends CommandName>(name:K,input:CommandInput<K>,{quiet=false,focus}: {quiet?:boolean;focus?:string}={}):Promise<MutationResult<K>|null> {
-  try { input={...input,pageId:input.pageId??store.getActivePageId()}; domId('save-status').textContent='Saving…'; if(!quiet)await flushPending(); const result = await store.dispatch(name, input, { quiet }); if (focus) requestAnimationFrame(()=>focusChecklistItem(focus)); return result; }
+  try { input={...input,pageId:input.pageId??store.getActivePageId()}; domId('save-status').textContent='Saving…'; if(!quiet)await flushPending(); const result = await store.dispatch(name, input, { quiet }); if (focus) requestAnimationFrame(()=>document.getElementById(focus)?.focus()); return result; }
   catch (error) { domId('save-status').textContent = 'Not saved'; notify(errorOf(error).message, 'error', true); return null; }
 }
 function editable(value:string,aria:string,fn:(value:string,pageId:string)=>unknown,{multiline=false,className='',placeholder='',id}: {multiline?:boolean;className?:string;placeholder?:string;id?:string}={}) {
@@ -184,7 +184,15 @@ function renderBlock(b:Block,containerId:string,index:number,count:number) {
 }
 function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
   let total=0,done=0;const pageId=store.getActivePageId();
-  async function addItem(parentId?:string,index?:number) {const result=await action('checklist_add',{pageId,blockId:b.id,parentId,index});if(result)requestAnimationFrame(()=>focusChecklistItem(result.itemId));}
+  function focusItem(itemId:string) {
+    requestAnimationFrame(()=>{
+      if(pageId!==store.getActivePageId())return;
+      const block=document.querySelector<HTMLElement>(`.block-type-checklist[data-block-id="${CSS.escape(b.id)}"]`),target=block?.querySelector<HTMLElement>(`[data-item-id="${CSS.escape(itemId)}"] > .check-row .markdown-editor`);
+      if(target){revealChecklistItem(target);target.focus();}
+    });
+  }
+  async function addItem(parentId?:string,index?:number) {const result=await action('checklist_add',{pageId,blockId:b.id,parentId,index});if(result)focusItem(result.itemId);}
+  async function moveItem(itemId:string,parentId:string|undefined,index:number) {const result=await action('checklist_move',{pageId,blockId:b.id,itemId,parentId,index});if(result)focusItem(itemId);return result;}
   function branchProgress(item:ChecklistItem):[number,number] {
     let done=item.done?1:0,total=1;
     for(const child of item.children??[]){const [childDone,childTotal]=branchProgress(child);done+=childDone;total+=childTotal;}
@@ -195,7 +203,7 @@ function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
       await flushPending();if(pageId!==store.getActivePageId())return;
       for(const fold of folds) {
         if(!fold.isConnected)continue;
-        const list=document.getElementById(fold.getAttribute('aria-controls')!)!;
+        const list=fold.closest('.checklist-item')!.querySelector<HTMLElement>(':scope > .checklist-items')!;
         if(collapsed&&list.contains(document.activeElement))fold.focus();
         list.hidden=collapsed;fold.setAttribute('aria-expanded',String(!collapsed));
         fold.title=collapsed?'Expand checklist branch':'Collapse checklist branch';fold.setAttribute('aria-label',fold.title);
@@ -211,12 +219,12 @@ function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
       const parent=ancestors.at(-1),level=ancestors.length+1;
       const entry=element('div','checklist-item');entry.setAttribute('role','listitem');entry.dataset.itemId=item.id;entry.dataset.level=String(level);
       const row=element('div',`check-row ${item.done?'done':''}`),check=element('input');check.type='checkbox';check.checked=item.done;check.setAttribute('aria-label',`Complete ${item.text||'item'}`);
-      check.addEventListener('change',()=>action('checklist_update',{blockId:b.id,itemId:item.id,patch:{done:check.checked}}));
+      check.addEventListener('change',()=>action('checklist_update',{pageId,blockId:b.id,itemId:item.id,patch:{done:check.checked}}));
       const canIndent=index>0&&level+checklistHeight(item)<=MAX_CHECKLIST_LEVELS;
-      const indent=()=>action('checklist_move',{blockId:b.id,itemId:item.id,parentId:items[index-1].id,index:items[index-1].children?.length??0},{focus:item.id});
+      const indent=()=>moveItem(item.id,items[index-1].id,items[index-1].children?.length??0);
       const outdent=()=>{
         const grandparent=ancestors.at(-2),siblings=grandparent?.children??b.items;
-        return action('checklist_move',{blockId:b.id,itemId:item.id,parentId:grandparent?.id??'',index:siblings.findIndex(sibling=>sibling.id===parent!.id)+1},{focus:item.id});
+        return moveItem(item.id,grandparent?.id??'',siblings.findIndex(sibling=>sibling.id===parent!.id)+1);
       };
       const text=textEditors!.mountChecklist(b.id,item,store.getActivePageId(),key=>{
         if(key.ctrlKey||key.metaKey||key.altKey)return false;
@@ -233,16 +241,16 @@ function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
         {label:'Add child checklist item',icon:'plus',disabled:level>=MAX_CHECKLIST_LEVELS,run:()=>addItem(item.id)},
         {label:'Indent checklist item',icon:'right',disabled:!canIndent,run:indent},
         {label:'Outdent checklist item',icon:'left',disabled:!parent,run:outdent},
-        {label:'Move checklist item up',icon:'up',disabled:index===0,run:()=>action('checklist_move',{blockId:b.id,itemId:item.id,index:index-1},{focus:item.id})},
-        {label:'Move checklist item down',icon:'down',disabled:index===items.length-1,run:()=>action('checklist_move',{blockId:b.id,itemId:item.id,index:index+1},{focus:item.id})},
-        {label:'Delete checklist item',icon:'trash',danger:true,run:()=>action('checklist_remove',{blockId:b.id,itemId:item.id})}
-      ],more));more.id=`${item.id}-menu`;controls.append(more);
+        {label:'Move checklist item up',icon:'up',disabled:index===0,run:()=>moveItem(item.id,undefined,index-1)},
+        {label:'Move checklist item down',icon:'down',disabled:index===items.length-1,run:()=>moveItem(item.id,undefined,index+1)},
+        {label:'Delete checklist item',icon:'trash',danger:true,run:()=>action('checklist_remove',{pageId,blockId:b.id,itemId:item.id})}
+      ],more));more.id=checklistControlId(checklistViewKey(pageId,b.id,item.id),'menu');controls.append(more);
       if(item.children?.length) {
         const children=renderItems(item.children,[...ancestors,item]),viewKey=checklistViewKey(pageId,b.id,item.id),collapsed=collapsedChecklistItems.has(viewKey);
-        children.id=`${item.id}-children`;children.hidden=collapsed;
+        children.id=checklistControlId(viewKey,'children');children.hidden=collapsed;
         const fold=button('▾',collapsed?'Expand checklist branch':'Collapse checklist branch',()=>setCollapsed([fold],fold.getAttribute('aria-expanded')==='true'),'icon-button checklist-fold');
-        fold.id=`${item.id}-fold`;
-        fold.setAttribute('aria-expanded',String(!collapsed));fold.setAttribute('aria-controls',children.id);fold.setAttribute('aria-describedby',item.id);fold.dataset.viewKey=viewKey;
+        fold.id=checklistControlId(viewKey,'fold');
+        fold.setAttribute('aria-expanded',String(!collapsed));fold.setAttribute('aria-controls',children.id);fold.setAttribute('aria-describedby',text.querySelector<HTMLElement>('.markdown-editor')!.id);fold.dataset.viewKey=viewKey;
         row.append(fold,check,text,controls);entry.append(row,children);
       }else {const marker=element('span','checklist-leaf');marker.setAttribute('aria-hidden','true');row.append(marker,check,text,controls);entry.append(row);}
       list.append(entry);
