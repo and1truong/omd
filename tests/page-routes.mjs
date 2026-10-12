@@ -5,7 +5,10 @@ export async function verifyPageRoutes({browser,appURL,call,root}) {
   const ready=target=>target.waitForFunction(()=>document.getElementById('agent-status')?.textContent.includes('55 tools'));
   const active=async target=>(await call('get_notebook',{},target)).id;
   const path=id=>new URL(`page/${encodeURIComponent(id)}`,appURL).href;
-  const synchronized=async(target,revision)=>target.waitForFunction(async revision=>(await import(new URL('./src/app.js',document.baseURI).href)).getStore().getRevision()>=revision,revision);
+  const synchronized=async(target,revision)=>{
+    await target.evaluate(async()=>{window.omdRouteStore=(await import(new URL('./src/app.js',document.baseURI).href)).getStore();});
+    await target.waitForFunction(revision=>window.omdRouteStore.getRevision()>=revision,revision);
+  };
   try {
     await a.goto(appURL);await ready(a);const first=await active(a);
     for(const block of (await call('get_notebook',{},a)).blocks)await call('remove_block',{blockId:block.id},a);
@@ -31,10 +34,18 @@ export async function verifyPageRoutes({browser,appURL,call,root}) {
     assert.equal(await active(a),second);assert.equal(await active(b),first);
     const link=b.getByRole('link',{name:'Switch to Compare — right page (synced)',exact:true});
     assert.equal(await link.getAttribute('href'),new URL(path(second)).pathname);
-    await b.bringToFront();await b.keyboard.down('ControlOrMeta');let third;
+    await b.bringToFront();await link.focus();await b.waitForFunction(()=>document.hasFocus());
+    await link.evaluate(node=>{
+      window.omdRouteClick=null;
+      window.addEventListener('click',event=>{window.omdRouteClick={ctrl:event.ctrlKey,meta:event.metaKey,button:event.button,trusted:event.isTrusted,prevented:event.defaultPrevented,href:event.target.closest('a')?.getAttribute('href'),focused:document.hasFocus(),active:document.activeElement===node};},{once:true});
+    });
+    await b.keyboard.down('ControlOrMeta');let third;
     try {
-      [third]=await Promise.all([context.waitForEvent('page'),link.click()]);
+      [third]=await Promise.all([context.waitForEvent('page'),link.click({modifiers:['ControlOrMeta'],delay:50})]);
+    } catch(error) {
+      error.message+=`\nNative link diagnostics: ${JSON.stringify(await b.evaluate(()=>({url:location.href,click:window.omdRouteClick})))}`;throw error;
     } finally {await b.keyboard.up('ControlOrMeta');}
+    assert.deepEqual(await b.evaluate(()=>window.omdRouteClick),{ctrl:process.platform!=='darwin',meta:process.platform==='darwin',button:0,trusted:true,prevented:false,href:new URL(path(second)).pathname,focused:true,active:true});
     await ready(third);
     assert.equal(await active(third),second);assert.equal(third.url(),path(second));assert.equal(await active(b),first);await third.close();
     await link.click();await b.waitForURL(path(second));
