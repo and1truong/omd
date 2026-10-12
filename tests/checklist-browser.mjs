@@ -15,10 +15,10 @@ const items=(flush=true)=>page.evaluate(async({blockId,flush})=>{
   const app=await import(new URL('./src/app.js',document.baseURI).href);if(flush)await app.flushPending();const store=app.getStore();
   const {findBlock}=await import(new URL('./src/model.js',document.baseURI).href);return findBlock(store.getState(),blockId,'checklist').block.items;
 },{blockId,flush});
-const input=id=>page.locator(`[id="${id}"]`);
+const input=id=>page.locator(`[data-checklist-editor="${id}"] .markdown-editor`);
 const host=id=>page.locator(`[data-checklist-editor="${id}"]`);
 const row=id=>page.locator(`[data-item-id="${id}"] > .check-row`);
-const focused=id=>page.waitForFunction(id=>document.activeElement?.id===id,id);
+const focused=id=>page.waitForFunction(id=>document.activeElement?.closest('[data-checklist-editor]')?.dataset.checklistEditor===id,id);
 // Focus can still belong to the old input while its async move is pending.
 // Wait for the rendered parent and sibling position before reading saved state.
 const placed=(id,parentId,index)=>page.waitForFunction(({id,parentId,index})=>{
@@ -123,7 +123,7 @@ async function markdownCases() {
   assert.equal(await input(leaf).evaluate(el=>el===window.omdComposedChecklist&&el.isConnected),true);
   await input(leaf).evaluate(el=>el.editor.chain().setTextSelection(el.editor.state.doc.content.size-1).insertContent(' tiếp').run());
   await page.evaluate(()=>{window.omdRestoreChecklistDispatch();window.omdFinishComposition();});await items();
-  await page.waitForFunction(id=>!document.getElementById(id).editor.view.composing,leaf);
+  await page.waitForFunction(id=>!document.querySelector(`[data-checklist-editor="${id}"] .markdown-editor`).editor.view.composing,leaf);
   assert.equal(visit(await items(),leaf).text,'Đang gõ tiếng Việt tiếp');assert.equal((await children(ids[2])).length,1);
 
   // An actual database write error retains the draft/instance and blocks destructive actions until retry.

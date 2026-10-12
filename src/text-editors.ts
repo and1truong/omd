@@ -8,6 +8,7 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
   type ItemKeyDown=(event:KeyboardEvent)=>boolean;
   interface Entry {host:HTMLDivElement;editor:Editor;pageId:string;blockId:string;itemId?:string;onKeyDown?:ItemKeyDown;source:string;serialized:string;pending:string|null;saving?:Promise<unknown>;creating:boolean}
   const entries=new Map<string,Entry>(),key=(pageId:string,blockId:string,itemId?:string)=>JSON.stringify([pageId,blockId,itemId]);
+  const checklistId=(blockId:string,itemId:string,pageId:string,part='text')=>`omd-checklist-${encodeURIComponent(JSON.stringify([pageId,blockId,itemId,part]))}`;
   function write(entry:Entry,text:string) {
     return entry.itemId
       ?store.dispatch('checklist_update',{pageId:entry.pageId,blockId:entry.blockId,itemId:entry.itemId,patch:{text}},{quiet:true})
@@ -51,7 +52,7 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
     const toolbar=document.createElement('div');toolbar.className='markdown-toolbar';toolbar.setAttribute('role','toolbar');toolbar.setAttribute('aria-label','Text formatting');
     const surface=document.createElement('div');surface.className='markdown-surface';if(!item)host.append(toolbar);host.append(surface);
     const editor=new Editor({element:surface,injectCSS:false,extensions:[StarterKit.configure({undoRedo:false,underline:false,trailingNode:false,link:{openOnClick:false}}),Markdown],content:source,contentType:'markdown',
-      editorProps:{attributes:{id:item?.id??`${block.id}-text`,class:'markdown-editor',role:'textbox','aria-label':item?'Checklist item':'text content','aria-multiline':'true','aria-keyshortcuts':item?'Enter Shift+Enter Tab Shift+Tab':'Shift+Enter','data-placeholder':item?'A little thing to do':'Write something…'},
+      editorProps:{attributes:{id:item?checklistId(block.id,item.id,pageId):`${block.id}-text`,class:'markdown-editor',role:'textbox','aria-label':item?'Checklist item':'text content','aria-multiline':'true','aria-keyshortcuts':item?'Enter Shift+Enter Tab Shift+Tab':'Shift+Enter','data-placeholder':item?'A little thing to do':'Write something…'},
         handleClick:(view,_pos,event)=>{
           if(event.button!==0||event.shiftKey||event.altKey||view.composing||composition.isComposing(view.dom))return false;
           const link=event.target instanceof Element?event.target.closest<HTMLAnchorElement>('a[href]'):null;
@@ -131,6 +132,10 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
     editor.on('transaction',sync);sync();return host;
   }
   const manager={mount,
+    checklistId,
+    focusChecklist(blockId:string,itemId:string,pageId:string){
+      const entry=entries.get(key(pageId,blockId,itemId));if(store.getActivePageId()===pageId&&entry?.host.isConnected)entry.editor.view.focus();
+    },
     mountChecklist(blockId:string,item:ChecklistItem,pageId:string,onKeyDown:ItemKeyDown){return mount({id:blockId,type:'text',text:item.text},pageId,item,onKeyDown);},
     end(){for(const [id,entry] of entries)if((entry.pageId!==store.getActivePageId()||!entry.host.isConnected)&&entry.pending===null&&!entry.saving&&!composition.isComposing(entry.editor.view.dom)){entry.editor.destroy();entries.delete(id);}onDraftsChange();},
     drafts(){return [...entries].filter(([,entry])=>entry.pending!==null&&!entry.host.isConnected).map(([id,entry])=>({id,pageId:entry.pageId,blockId:entry.blockId,itemId:entry.itemId,text:entry.pending!}));},

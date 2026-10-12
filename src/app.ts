@@ -76,8 +76,8 @@ function element<T extends keyof HTMLElementTagNameMap>(tag:T,className = '') { 
 function button(label:string,aria:string,fn:(event:MouseEvent)=>unknown,className = 'icon-button') {
   const b = element('button', className); b.type = 'button'; if(labelIcon[label])b.append(icon(labelIcon[label]));else b.textContent=label; b.title = aria; b.setAttribute('aria-label', aria); b.addEventListener('click', fn); return b;
 }
-async function action<K extends CommandName>(name:K,input:CommandInput<K>,{quiet=false,focus}: {quiet?:boolean;focus?:string}={}):Promise<MutationResult<K>|null> {
-  try { input={...input,pageId:input.pageId??store.getActivePageId()}; domId('save-status').textContent='Saving…'; if(!quiet)await flushPending(); const result = await store.dispatch(name, input, { quiet }); if (focus) requestAnimationFrame(()=>document.getElementById(focus)?.focus()); return result; }
+async function action<K extends CommandName>(name:K,input:CommandInput<K>,{quiet=false,focus}: {quiet?:boolean;focus?:string|(()=>void)}={}):Promise<MutationResult<K>|null> {
+  try { input={...input,pageId:input.pageId??store.getActivePageId()}; domId('save-status').textContent='Saving…'; if(!quiet)await flushPending(); const result = await store.dispatch(name, input, { quiet }); if (focus) requestAnimationFrame(()=>typeof focus==='function'?focus():document.getElementById(focus)?.focus()); return result; }
   catch (error) { domId('save-status').textContent = 'Not saved'; notify(errorOf(error).message, 'error', true); return null; }
 }
 function editable(value:string,aria:string,fn:(value:string,pageId:string)=>unknown,{multiline=false,className='',placeholder='',id}: {multiline?:boolean;className?:string;placeholder?:string;id?:string}={}) {
@@ -191,8 +191,9 @@ function renderBlock(b:Block,containerId:string,index:number,count:number) {
   return shell;
 }
 function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
+  const pageId=store.getActivePageId(),focusItem=(itemId:string)=>textEditors!.focusChecklist(b.id,itemId,pageId);
   let total=0,done=0;
-  async function addItem(parentId?:string,index?:number) {const result=await action('checklist_add',{blockId:b.id,parentId,index});if(result)requestAnimationFrame(()=>domId(result.itemId)?.focus());}
+  async function addItem(parentId?:string,index?:number) {const result=await action('checklist_add',{pageId,blockId:b.id,parentId,index});if(result)requestAnimationFrame(()=>focusItem(result.itemId));}
   function renderItems(items:ChecklistItem[],ancestors:ChecklistItem[]=[]):HTMLElement {
     const list=element('div','checklist-items');list.setAttribute('role','list');
     items.forEach((item,index)=>{
@@ -200,30 +201,30 @@ function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
       const parent=ancestors.at(-1),level=ancestors.length+1;
       const entry=element('div','checklist-item');entry.setAttribute('role','listitem');entry.dataset.itemId=item.id;entry.dataset.level=String(level);
       const row=element('div',`check-row ${item.done?'done':''}`),check=element('input');check.type='checkbox';check.checked=item.done;check.setAttribute('aria-label',`Complete ${item.text||'item'}`);
-      check.addEventListener('change',()=>action('checklist_update',{blockId:b.id,itemId:item.id,patch:{done:check.checked}}));
+      check.addEventListener('change',()=>action('checklist_update',{pageId,blockId:b.id,itemId:item.id,patch:{done:check.checked}}));
       const canIndent=index>0&&level+checklistHeight(item)<=MAX_CHECKLIST_LEVELS;
-      const indent=()=>action('checklist_move',{blockId:b.id,itemId:item.id,parentId:items[index-1].id,index:items[index-1].children?.length??0},{focus:item.id});
+      const indent=()=>action('checklist_move',{pageId,blockId:b.id,itemId:item.id,parentId:items[index-1].id,index:items[index-1].children?.length??0},{focus:()=>focusItem(item.id)});
       const outdent=()=>{
         const grandparent=ancestors.at(-2),siblings=grandparent?.children??b.items;
-        return action('checklist_move',{blockId:b.id,itemId:item.id,parentId:grandparent?.id??'',index:siblings.findIndex(sibling=>sibling.id===parent!.id)+1},{focus:item.id});
+        return action('checklist_move',{pageId,blockId:b.id,itemId:item.id,parentId:grandparent?.id??'',index:siblings.findIndex(sibling=>sibling.id===parent!.id)+1},{focus:()=>focusItem(item.id)});
       };
-      const text=textEditors!.mountChecklist(b.id,item,store.getActivePageId(),key=>{
+      const text=textEditors!.mountChecklist(b.id,item,pageId,key=>{
         if(key.ctrlKey||key.metaKey||key.altKey)return false;
         if(key.key==='Enter'){if(!key.repeat)void addItem(parent?.id,index+1);return true;}
         if(key.key==='Tab'&&((key.shiftKey&&parent)||(!key.shiftKey&&canIndent))){if(!key.repeat)void (key.shiftKey?outdent():indent());return true;}
         return false;
       });
-      const controls=rowsControls(()=>action('checklist_move',{blockId:b.id,itemId:item.id,index:index-1},{focus:item.id}),()=>action('checklist_move',{blockId:b.id,itemId:item.id,index:index+1},{focus:item.id}),()=>action('checklist_remove',{blockId:b.id,itemId:item.id}),index===0,index===items.length-1,'checklist item');
+      const controls=rowsControls(()=>action('checklist_move',{pageId,blockId:b.id,itemId:item.id,index:index-1},{focus:()=>focusItem(item.id)}),()=>action('checklist_move',{pageId,blockId:b.id,itemId:item.id,index:index+1},{focus:()=>focusItem(item.id)}),()=>action('checklist_remove',{pageId,blockId:b.id,itemId:item.id}),index===0,index===items.length-1,'checklist item');
       const more=button('…','Checklist item actions',()=>showMenu('block-actions-dialog','Checklist item actions',[
         {label:'Add child checklist item',icon:'plus',disabled:level>=MAX_CHECKLIST_LEVELS,run:()=>addItem(item.id)},
         {label:'Indent checklist item',icon:'right',disabled:!canIndent,run:indent},
         {label:'Outdent checklist item',icon:'left',disabled:!parent,run:outdent}
-      ],more));more.id=`${item.id}-menu`;controls.prepend(more);
+      ],more));more.id=textEditors!.checklistId(b.id,item.id,pageId,'menu');controls.prepend(more);
       row.append(check,text,controls);entry.append(row);if(item.children?.length)entry.append(renderItems(item.children,[...ancestors,item]));list.append(entry);
     });return list;
   }
   const head=title(b,'☑'),progress=element('span','checklist-progress'),items=renderItems(b.items);progress.textContent=`${done} / ${total}`;head.append(progress);shell.append(head,items);
-  shell.append(button('+ Add an item', 'Add checklist item', async () => { const r = await action('checklist_add', { blockId: b.id }); if (r) requestAnimationFrame(() => domId(r.itemId)?.focus()); }, 'add-inline'));
+  shell.append(button('+ Add an item', 'Add checklist item', ()=>addItem(), 'add-inline'));
 }
 function renderTable(shell:HTMLElement,b:BlockOf<'table'>) {
   const pageId=store.getActivePageId(),cellKey=(rowId:string,columnId:string)=>`table-cell-${encodeURIComponent(JSON.stringify([b.id,rowId,columnId]))}`,cellId=(r:number,c:number)=>cellKey(b.rows[r].id,b.columns[c].id);

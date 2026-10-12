@@ -146,10 +146,42 @@ async function compositionBarrier(type) {
   await context.close();
 }
 
+async function importedFocus() {
+  const {context,page}=await fresh(),f=await fixture(page);
+  await page.evaluate(async f=>{
+    const book=JSON.parse(await lifecycleStore.export()),block=book.pages.find(p=>p.id===f.pageId).blocks[0];
+    block.items=[{id:'first-root-item',text:'First task',done:false},{id:'page-title',text:'Imported task',done:false}];await lifecycleStore.import(JSON.stringify(book));
+  },f);
+  const input=editor(page,'page-title'),focus=()=>page.waitForFunction(()=>document.activeElement?.closest('[data-checklist-editor]')?.dataset.checklistEditor==='page-title');
+  const editorId=await input.getAttribute('id');assert.notEqual(editorId,'page-title');assert.equal(await page.locator('[id="page-title"]').count(),1);
+  await input.press('Tab');await page.waitForFunction(()=>lifecycleStore.getState().blocks[0].items[0].children?.[0]?.id==='page-title');await focus();
+  assert.equal(await input.getAttribute('id'),editorId);await input.press('Shift+Tab');await page.waitForFunction(()=>lifecycleStore.getState().blocks[0].items[1]?.id==='page-title');await focus();
+  const title=await page.locator('#page-title').inputValue();await input.press('End');await page.keyboard.type(' stays focused');await flush(page);
+  assert.equal(await page.locator('#page-title').inputValue(),title);assert.equal(await text(page,{...f,itemId:'page-title'}),'Imported task stays focused');
+  await page.locator('[data-item-id="page-title"] > .check-row').getByRole('button',{name:'Move checklist item up',exact:true}).click();
+  await page.waitForFunction(()=>lifecycleStore.getState().blocks[0].items[0]?.id==='page-title');await focus();
+  await input.press('Enter');await page.waitForFunction(()=>lifecycleStore.getState().blocks[0].items.length===3);
+  const added=await page.evaluate(()=>lifecycleStore.getState().blocks[0].items[1].id);
+  await page.waitForFunction(id=>document.activeElement?.closest('[data-checklist-editor]')?.dataset.checklistEditor===id,added);
+  await screenshot(page,'imported-focus');await context.close();
+}
+
+async function scopedSettlement() {
+  const {context,page}=await fresh();await page.evaluate(async()=>{
+    const {createCompositionGuard}=await import(new URL('./src/composition.js',document.baseURI).href),{createTextEditors}=await import(new URL('./src/text-editors.js',document.baseURI).href);
+    const guard=createCompositionGuard(),native=document.createElement('textarea');document.body.append(native);guard.track(native,()=>{},()=>lifecycleStore.getActivePageId());
+    const manager=createTextEditors(lifecycleStore,{composition:guard,notify:()=>{},createNext:async()=>{},flushPending:async()=>{}});
+    const host=manager.mount({id:'scoped-test-editor',type:'text',text:'Unrelated composition'},lifecycleStore.getActivePageId());document.body.append(host);
+    native.dispatchEvent(new CompositionEvent('compositionstart'));await manager.flushAll();assertNativeStillComposing();
+    function assertNativeStillComposing(){if(!guard.isComposing(native))throw new Error('Native composition was incorrectly ended');}
+    native.dispatchEvent(new CompositionEvent('compositionend'));await guard.settled();manager.destroy();host.remove();native.remove();
+  });await context.close();
+}
+
 try {
   await new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.once('error',reject);server.once('exit',code=>reject(new Error(`Server exited: ${code}`)));});
   await mkdir(`${root}/test-results`,{recursive:true});browser=await ({chromium,webkit}[engine]).launch({headless:true});
   await historyBarrier();await retainedDrafts('checklist');await retainedDrafts('text');await deletedDrafts();await deletedDrafts(true);
-  await compositionBarrier('checklist');await compositionBarrier('text');assert.deepEqual(errors,[]);
-  console.log(`${engine} ${basePath||'/'}: history/draft recovery, strict export/final composition barriers and original-page navigation passed.`);
+  await compositionBarrier('checklist');await compositionBarrier('text');await importedFocus();await scopedSettlement();assert.deepEqual(errors,[]);
+  console.log(`${engine} ${basePath||'/'}: history/draft recovery, strict scoped composition/export, original-page navigation and imported focus identity passed.`);
 } finally {await browser?.close();server.kill();}
