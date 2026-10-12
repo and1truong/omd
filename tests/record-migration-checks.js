@@ -24,7 +24,7 @@ export async function migrationChecks({sourceRoot,extension='ts',startupVersion}
     const tabs=makeBlock('tabs');tabs.id='tabs:"';tabs.tabs[0].id='tab:first/一';tabs.tabs[1].id='tab:second/一';tabs.activeTabId=tabs.tabs[0].id;
     const toggle=makeBlock('toggle');toggle.id='toggle:一';toggle.open=false;
     const accordion=makeBlock('accordion');accordion.id='accordion:一';accordion.items[0].id='section:/"一';accordion.items[0].open=false;accordion.items[0].blocks=[drawing];toggle.blocks=[accordion];tabs.tabs[1].blocks=[toggle];
-    const reminder=makeBlock('reminder',{dueAt:'2020-01-01T00:00:00+07:00'});reminder.id='remind:2020-01-01T00:00:00Z:/"一';
+    const reminder=makeBlock('reminder',{dueAt:'2020-01-01T00:00:00+07:00'});reminder.id='remind:\n2020-01-01T00:00:00Z:/"一';
     const rootAlias=makeBlock('text',{text:'ID page is a block, not the root container'});rootAlias.id='page';
     page.blocks=[text,tabs,reminder,rootAlias];
     const other=emptyNotebook();other.id='p:á/"二';other.blocks=[{...text,text:'Same logical block ID, another page'}];
@@ -47,7 +47,7 @@ export async function migrationChecks({sourceRoot,extension='ts',startupVersion}
     const firedAt='2020-01-02T00:00:00Z';tx.objectStore('delivery').put(firedAt,JSON.stringify([book.pages[0].id,`${reminder.id}:${reminder.dueAt}`]));
     // Deleted reminders still have ledger entries, and their cursor can outlast records.
     for(let i=0;i<80;i++)tx.objectStore('delivery').put(firedAt,JSON.stringify([book.pages[0].id,`deleted:${i}:${reminder.dueAt}`]));
-    mutate?.(tx);await completed;db.close();
+    mutate?.(tx,{book,drawing,reminder});await completed;db.close();
   }
   async function rejects(fn,pattern){let error;try{await fn();}catch(e){error=e;}check(error&&pattern.test(error.message),`Expected recovery error ${pattern}, got ${error?.message??'success'}`);}
   for(const version of [1,2,3]){
@@ -73,13 +73,17 @@ export async function migrationChecks({sourceRoot,extension='ts',startupVersion}
     try{await rejects(()=>openRepository(data,{name:dbName,initial:emptyNotebook}),/upgrade failed.*intact.*injected/);}finally{IDBObjectStore.prototype.add=add;}
     equal(await snapshot(dbName),before,`v${version} rollback changed schema/data`);const retry=await openRepository(data,{name:dbName,initial:emptyNotebook});equal(await retry.export(),f.book,'Retry failed');retry.close();evidence.push({case:`v${version} abort / exact rollback / retry`,passed:true});
   }
+  function alterRecord(tx,f,kind,id,change){const store=tx.objectStore('records'),key=JSON.stringify([f.book.pages[0].id,`$${kind}:${id}`]),reading=store.get(key);reading.onsuccess=()=>{const row=reading.result;change(row);store.put(row,key);};}
   const corruptions=[
     ['malformed key',tx=>tx.objectStore('records').put({kind:'block',pageId:'bad',data:{id:'x',type:'text',text:'bad'}},'not JSON')],
     ['mismatched ID',tx=>{const k=JSON.stringify(['bad','$block:x']);tx.objectStore('records').put({key:k,kind:'block',pageId:'bad',data:{id:'wrong',type:'text',text:'bad'}},k);}],
     ['alias collision',tx=>{const k='["bad", "$block:x"]';tx.objectStore('records').put({key:k,kind:'block',pageId:'bad',data:{id:'x',type:'text',text:'bad'}},k);const other='["bad","$block:x"]';tx.objectStore('records').put({key:other,kind:'block',pageId:'bad',data:{id:'x',type:'text',text:'bad'}},other);}],
     ['orphan record',tx=>{const k=JSON.stringify(['bad','$block:orphan']);tx.objectStore('records').put({key:k,kind:'block',pageId:'bad',data:{id:'orphan',type:'text',text:'bad'}},k);}],
     ['malformed reminder',tx=>tx.objectStore('reminders').put({pageId:'bad',id:'bad',type:'reminder'},'not JSON')],
-    ['malformed delivery',tx=>tx.objectStore('delivery').put('2020-01-02T00:00:00Z',JSON.stringify(['bad','unparseable']))]
+    ['malformed delivery',tx=>tx.objectStore('delivery').put('2020-01-02T00:00:00Z',JSON.stringify(['bad','unparseable']))],
+    ['unknown container data',(tx,f)=>alterRecord(tx,f,'container','page',row=>row.data.unknown='must not silently discard')],
+    ['embedded hidden tab blocks',(tx,f)=>alterRecord(tx,f,'block','tabs:"',row=>row.data.tabs[0].blocks=[{id:'lost',type:'text',text:'must not silently discard'}])],
+    ['ambiguous embedded files',(tx,f)=>alterRecord(tx,f,'scene',f.drawing.id,row=>row.data.files=f.drawing.scene.files)]
   ];
   for(const [label,mutate]of corruptions){const dbName=name(),f=fixture();await seed(dbName,3,f,mutate);const before=await snapshot(dbName);await rejects(()=>openRepository(storage(),{name:dbName,initial:emptyNotebook}),/upgrade failed.*intact/);equal(await snapshot(dbName),before,`${label} was partially migrated`);evidence.push({case:`reject ${label} / exact rollback`,passed:true});}
   for(const version of [1,2,3]){

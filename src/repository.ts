@@ -1,6 +1,6 @@
 import {errorOf} from './dom.js';
 import type {StorageLike,StoreOptions,Notebook,StoredRecord,Records,RecordChange,Journal,DueReminder,RecordKey} from './types.js';
-import { bookRecords, makeMaterializer, metadataBook, recordKey, nativeRecordKey, recordsMap } from './records.js';
+import { bookRecords, makeMaterializer, metadataBook, recordKey, nativeRecordKey, recordsMap, equalValue } from './records.js';
 import { parseBook, validateBook, wrapPage } from './notebook.js';
 import { STORAGE_KEY } from './model.js';
 const request=<T>(req:IDBRequest<T>):Promise<T>=>new Promise((resolve,reject)=>{req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});
@@ -49,7 +49,7 @@ function migrate(db:IDBDatabase,tx:IDBTransaction,fail:(error:unknown)=>void) {
     const row=deliveryCursor.result;if(!row){finished();return;}
     const [pageId,oldId]=legacyKey(row.primaryKey);
     // The old ledger appended an ISO date (or empty date) to a logical block ID.
-    const match=/^(.+):((?:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2}))?)$/.exec(oldId);
+    const match=/^(.+):((?:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2}))?)$/s.exec(oldId);
     if(!match||match[2]&&!Number.isFinite(Date.parse(match[2]))||typeof row.value!=='string'||!Number.isFinite(Date.parse(row.value)))throw new Error('Invalid legacy delivery key or date.');
     add(delivery,row.value,[pageId,match[1],match[2]]);row.continue();
   });
@@ -59,11 +59,12 @@ function migrate(db:IDBDatabase,tx:IDBTransaction,fail:(error:unknown)=>void) {
         const book=meta.result as Notebook|undefined,mapped=recordsMap(rows.result);
         if(book){
           const full=validateBook({...book,pages:book.pages.map(p=>makeMaterializer()(mapped,p.id))});
-          if(JSON.stringify(metadataBook(full))!==JSON.stringify(book)||bookRecords(full).size!==mapped.size)throw new Error('Legacy records contain orphaned or inconsistent data.');
+          const normalized=bookRecords(structuredClone(full));
+          if(!equalValue(metadataBook(full),book)||normalized.size!==mapped.size||[...mapped].some(([key,row])=>!equalValue(row,normalized.get(key))))throw new Error('Legacy records contain orphaned or inconsistent data.');
         }else if(mapped.size)throw new Error('Legacy notebook metadata is missing.');
         const pending=reminders.getAll();pending.onsuccess=()=>guard(()=>{
           const expected=[...mapped.values()].filter(r=>r.kind==='block'&&r.data.type==='reminder');
-          if(expected.length!==pending.result.length||pending.result.some(value=>{const record=mapped.get(recordKey(value.pageId,'block',value.id));if(record?.kind!=='block'||record.data.type!=='reminder')return true;const {pageId,due,...block}=value;return JSON.stringify(block)!==JSON.stringify(record.data)||due!==reminderDue(record.data);}))throw new Error('Legacy reminder index does not match its records.');
+          if(expected.length!==pending.result.length||pending.result.some(value=>{const record=mapped.get(recordKey(value.pageId,'block',value.id));if(record?.kind!=='block'||record.data.type!=='reminder')return true;const {pageId,due,...block}=value;return !equalValue(block,record.data)||due!==reminderDue(record.data);}))throw new Error('Legacy reminder index does not match its records.');
           // Open tabs cannot reuse old patch paths. As in previous upgrades, only transient undo is invalidated.
           const history=tx.objectStore('history');history.clear();if(!history.indexNames.contains('owner'))history.createIndex('owner','owner');
           for(const [name,store]of [['records',records],['reminders',reminders],['delivery',delivery]] as const){db.deleteObjectStore(name);store.name=name;}
