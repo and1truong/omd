@@ -18,6 +18,20 @@ import {appBase,routePageId,setupRoutes} from './routes.js';
 function $<T extends HTMLElement=HTMLElement>(selector:string):T {if(selector.startsWith('#'))return domId<T>(selector.slice(1));const node=document.querySelector<T>(selector);if(!node)throw new Error(`Missing element: ${selector}`);return node;}
 let store:NotebookStore,palette:ReturnType<typeof setupPalette>|undefined,diagrams:ReturnType<typeof createDiagramManager>|undefined,renderer:ReturnType<typeof createRenderCache>,shell:ReturnType<typeof setupShell>|undefined,dragData:DragData|null|undefined;
 let textEditors:ReturnType<typeof createTextEditors>|undefined;
+const collapsedChecklistItems=new Set<string>();
+const checklistViewKey=(pageId:string,blockId:string,itemId:string)=>JSON.stringify([pageId,blockId,itemId]);
+function focusChecklistItem(id:string) {
+  const target=document.getElementById(id);if(!target)return;
+  let list=target.closest<HTMLElement>('.checklist-items');
+  while(list) {
+    const parent=list.parentElement;
+    if(!parent?.classList.contains('checklist-item'))break;
+    const fold=parent.querySelector<HTMLButtonElement>(':scope > .check-row .checklist-fold');
+    if(fold){list.hidden=false;fold.setAttribute('aria-expanded','true');fold.title='Collapse checklist branch';fold.setAttribute('aria-label',fold.title);collapsedChecklistItems.delete(fold.dataset.viewKey!);}
+    list=parent.parentElement?.closest<HTMLElement>('.checklist-items')??null;
+  }
+  target.focus();
+}
 let tableEdits:ReturnType<typeof createTableEdits>|undefined;
 interface InsertionAnchor {blockId:string;side:'before'|'after'}
 interface DragData {containerId?:string;kind:'block'|'card'|'column'|'tab';blockId:string;cardId?:string;columnId?:string;tabId?:string;pageId?:string}
@@ -50,7 +64,7 @@ function button(label:string,aria:string,fn:(event:MouseEvent)=>unknown,classNam
   const b = element('button', className); b.type = 'button'; if(labelIcon[label])b.append(icon(labelIcon[label]));else b.textContent=label; b.title = aria; b.setAttribute('aria-label', aria); b.addEventListener('click', fn); return b;
 }
 async function action<K extends CommandName>(name:K,input:CommandInput<K>,{quiet=false,focus}: {quiet?:boolean;focus?:string}={}):Promise<MutationResult<K>|null> {
-  try { input={...input,pageId:input.pageId??store.getActivePageId()}; domId('save-status').textContent='Saving…'; if(!quiet)await flushPending(); const result = await store.dispatch(name, input, { quiet }); if (focus) requestAnimationFrame(()=>document.getElementById(focus)?.focus()); return result; }
+  try { input={...input,pageId:input.pageId??store.getActivePageId()}; domId('save-status').textContent='Saving…'; if(!quiet)await flushPending(); const result = await store.dispatch(name, input, { quiet }); if (focus) requestAnimationFrame(()=>focusChecklistItem(focus)); return result; }
   catch (error) { domId('save-status').textContent = 'Not saved'; notify(errorOf(error).message, 'error', true); return null; }
 }
 function editable(value:string,aria:string,fn:(value:string,pageId:string)=>unknown,{multiline=false,className='',placeholder='',id}: {multiline?:boolean;className?:string;placeholder?:string;id?:string}={}) {
@@ -164,8 +178,33 @@ function renderBlock(b:Block,containerId:string,index:number,count:number) {
   return shell;
 }
 function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
-  let total=0,done=0;
-  async function addItem(parentId?:string,index?:number) {const result=await action('checklist_add',{blockId:b.id,parentId,index});if(result)requestAnimationFrame(()=>domId(result.itemId)?.focus());}
+  let total=0,done=0;const pageId=store.getActivePageId();
+  async function addItem(parentId?:string,index?:number) {const result=await action('checklist_add',{pageId,blockId:b.id,parentId,index});if(result)requestAnimationFrame(()=>focusChecklistItem(result.itemId));}
+  function branchProgress(item:ChecklistItem):[number,number] {
+    let done=item.done?1:0,total=1;
+    for(const child of item.children??[]){const [childDone,childTotal]=branchProgress(child);done+=childDone;total+=childTotal;}
+    return [done,total];
+  }
+  async function setCollapsed(folds:HTMLButtonElement[],collapsed:boolean) {
+    try {
+      await flushPending();if(pageId!==store.getActivePageId())return;
+      for(const fold of folds) {
+        if(!fold.isConnected)continue;
+        const list=document.getElementById(fold.getAttribute('aria-controls')!)!;
+        if(collapsed&&list.contains(document.activeElement))fold.focus();
+        list.hidden=collapsed;fold.setAttribute('aria-expanded',String(!collapsed));
+        fold.title=collapsed?'Expand checklist branch':'Collapse checklist branch';fold.setAttribute('aria-label',fold.title);
+        if(collapsed)collapsedChecklistItems.add(fold.dataset.viewKey!);else collapsedChecklistItems.delete(fold.dataset.viewKey!);
+      }
+      syncFoldAll();
+    }catch(error){notify(errorOf(error).message,'error',true);}
+  }
+  function syncFoldAll() {
+    const scope=foldAll.closest('.block')??shell,folds=[...scope.querySelectorAll<HTMLButtonElement>('.checklist-fold')];
+    const collapse=folds.some(fold=>fold.getAttribute('aria-expanded')==='true');
+    foldAll.hidden=folds.length===0;foldAll.textContent=collapse?'Collapse branches':'Expand branches';
+    foldAll.setAttribute('aria-label',collapse?'Collapse checklist branches':'Expand checklist branches');
+  }
   function renderItems(items:ChecklistItem[],ancestors:ChecklistItem[]=[]):HTMLElement {
     const list=element('div','checklist-items');list.setAttribute('role','list');
     items.forEach((item,index)=>{
@@ -186,17 +225,33 @@ function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
         if(key.key==='Tab'&&((key.shiftKey&&parent)||(!key.shiftKey&&canIndent))){if(!key.repeat)void (key.shiftKey?outdent():indent());return true;}
         return false;
       });
-      const controls=rowsControls(()=>action('checklist_move',{blockId:b.id,itemId:item.id,index:index-1},{focus:item.id}),()=>action('checklist_move',{blockId:b.id,itemId:item.id,index:index+1},{focus:item.id}),()=>action('checklist_remove',{blockId:b.id,itemId:item.id}),index===0,index===items.length-1,'checklist item');
+      text.querySelector('.checklist-branch-progress')?.remove();
+      if(item.children?.length) {
+        const [done,total]=branchProgress(item),count=element('span','checklist-branch-progress');count.textContent=`${done}/${total}`;count.setAttribute('aria-label',`${done} of ${total} items complete in branch`);text.append(count);
+      }
+      const controls=element('div','row-controls');
       const more=button('…','Checklist item actions',()=>showMenu('block-actions-dialog','Checklist item actions',[
         {label:'Add child checklist item',icon:'plus',disabled:level>=MAX_CHECKLIST_LEVELS,run:()=>addItem(item.id)},
         {label:'Indent checklist item',icon:'right',disabled:!canIndent,run:indent},
-        {label:'Outdent checklist item',icon:'left',disabled:!parent,run:outdent}
-      ],more));more.id=`${item.id}-menu`;controls.prepend(more);
-      row.append(check,text,controls);entry.append(row);if(item.children?.length)entry.append(renderItems(item.children,[...ancestors,item]));list.append(entry);
+        {label:'Outdent checklist item',icon:'left',disabled:!parent,run:outdent},
+        {label:'Move checklist item up',icon:'up',disabled:index===0,run:()=>action('checklist_move',{blockId:b.id,itemId:item.id,index:index-1},{focus:item.id})},
+        {label:'Move checklist item down',icon:'down',disabled:index===items.length-1,run:()=>action('checklist_move',{blockId:b.id,itemId:item.id,index:index+1},{focus:item.id})},
+        {label:'Delete checklist item',icon:'trash',danger:true,run:()=>action('checklist_remove',{blockId:b.id,itemId:item.id})}
+      ],more));more.id=`${item.id}-menu`;controls.append(more);
+      if(item.children?.length) {
+        const children=renderItems(item.children,[...ancestors,item]),viewKey=checklistViewKey(pageId,b.id,item.id),collapsed=collapsedChecklistItems.has(viewKey);
+        children.id=`${item.id}-children`;children.hidden=collapsed;
+        const fold=button('▾',collapsed?'Expand checklist branch':'Collapse checklist branch',()=>setCollapsed([fold],fold.getAttribute('aria-expanded')==='true'),'icon-button checklist-fold');
+        fold.setAttribute('aria-expanded',String(!collapsed));fold.setAttribute('aria-controls',children.id);fold.dataset.viewKey=viewKey;
+        row.append(fold,check,text,controls);entry.append(row,children);
+      }else {const marker=element('span','checklist-leaf');marker.setAttribute('aria-hidden','true');row.append(marker,check,text,controls);entry.append(row);}
+      list.append(entry);
     });return list;
   }
-  const head=title(b,'☑'),progress=element('span','checklist-progress'),items=renderItems(b.items);progress.textContent=`${done} / ${total}`;head.append(progress);shell.append(head,items);
-  shell.append(button('+ Add an item', 'Add checklist item', async () => { const r = await action('checklist_add', { blockId: b.id }); if (r) requestAnimationFrame(() => domId(r.itemId)?.focus()); }, 'add-inline'));
+  const head=title(b,'☑'),progress=element('span','checklist-progress'),items=renderItems(b.items),meter=element('progress','checklist-meter');progress.textContent=`${done} / ${total}`;
+  meter.max=Math.max(1,total);meter.value=done;meter.setAttribute('aria-label','Checklist progress');head.append(progress,meter);shell.append(head,items);
+  const foot=element('div','checklist-footer'),foldAll=button('Collapse branches','Collapse checklist branches',()=>{const scope=foldAll.closest('.block')!;return setCollapsed([...scope.querySelectorAll<HTMLButtonElement>('.checklist-fold')],scope.querySelector('.checklist-fold[aria-expanded=true]')!==null);},'checklist-fold-all');
+  foot.append(button('+ Add an item','Add checklist item',()=>addItem(),'add-inline'),foldAll);shell.append(foot);syncFoldAll();
 }
 function renderTable(shell:HTMLElement,b:BlockOf<'table'>) {
   const pageId=store.getActivePageId(),cellKey=(rowId:string,columnId:string)=>`table-cell-${encodeURIComponent(JSON.stringify([b.id,rowId,columnId]))}`,cellId=(r:number,c:number)=>cellKey(b.rows[r].id,b.columns[c].id);

@@ -174,9 +174,9 @@ try {
   await input(leaf).press('Enter');
   await page.waitForFunction(id=>document.querySelector(`[data-item-id="${id}"] > .checklist-items`)?.children.length===2,grandchild);
   const sibling=(await children(grandchild))[1].id;await focused(sibling);await input(sibling).fill('Sibling');
-  await row(sibling).getByRole('button',{name:'Move checklist item up',exact:true}).click();await placed(sibling,grandchild,0);await focused(sibling);
+  await (await menu(sibling)).getByRole('button',{name:'Move checklist item up',exact:true}).click();await placed(sibling,grandchild,0);await focused(sibling);
   assert.deepEqual((await children(grandchild)).map(i=>i.id),[sibling,leaf]);
-  await row(sibling).getByRole('button',{name:'Move checklist item down',exact:true}).click();await placed(sibling,grandchild,1);await focused(sibling);
+  await (await menu(sibling)).getByRole('button',{name:'Move checklist item down',exact:true}).click();await placed(sibling,grandchild,1);await focused(sibling);
   assert.deepEqual((await children(grandchild)).map(i=>i.id),[leaf,sibling]);
   await row(leaf).getByRole('checkbox').check();
   await page.waitForFunction(blockId=>document.querySelector(`[data-block-id="${blockId}"] .checklist-progress`)?.textContent==='1 / 6',blockId);
@@ -193,7 +193,7 @@ try {
   await input(leaf).evaluate(el=>{el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));});
   assert.deepEqual(await items(),before);
   await mkdir(`${root}/test-results`,{recursive:true});await page.screenshot({path:`${root}/test-results/checklist-${engine}-desktop.png`});
-  await row(second).getByRole('button',{name:'Delete checklist item',exact:true}).click();await input(second).waitFor({state:'detached'});assert.equal((await items()).length,1);
+  await (await menu(second)).getByRole('button',{name:'Delete checklist item',exact:true}).click();await input(second).waitFor({state:'detached'});assert.equal((await items()).length,1);
   await call('undo');assert.deepEqual(await items(),before);await call('redo');assert.equal((await items()).length,1);await call('undo');
   await page.reload();await page.evaluate(async()=>await (await import(new URL('./src/app.js',document.baseURI).href)).ready);assert.deepEqual(await items(),before);
   await markdownCases();await context.close();
