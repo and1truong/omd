@@ -106,6 +106,69 @@ export async function verifyPageRoutes({browser,appURL,call,root}) {
       const drawing=(await call('add_block',{type:'excalidraw'},fallback)).block;
       await fallback.locator(`[data-block-id="${drawing.id}"] .excalidraw canvas`).first().waitFor();
     } finally {await fallbackContext.close();}
+    await verifySurrogatePageRoutes({browser,appURL,call,root});
     console.log(`${new URL(appURL).pathname}: two shared-IDB tabs, native WebMCP, independent paths, sync, refresh/new-tab/history, pending edits, nested/invalid/deleted/imported pages, offline deep links and emitted static 404 passed.`);
   } finally {await context.close();}
+}
+
+export async function verifySurrogatePageRoutes({browser,appURL,call,root}) {
+  const context=await browser.newContext({viewport:{width:1280,height:900}}),a=await context.newPage(),b=await context.newPage(),errors=[];
+  for(const target of [a,b])target.on('pageerror',error=>errors.push(error.message));
+  const ready=target=>target.waitForFunction(()=>document.getElementById('agent-status')?.textContent.includes('55 tools'));
+  const ids=['lone-\uD800','lone-\uDC00','mix-\uD800🚀/\0%~\uDC00','slash/\0%~','~u006c006f006e0065002dd800','paired-🚀'];
+  const path=id=>{
+    let segment;
+    try{segment=encodeURIComponent(id.startsWith('~')?'~'+id:id);}
+    catch{segment='~u'+id.split('').map(unit=>unit.charCodeAt(0).toString(16).padStart(4,'0')).join('');}
+    return new URL(`page/${segment}`,appURL).href;
+  };
+  const selected=async(target,id)=>{
+    await target.evaluate(async()=>{const app=await import(new URL('./src/app.js',document.baseURI).href);await app.ready;window.omdSurrogateStore=app.getStore();});
+    await target.waitForFunction(id=>window.omdSurrogateStore.getActivePageId()===id,id);
+    assert.equal((await call('get_notebook',{},target)).id,id);
+    assert.equal(target.url(),path(id));
+    assert.equal(await target.locator('#page-title').inputValue(),`UTF-16 route ${ids.indexOf(id)}`);
+  };
+  try {
+    await a.goto(appURL);await ready(a);
+    const book=JSON.parse((await call('export_notebook',{},a)).json),template=book.pages[0];
+    book.pages=ids.map((id,index)=>({...template,id,title:`UTF-16 route ${index}`,blocks:[]}));
+    book.activePageId=ids[0];book.parents=Object.fromEntries(ids.map((id,index)=>[id,index?ids[0]:'']));
+    await a.evaluate(async json=>{const app=await import(new URL('./src/app.js',document.baseURI).href);await app.getStore().import(json);},JSON.stringify(book));
+    await selected(a,ids[0]);
+    const importing=call('import_notebook',{json:JSON.stringify(book)},a);
+    await a.getByRole('button',{name:'Back up & import',exact:true}).click();await importing;
+    await selected(a,ids[0]);
+    await a.reload();await ready(a);await selected(a,ids[0]);
+    for(let index=1;index<ids.length;index++){
+      const id=ids[index],previous=ids[index-1];
+      await call('page_select',{pageId:id},a);await selected(a,id);
+      await a.reload();await ready(a);await selected(a,id);
+      await b.goto(path(id));await ready(b);await selected(b,id);
+      await a.goBack();await selected(a,previous);
+      await a.goForward();await selected(a,id);
+    }
+    const link=b.getByRole('link',{name:'Switch to UTF-16 route 0',exact:true});
+    assert.equal(await link.getAttribute('href'),new URL(path(ids[0])).pathname);
+    await b.bringToFront();await link.focus();await b.waitForFunction(()=>document.hasFocus());
+    let third;await b.keyboard.down('ControlOrMeta');
+    try{[third]=await Promise.all([context.waitForEvent('page'),link.click({modifiers:['ControlOrMeta'],delay:50})]);}
+    finally{await b.keyboard.up('ControlOrMeta');}
+    try{await ready(third);await selected(third,ids[0]);await selected(b,ids.at(-1));}finally{await third.close();}
+    await a.goto(appURL);await ready(a);await selected(a,ids[0]);
+    const saved=await a.evaluate(async()=>{
+      const store=window.omdSurrogateStore,book=JSON.parse(await store.export());
+      const request=req=>new Promise((resolve,reject)=>{req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});
+      const db=await request(indexedDB.open(store.databaseName()));
+      try{
+        const tx=db.transaction(['meta','records']),[meta,records]=await Promise.all([request(tx.objectStore('meta').get('book')),request(tx.objectStore('records').getAll())]);
+        return {ids:book.pages.map(page=>page.id),parents:book.parents,active:store.getActivePageId(),meta,recordIds:records.filter(row=>row.kind==='page').map(row=>row.pageId)};
+      }finally{db.close();}
+    });
+    assert.deepEqual(saved.ids,ids);assert.deepEqual(saved.parents,book.parents);assert.equal(saved.active,ids[0]);
+    assert.deepEqual(saved.meta.pages.map(page=>page.id),ids);assert.deepEqual(saved.meta.parents,book.parents);assert.equal(saved.meta.activePageId,ids[0]);
+    assert.deepEqual(saved.recordIds.sort(),[...ids].sort());assert.deepEqual(errors,[]);
+    await a.screenshot({path:`${root}/test-results/routes-utf16${new URL(appURL).pathname==='/'?'-root':'-omd'}.png`});
+    console.log(`${new URL(appURL).pathname}: UTF-16 import, persisted exact IDs/parents, startup, reload/direct/native new-tab routes and back/forward passed.`);
+  }finally{await context.close();}
 }
