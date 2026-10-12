@@ -8,7 +8,7 @@ const $ = selector => document.querySelector(selector);
 let store, palette, diagrams, dragData, pickerTarget = 'page';
 export const openPalette = () => palette?.open();
 export const flushDiagrams = () => diagrams?.flushAll();
-export function openCanvas(blockId,pageId) { diagrams?.flushAll(); if(pageId && pageId!==store.getState().id)store.dispatch('page_select',{pageId}); diagrams.openFocus(blockId); }
+export function openCanvas(blockId,pageId) { findBlock(store.getPage(pageId),blockId,'excalidraw');diagrams?.flushAll(); if(pageId && pageId!==store.getState().id)store.dispatch('page_select',{pageId}); diagrams.openFocus(blockId); }
 export const closeCanvas = () => diagrams?.closeFocus();
 const themeQuery = matchMedia('(prefers-color-scheme: dark)');
 export function notify(message, kind = '', persistent = false) {

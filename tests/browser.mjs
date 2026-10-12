@@ -7,13 +7,14 @@ const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 const root = new URL('..', import.meta.url).pathname;
 const server = spawn(process.execPath, ['scripts/serve.mjs'], { cwd: root, env: { ...process.env, OMD_PORT: '4317', OMD_STATIC_DIR: 'dist' }, stdio: ['ignore','pipe','pipe'] });
-let browser;
+let browser,page;
 const errors = [];
+const consoleErrors=[];
 try {
   await new Promise((resolve,reject) => { server.stdout.once('data', resolve); server.once('error', reject); server.once('exit', code => reject(new Error(`Server exited: ${code}`))); });
   browser = await chromium.launch({ headless: true, args: ['--enable-features=WebMCP,WebMCPTesting', '--enable-experimental-web-platform-features'] });
   const context = await browser.newContext({ viewport: { width: 1440, height: 1100 }, colorScheme: 'light' });
-  const page = await context.newPage(); page.on('pageerror', error => errors.push(error.message));
+  page = await context.newPage(); page.on('pageerror', error => errors.push(error.message));page.on('console',msg=>{if(msg.type()==='error')consoleErrors.push(msg.text());});
   await page.goto('http://localhost:4317/');
   await page.waitForFunction(() => document.getElementById('agent-status').textContent.includes('48 tools'));
   const call = (name, input = {}) => page.evaluate(async ({name,input}) => {
@@ -133,4 +134,7 @@ try {
   assert.ok((await call('get_notebook')).blocks.find(b=>b.id===drawing.id).scene.elements.length>0);
   assert.deepEqual(errors.filter(error => error !== 'Tabs are limited to two levels.'), []);
   console.log('Native WebMCP, notebook UI, persistence, mobile, theme, reminders, import/export, and offline reload passed.');
+} catch(error) {
+  if(page) { await mkdir(`${root}/test-results`,{recursive:true});await page.screenshot({path:`${root}/test-results/failure.png`,fullPage:true});console.log(JSON.stringify({errors,consoleErrors,diagnostic:await page.evaluate(()=>({notices:document.getElementById('notices')?.textContent,canvas:[...document.querySelectorAll('#canvas-stage canvas')].map(c=>({class:c.className,width:c.width,height:c.height,rect:c.getBoundingClientRect().toJSON()})),selected:[...document.querySelectorAll('#canvas-stage input:checked')].map(e=>({value:e.value,title:e.closest('label')?.title})),notebook:JSON.parse(localStorage.getItem('omd.notebook.v1'))}))})); }
+  throw error;
 } finally { await browser?.close(); server.kill(); }

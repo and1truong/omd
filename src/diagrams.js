@@ -59,7 +59,7 @@ export function createDiagramManager(store,{notify}) {
   }
   function closeFocus() {
     if(!focused)return;
-    const entry=entries.get(focused);if(entry) { flush(entry);const placeholder=document.querySelector(`[data-canvas-placeholder="${entry.blockId}"]`); if(placeholder)placeholder.replaceChildren(entry.host); }
+    const entry=entries.get(focused);if(entry) { flush(entry);const placeholder=document.querySelector(`[data-canvas-placeholder="${CSS.escape(entry.blockId)}"]`); if(placeholder)placeholder.replaceChildren(entry.host); }
     focused=null;document.getElementById('canvas-stage').hidden=true;document.body.classList.remove('canvas-focused');
   }
   function openFocus(blockId) {
