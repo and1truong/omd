@@ -1,0 +1,59 @@
+# Development and releases
+
+[Back to README](../README.md)
+
+## Requirements and local server
+
+Use Node.js 22 or newer. Install dependencies once, then start the app:
+
+```sh
+npm install
+npm start
+```
+
+Open [localhost:3000](http://localhost:3000/). `npm start` builds before serving. Application modules and the service worker are TypeScript; build scripts use Node ESM.
+
+## Checks
+
+```sh
+npm run typecheck
+npm test
+npm run build
+npm run check:static
+```
+
+Type checks cover browser and worker environments in strict mode. Source tests run through tsx and cover the data model, migrations, persistence failures, cross-window conflicts, reminders, undo/redo, WebMCP and offline asset completeness. Static checks verify emitted imports and precached assets.
+
+### Native browser integration
+
+After installing dependencies and building:
+
+```sh
+npx playwright install chromium
+npm run test:browser
+```
+
+The browser suite enables Chrome's native WebMCP feature and executes tools through the real registry. It also checks mobile layout, themes, reminders, import confirmation, persistent edits and offline reopening. An unavailable browser binary or unsupported native API is a verification failure. Adapter tests alone do not verify a Gemini integration; that requires a real extension session.
+
+CI runs the native suite at both the origin root and `/omd/`, including lazy library/font URLs and canvas behavior.
+
+## Static hosting and GitHub Pages
+
+Run `npm run build` and serve `dist` from a static HTTPS host. Relative asset, manifest and worker URLs support deployment beneath a subpath.
+
+The GitHub Pages workflow builds and uploads `dist` on pull requests; it deploys only main pushes or a manual run on main. Set **Settings → Pages → Source** to **GitHub Actions**. Main then publishes to [omd](https://and1truong.github.io/omd/), unless a custom domain is configured. Generated files and a publishing branch are not committed.
+
+The deploy job uses the `github-pages` environment and Pages/OIDC permissions. Build checks include strict TypeScript, source tests and static-artifact integrity.
+
+## Release packaging
+
+```sh
+npm run build
+npm run check:static
+npm run package:release
+npm run test:release
+```
+
+Packaging creates ZIP, tar.gz and `SHA256SUMS.txt` in `release`, with a dependency-free local launcher, dependency inventory and available third-party notices. Package tests extract each archive outside the checkout, start the server without `node_modules`, and verify every asset against the build.
+
+Pushing a `release/vVERSION` branch whose version matches `package.json` explicitly publishes that version. The Release workflow checks types, source tests, native browsers at root and `/omd/`, and extracted packages before creating a draft with assets and publishing it. It tags the tested commit and can also be run manually from the matching release branch. If publication fails, rerunning refreshes the assets and resumes only an unpublished draft targeting the same tested commit; published releases, unrelated existing tags and mismatched drafts cannot be overwritten. Update `docs/releases/vVERSION.md` for each release. Publishing a release is independent of merging changes into main; main remains the GitHub Pages source.
