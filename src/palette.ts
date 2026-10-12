@@ -2,6 +2,7 @@ import type {NotebookStore,CommandName,CommandInput,PageRow,ErrorHandler} from '
 import {errorOf} from './dom.js';
 import {byId as domId} from './dom.js';
 import {MAX_PAGE_LEVELS} from './notebook.js';
+import {pagePath,followPageLink} from './routes.js';
 export function setupPalette(store:NotebookStore,{onError,beforeOpen=()=>{},beforeNavigate=()=>{}}:{onError?:ErrorHandler;beforeOpen?:()=>unknown;beforeNavigate?:()=>unknown}={}) {
   const dialog = domId('page-palette'), search = domId('page-search'), list = domId('palette-pages'), create = domId('palette-create'),parentSelect=domId('page-create-parent');
   let selected = 0, matches:PageRow[] = [];
@@ -16,8 +17,8 @@ export function setupPalette(store:NotebookStore,{onError,beforeOpen=()=>{},befo
     selected = Math.min(selected, Math.max(0, matches.length - 1)); list.replaceChildren();
     matches.forEach((page, i) => {
       const row = document.createElement('div'); row.className = 'palette-page';
-      const pick = document.createElement('button'); pick.className = `palette-pick ${i === selected ? 'highlighted' : ''}`;
-      pick.type = 'button'; pick.setAttribute('role','option'); pick.setAttribute('aria-selected', String(i === selected)); pick.id = `palette-${page.pageId}`; pick.textContent = `${page.title || 'Untitled page'}${page.active ? ' · current' : ''}`; pick.addEventListener('click', async () => select(page.pageId));
+      const pick = document.createElement('a'); pick.href=pagePath(page.pageId);pick.className = `palette-pick ${i === selected ? 'highlighted' : ''}`;
+      pick.setAttribute('role','option'); pick.setAttribute('aria-selected', String(i === selected)); pick.id = `palette-${page.pageId}`; pick.textContent = `${page.title || 'Untitled page'}${page.active ? ' · current' : ''}`; pick.addEventListener('click', event => followPageLink(event,()=>select(page.pageId)));
       if(page.parentId){const path=document.createElement('small');path.className='palette-page-path';path.textContent=`Under ${byId.get(page.parentId)!.title||'Untitled page'}`;pick.append(path);}
       row.append(pick); const controls = document.createElement('div'); controls.className = 'palette-order';
       for (const [label,name,index] of [['↑','up',page.index-1],['↓','down',page.index+1]] as [string,string,number][]) {
