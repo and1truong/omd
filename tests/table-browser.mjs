@@ -145,11 +145,13 @@ try{
   await page.locator('#page-menu summary').click();const downloadEvent=page.waitForEvent('download');await page.locator('#export-button').click();const download=await downloadEvent,json=await readFile(await download.path(),'utf8');
   await cell(2,1).fill('Changed after backup');await settled();await page.locator('#import-file').setInputFiles({name:'tables.json',mimeType:'application/json',buffer:Buffer.from(json)});await page.locator('#confirm-ok').click();await page.locator('.notice').filter({hasText:'Notebook imported.'}).waitFor();assert.deepEqual(await grid(),saved);
   await page.evaluate(()=>navigator.serviceWorker.ready);await page.waitForFunction(()=>!!navigator.serviceWorker.controller);
-  await context.setOffline(true);await cell(2,1).fill('Offline table');await settled();
-  // Playwright WebKit's offline navigation fails internally even with an active SW.
-  // Still verify disconnected IndexedDB writes there; Chromium covers offline boot.
-  if(engine==='webkit')await context.setOffline(false);
-  await page.reload();await page.evaluate(async source=>{window.tableApp=await import(`${source}app.js`);await tableApp.ready;},source);assert.equal((await grid()).rows[1].cells[0],'Offline table');await context.setOffline(false);
+  if(engine==='webkit'){
+    // WebKit's emulated offline mode bypasses service workers; remove the real origin instead.
+    await new Promise(resolve=>{server.once('exit',resolve);server.kill();});await assert.rejects(()=>fetch(url),/fetch failed/);
+  }else await context.setOffline(true);
+  await cell(2,1).fill('Offline table');await settled();
+  const response=await page.reload();if(engine==='webkit')assert.ok(response.fromServiceWorker());
+  await page.evaluate(async source=>{window.tableApp=await import(`${source}app.js`);await tableApp.ready;},source);assert.equal((await grid()).rows[1].cells[0],'Offline table');if(engine!=='webkit')await context.setOffline(false);
   // Hidden tab/toggle/accordion branches do not mount cell editors.
   const tabs=(await call('add_block',{type:'tabs'})).block,toggle=(await call('add_block',{type:'toggle',containerId:tabs.tabs[1].id})).block,accordion=(await call('add_block',{type:'accordion',containerId:toggle.id})).block;
   const nested=(await call('add_block',{type:'table',containerId:accordion.items[0].id})).blockId;assert.equal(await page.locator(`[data-block-id="${nested}"]`).count(),0);
@@ -173,5 +175,5 @@ try{
   await page.setViewportSize({width:1280,height:900});await block().locator('.table-options summary').click();await block().getByRole('combobox',{name:'Pinned first columns',exact:true}).selectOption('2');await settled();await block().locator('.table-options summary').click();
   await block().locator('.table-scroll').evaluate(scroll=>{scroll.scrollLeft=160;scroll.scrollTop=132;});await page.evaluate(()=>{document.activeElement?.blur();window.scrollTo(0,0);});await shot('desktop-pinned');
   await block().locator('.table-options summary').click();await shot('options');await page.keyboard.press('Escape');
-  await context.close();assert.deepEqual(errors,[]);console.log(`${engine} ${base||'/'}: table UI, keyboard, dimensions, pinning, synthetic composition, cell/title/page failure/retry, peer redraw/deletion, aggregate save status, orphan recovery/download/discard, nested visibility, JSON, reload, disconnected writes and mobile passed. Offline boot: ${engine==='webkit'?'not tested (Playwright internal navigation error)':'passed'}.`);
+  await context.close();assert.deepEqual(errors,[]);console.log(`${engine} ${base||'/'}: table UI, keyboard, dimensions, pinning, synthetic composition, cell/title/page failure/retry, peer redraw/deletion, aggregate save status, orphan recovery/download/discard, nested visibility, JSON, reload, disconnected writes and mobile passed. Offline boot: passed.`);
 }finally{await browser?.close();server.kill();}
