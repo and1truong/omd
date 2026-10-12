@@ -48,6 +48,12 @@ IndexedDB stores page metadata, block records, container order, canvas scenes an
 
 Migration accepts old localStorage v1/v2/v3 notebooks, initializes IndexedDB atomically, and retains the original localStorage bytes for recovery. Normal edits never serialize the whole notebook or mirror it to localStorage. Full JSON materialization occurs only for explicit import/export/read operations. Validation and record traversal still scan the affected page, and the active page's content remains in RAM; this is not out-of-viewport data eviction. No content quantity quotas are introduced.
 
+## GitHub Pages
+
+The GitHub Pages workflow builds and uploads `dist` on pull requests; it deploys only main pushes or a manual run on main. Merge the TypeScript/fix prerequisites and then the Pages PR. With Settings → Pages → Source set to GitHub Actions, main publishes automatically to [omd](https://and1truong.github.io/omd/), unless a custom domain is configured. No generated files or publishing branch are committed.
+
+The deploy job uses the github-pages environment and Pages/OIDC permissions. Build checks include strict TypeScript, source tests and static-artifact integrity. Browser CI runs the complete native suite at both origin root and `/omd/`, including lazy library/font URLs, canvas and offline reopening. Relative asset/manifest/worker URLs keep the app deployable beneath a repository path. `npm run check:static` verifies emitted imports and precached assets after a build.
+
 ## Install and offline use
 
 After the first online load, the service worker caches the app shell. Install from Chrome/Edge's browser menu, or Safari's Share → Add to Home Screen. When an install prompt is available, Settings also shows an install button. Closing the browser/PWA and reopening keeps the notebook in IndexedDB. Offline edits persist too.

@@ -16,6 +16,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - run: npm run check:static
       - uses: actions/upload-artifact@v4
         with:
           name: omd-static
@@ -23,6 +24,15 @@ jobs:
   browser:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      matrix:
+        include:
+          - scope: root
+            base_path: ''
+          - scope: project
+            base_path: '/omd'
+    env:
+      OMD_BASE_PATH: ${{ matrix.base_path }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -32,10 +42,11 @@ jobs:
       - run: npm run typecheck
       - run: npx playwright install --with-deps chromium
       - run: npm run build
+      - run: npm run check:static
       - run: node tests/browser.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: omd-browser-screenshots
+          name: omd-browser-screenshots-${{ matrix.scope }}
           path: test-results
           if-no-files-found: ignore

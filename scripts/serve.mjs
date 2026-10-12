@@ -2,11 +2,14 @@ import http from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 const root = resolve(new URL('..', import.meta.url).pathname, process.env.OMD_STATIC_DIR || '.');
+const basePath=(process.env.OMD_BASE_PATH??'').replace(/\/$/,'');
+if(basePath&&!/^\/[a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_-]+)*$/.test(basePath))throw new Error('Invalid static base path.');
 const port = Number(process.env.OMD_PORT || 3000);
 const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.woff2':'font/woff2', '.woff':'font/woff', '.ttf':'font/ttf' };
 http.createServer(async (req, res) => {
   try {
-    let path = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
+    const requested=new URL(req.url,'http://localhost');let path=decodeURIComponent(requested.pathname);
+    if(basePath){if(path===basePath){res.writeHead(302,{Location:basePath+'/'+requested.search});res.end();return;}if(!path.startsWith(basePath+'/')){res.writeHead(404);res.end('Not found');return;}path=path.slice(basePath.length);}
     const file = resolve(root, `.${path.endsWith('/') ? path + 'index.html' : path}`);
     if (!file.startsWith(root + sep)) { res.writeHead(403); res.end(); return; }
     if (!(await stat(file)).isFile()) throw new Error('Not a file');

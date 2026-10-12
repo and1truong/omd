@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 const root = new URL('..', import.meta.url).pathname;
+const basePath=process.env.OMD_BASE_PATH??'';const appURL=`http://localhost:4317${basePath}/`;
 const server = spawn(process.execPath, ['scripts/serve.mjs'], { cwd: root, env: { ...process.env, OMD_PORT: '4317', OMD_STATIC_DIR: 'dist' }, stdio: ['ignore','pipe','pipe'] });
 let browser,page;
 const errors = [];
@@ -17,7 +18,7 @@ try {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1100 }, colorScheme: 'light' });
   page = await context.newPage(); page.on('pageerror', error => errors.push(error.message));page.on('console',msg=>{if(msg.type()==='error')consoleErrors.push(msg.text());});
   page.on('request',request=>{if(/\/(?:excalidraw|mermaid)-engine\.(?:js|css)/.test(request.url()))engineRequests.push(request.url());});
-  await page.goto('http://localhost:4317/');
+  await page.goto(appURL);
   await page.waitForFunction(() => document.getElementById('agent-status').textContent.includes('50 tools'));
   const call = (name, input = {}, target = page) => target.evaluate(async ({name,input}) => {
     const registry = document.modelContext;
@@ -30,7 +31,7 @@ try {
     const value = await registry.executeTool(tool, major < 155 ? JSON.stringify(input) : input);
     if (typeof value === 'string') { try { return JSON.parse(value); } catch { return value; } } return value;
   }, { name, input });
-  const settle=(target=page)=>target.evaluate(async()=>{const app=await import('/src/app.js');await app.flushDiagrams();await app.getStore().idle();});
+  const settle=(target=page)=>target.evaluate(async()=>{const app=await import(new URL('./src/app.js',location.href).href);await app.flushDiagrams();await app.getStore().idle();});
   let notebook = await call('get_notebook');
   for (const b of notebook.blocks) await call('remove_block', { blockId: b.id });
   await call('set_page', { title: 'My verified day', notificationMode: 'toast' });
@@ -196,7 +197,7 @@ try {
   // The left 200px is Excalidraw's shape-properties panel, not the drawing area.
   const drawX=bounds.x+bounds.width*.55,drawY=bounds.y+bounds.height*.45;
   await page.mouse.move(drawX,drawY);await page.mouse.down();await page.mouse.move(drawX+160,drawY+100,{steps:6});await page.mouse.up();
-  await page.waitForFunction(async id=>(await import('/src/app.js')).getStore().getRenderState().blocks.some(b=>b.id===id&&b.scene?.elements.length>0),drawing.id);
+  await page.waitForFunction(async id=>(await import(new URL('./src/app.js',location.href).href)).getStore().getRenderState().blocks.some(b=>b.id===id&&b.scene?.elements.length>0),drawing.id);
   await mkdir(`${root}/test-results`,{recursive:true});await page.screenshot({path:`${root}/test-results/full-canvas.png`,fullPage:true});
   await page.getByRole('button',{name:'Back to notebook',exact:true}).click();await settle();
   assert.ok((await call('get_notebook')).blocks.find(b=>b.id===drawing.id).scene.elements.length>0);
@@ -248,7 +249,7 @@ try {
   await page.locator('#page-menu > summary').click();await settle();await page.locator('#wide-page').check();await settle();assert.equal((await call('get_view')).contentWidth,'wide');await page.locator('#wide-page').uncheck();await settle();await page.locator('#page-menu > summary').click();await settle();
   // A failed localStorage preference write must restore the already-changed checkbox.
   await page.locator('#page-menu > summary').click();await settle();
-  await page.evaluate(async()=>{const {VIEW_KEY}=await import('/src/view.js');window.omdOriginalSet=Storage.prototype.setItem;Storage.prototype.setItem=function(key,value){if(key===VIEW_KEY)throw new DOMException('quota','QuotaExceededError');return window.omdOriginalSet.call(this,key,value);};});
+  await page.evaluate(async()=>{const {VIEW_KEY}=await import(new URL('./src/view.js',location.href).href);window.omdOriginalSet=Storage.prototype.setItem;Storage.prototype.setItem=function(key,value){if(key===VIEW_KEY)throw new DOMException('quota','QuotaExceededError');return window.omdOriginalSet.call(this,key,value);};});
   await page.locator('#wide-page').click();await settle();assert.equal(await page.locator('#wide-page').isChecked(),false);assert.equal(await page.locator('body').getAttribute('data-content-width'),'reading');
   await page.evaluate(()=>{Storage.prototype.setItem=window.omdOriginalSet;delete window.omdOriginalSet;});await page.locator('#page-menu > summary').click();await settle();
   const menuBlock=(await call('add_block',{type:'text',text:'Context menu fixture'})).block;
@@ -280,21 +281,21 @@ try {
   let releaseEngine,engineRequested;
   const engineGate=new Promise(resolve=>{releaseEngine=resolve;}),requested=new Promise(resolve=>{engineRequested=resolve;});
   await racePage.route('**/src/excalidraw-engine.js',async route=>{engineRequested();await engineGate;await route.continue();});
-  await racePage.goto('http://localhost:4317/',{waitUntil:'domcontentloaded'});
+  await racePage.goto(appURL,{waitUntil:'domcontentloaded'});
   await requested;await racePage.waitForFunction(()=>document.getElementById('agent-status').textContent.includes('50 tools'));
   const latestScene={elements:[{id:'edited-during-download',type:'rectangle',x:50,y:50,width:220,height:80}],appState:{},files:{}};
   await call('excalidraw_set_scene',{blockId:drawing.id,json:JSON.stringify(latestScene)},racePage);
   releaseEngine();await racePage.locator('.excalidraw canvas').first().waitFor();
   // A rendered initial scene is normalized and saved by onChange. The normalized
   // data must still be the agent's newest shape, never the old empty snapshot.
-  await racePage.waitForFunction(async id=>{const b=(await import('/src/app.js')).getStore().getRenderState().blocks.find(b=>b.id===id);return b.scene.elements[0]?.id==='edited-during-download'&&b.scene.elements[0]?.version!==undefined;},drawing.id);
+  await racePage.waitForFunction(async id=>{const b=(await import(new URL('./src/app.js',location.href).href)).getStore().getRenderState().blocks.find(b=>b.id===id);return b.scene.elements[0]?.id==='edited-during-download'&&b.scene.elements[0]?.version!==undefined;},drawing.id);
   // Other native tabs reload committed data through BroadcastChannel and keep only the destination page resident.
-  const peer=await raceContext.newPage();peer.on('pageerror',error=>errors.push(error.message));await peer.goto('http://localhost:4317/');await peer.waitForFunction(()=>document.getElementById('agent-status').textContent.includes('50 tools'));
+  const peer=await raceContext.newPage();peer.on('pageerror',error=>errors.push(error.message));await peer.goto(appURL);await peer.waitForFunction(()=>document.getElementById('agent-status').textContent.includes('50 tools'));
   await call('set_page',{title:'Shared IndexedDB edit'},racePage);await peer.waitForFunction(()=>document.getElementById('page-title').value==='Shared IndexedDB edit');
   const residentFirst=(await call('get_notebook',{},racePage)).id;
   const residentSecond=(await call('page_add',{title:'Hydrated destination'},racePage)).pageId;
   await peer.waitForFunction(()=>document.getElementById('page-title').value==='Hydrated destination');
-  assert.deepEqual(await peer.evaluate(async()=>{const store=(await import('/src/app.js')).getStore();const {pageId,recordCount}=store.residency();return {pageId,recordCount};}),{pageId:residentSecond,recordCount:2});
+  assert.deepEqual(await peer.evaluate(async()=>{const store=(await import(new URL('./src/app.js',location.href).href)).getStore();const {pageId,recordCount}=store.residency();return {pageId,recordCount};}),{pageId:residentSecond,recordCount:2});
   await call('page_select',{pageId:residentFirst},racePage);await peer.waitForFunction(()=>document.getElementById('page-title').value==='Shared IndexedDB edit');
   assert.ok((await call('get_notebook',{},peer)).blocks[0].scene.elements.length>0);
   await peer.close();
@@ -308,7 +309,7 @@ try {
   const edgeContext=await browser.newContext({serviceWorkers:'block'}),edgePage=await edgeContext.newPage();edgePage.on('pageerror',error=>errors.push(error.message));
   const edgeBook=JSON.parse(exported),template=edgeBook.pages[0],edgeScene={elements:[],appState:{},files:{}};
   edgeBook.id='edge-notebook';edgeBook.activePageId='a:b';edgeBook.pages=[['a:b','c'],['a','b:c'],['quoted-page','quote"\\canvas']].map(([id,blockId])=>({...template,id,title:id,blocks:[{id:blockId,type:'excalidraw',title:'ID fixture',scene:edgeScene}]}));edgeBook.parents=Object.fromEntries(edgeBook.pages.map(p=>[p.id,'']));
-  await edgePage.addInitScript(book=>localStorage.setItem('omd.notebook.v1',JSON.stringify(book)),edgeBook);await edgePage.goto('http://localhost:4317/');await edgePage.waitForFunction(()=>document.getElementById('agent-status').textContent.includes('50 tools'));await edgePage.locator('.excalidraw canvas').first().waitFor();
+  await edgePage.addInitScript(book=>localStorage.setItem('omd.notebook.v1',JSON.stringify(book)),edgeBook);await edgePage.goto(appURL);await edgePage.waitForFunction(()=>document.getElementById('agent-status').textContent.includes('50 tools'));await edgePage.locator('.excalidraw canvas').first().waitFor();
   await call('page_select',{pageId:'a'},edgePage);await edgePage.locator('.excalidraw canvas').first().waitFor();await call('excalidraw_set_scene',{blockId:'b:c',json:JSON.stringify(latestScene)},edgePage);await settle(edgePage);
   assert.equal((await call('get_page',{pageId:'a:b'},edgePage)).blocks[0].scene.elements.length,0);assert.equal((await call('get_page',{pageId:'a'},edgePage)).blocks[0].scene.elements[0].id,'edited-during-download');
   await call('open_canvas',{pageId:'quoted-page',blockId:'quote"\\canvas'},edgePage);await edgePage.locator('#canvas-stage .excalidraw canvas').first().waitFor();await call('close_canvas',{},edgePage);assert.ok(await edgePage.locator('#canvas-stage').isHidden());
@@ -317,6 +318,7 @@ try {
   await call('page_select',{pageId:'a'},edgePage);await edgePage.locator('#page-title').dispatchEvent('compositionend');await settle(edgePage);assert.equal((await call('get_page',{pageId:'quoted-page'},edgePage)).title,'Original-page IME edit');assert.equal((await call('get_notebook',{},edgePage)).id,'a');
   await edgeContext.close();
   assert.deepEqual(errors.filter(error => error !== 'Tabs are limited to two levels.'), []);
+  console.log(`Static base ${basePath||'/'} passed.`);
   console.log('Native WebMCP, app shell/sidebar, view persistence, mobile drawer/focus/menu, lazy engine loading/teardown, block identity, theme, reminders, import/export, and offline reload passed.');
 } catch(error) {
   if(page) { await mkdir(`${root}/test-results`,{recursive:true});await page.screenshot({path:`${root}/test-results/failure.png`,fullPage:true});console.log(JSON.stringify({errors,consoleErrors,diagnostic:await page.evaluate(()=>({notices:document.getElementById('notices')?.textContent,canvas:[...document.querySelectorAll('#canvas-stage canvas')].map(c=>({class:c.className,width:c.width,height:c.height,rect:c.getBoundingClientRect().toJSON()})),selected:[...document.querySelectorAll('#canvas-stage input:checked')].map(e=>({value:e.value,title:e.closest('label')?.title})),notebook:localStorage.getItem('omd.notebook.v1')}))})); }

@@ -9,7 +9,8 @@
     "start": "node scripts/start.mjs",
     "build": "node scripts/build.mjs",
     "test:browser": "node tests/browser.mjs",
-    "typecheck": "tsc --noEmit && tsc --project tsconfig.worker.json --noEmit"
+    "typecheck": "tsc --noEmit && tsc --project tsconfig.worker.json --noEmit",
+    "check:static": "node tests/static-output.mjs"
   },
   "engines": {
     "node": ">=22"
