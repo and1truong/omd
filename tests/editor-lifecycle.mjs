@@ -163,7 +163,8 @@ async function importedFocus() {
   assert.equal(await input.getAttribute('id'),editorId);await input.press('Shift+Tab');await page.waitForFunction(()=>lifecycleStore.getState().blocks[0].items[1]?.id==='page-title');await focus();
   const title=await page.locator('#page-title').inputValue();await input.press('End');await page.keyboard.type(' stays focused');await flush(page);
   assert.equal(await page.locator('#page-title').inputValue(),title);assert.equal(await text(page,{...f,itemId:'page-title'}),'Imported task stays focused');
-  await page.locator('[data-item-id="page-title"] > .check-row').getByRole('button',{name:'Move checklist item up',exact:true}).click();
+  await page.locator('[data-item-id="page-title"] > .check-row').getByRole('button',{name:'Checklist item actions',exact:true}).click();
+  await page.locator('#block-actions-dialog').getByRole('button',{name:'Move checklist item up',exact:true}).click();
   await page.waitForFunction(()=>lifecycleStore.getState().blocks[0].items[0]?.id==='page-title');await focus();
   await input.press('Enter');await page.waitForFunction(()=>lifecycleStore.getState().blocks[0].items.length===3);
   const added=await page.evaluate(()=>lifecycleStore.getState().blocks[0].items[1].id);
