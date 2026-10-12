@@ -66,6 +66,8 @@ async function inlineRename(group,nested,orientation) {
   assert.equal(await titleOf(group,id),`Inline ${orientation}`);assert.equal((await block(group.id)).activeTabId,active);assert.equal(await titleInput().count(),0);
   assert.equal(await revision(),before+1);assert.equal(await page.evaluate(()=>window.tabsApp.getStore().residency().undoEntries),history+1);
   await page.locator('#undo-button').click();await settled();assert.equal(await titleOf(group,id),old);
+  const noOpRevision=await revision(),noOpHistory=await page.evaluate(()=>window.tabsApp.getStore().residency().undoEntries);await header(active).click();await settled();
+  assert.equal(await revision(),noOpRevision);assert.equal(await page.evaluate(()=>window.tabsApp.getStore().residency().undoEntries),noOpHistory);assert.equal(await page.evaluate(()=>window.tabsApp.getStore().canRedo()),true);
   await page.locator('#redo-button').click();await settled();assert.equal(await titleOf(group,id),`Inline ${orientation}`);
   await header(id).press('F2');await titleInput().fill('Cancelled draft');await titleInput().press('Escape');await focused(id);
   assert.equal(await titleOf(group,id),`Inline ${orientation}`);assert.equal(await revision(),before+3);
@@ -112,6 +114,78 @@ async function inlineRename(group,nested,orientation) {
   console.log(`${engine} ${basePath||'/'}: ${orientation} inline labels, nested edits, Enter/Escape/blur, one-entry history, empty titles, IME hide/page switch, failure/retry and DnD after rename passed.`);
 }
 
+async function staleTabControls(orientation) {
+  await call('page_add',{title:`Scope A ${orientation}`});const tabs=await group(orientation,null,'Same IDs');
+  const source=await state(),destination={...structuredClone(source),id:`${source.id}-copy`,title:`Scope B ${orientation}`};
+  const book=await page.evaluate(()=>window.tabsApp.getStore().getNotebook());book.pages=[source,destination];book.activePageId=source.id;book.parents={[source.id]:'',[destination.id]:''};
+  await call('import_notebook',{notebook:book});await settled();
+  const baseline=structuredClone((await block(tabs.id)));await page.evaluate(()=>window.tabsApp.setView({sidebarOpen:true}));
+  await header(tabs.ids[1]).press('F2');await page.getByRole('textbox',{name:'Rename tab',exact:true}).evaluate(el=>{window.scopedTitle=el;el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.value='Draft belongs to A';});
+  await page.getByRole('link',{name:`Switch to ${destination.title}`,exact:true}).click();await settled();
+  assert.equal((await state()).id,destination.id);assert.equal(await page.evaluate(()=>window.scopedTitle.isConnected),true);
+  await own(tabs.id).getByRole('button',{name:'Move tab down',exact:true}).click();await settled();
+  await header(tabs.ids[0]).press('End');await settled();
+  await header(tabs.ids[2]).click();await settled();
+  await tablist(tabs.id).getByRole('button',{name:'Add tab',exact:true}).click();await settled();
+  await own(tabs.id).getByRole('button',{name:'Delete tab',exact:true}).click();await page.getByRole('button',{name:'Remove tab',exact:true}).click();await settled();
+  assert.deepEqual(await block(tabs.id),baseline,'stale select/keyboard/add/move/remove never mutate the destination with identical IDs');
+  assert.equal(await page.evaluate(()=>window.scopedTitle.isConnected),true);
+  await page.evaluate(()=>window.scopedTitle.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));await settled();
+  const original=await page.evaluate(id=>window.tabsApp.getStore().getPage(id),source.id);
+  assert.equal(find(original.blocks,tabs.id).tabs.find(t=>t.id===tabs.ids[1]).title,'Draft belongs to A');
+  assert.deepEqual(await block(tabs.id),baseline);await page.evaluate(()=>window.tabsApp.setView({sidebarOpen:false}));
+  console.log(`${engine} ${basePath||'/'}: ${orientation} stale controls scoped to original page despite shared IDs and composition passed.`);
+}
+
+async function failedRenameRecovery(orientation,nested=false) {
+  const sourcePage=(await call('page_add',{title:`Recovery ${orientation} ${nested?'nested':'root'}`})).pageId;
+  const outer=await group(nested?(orientation==='horizontal'?'vertical':'horizontal'):orientation,null,'Recovery');
+  const tabs=nested?await group(orientation,outer.ids[0],'Nested recovery'):outer,id=tabs.ids[1];
+  const destination=(await call('page_add',{title:'Recovery destination'})).pageId;await call('page_select',{pageId:sourcePage});
+  const fail=()=>page.evaluate(()=>{window.savedPut=IDBObjectStore.prototype.put;const name=window.tabsApp.getStore().databaseName();IDBObjectStore.prototype.put=function(...args){if(this.transaction.db.name===name)throw new DOMException('Injected tab quota exceeded','QuotaExceededError');return window.savedPut.apply(this,args);};});
+  const restore=()=>page.evaluate(()=>{IDBObjectStore.prototype.put=window.savedPut;});
+  const start=async value=>{await header(id).press('F2');await titleInput().evaluate((el,value)=>{window.failedIME=el;el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.value=value;},value);};
+  const end=async()=>{await fail();await page.evaluate(()=>window.failedIME.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));await page.getByRole('button',{name:'Retry tab rename',exact:true}).waitFor();await page.waitForFunction(()=>window.failedIME.isConnected&&!window.failedIME.disabled);await page.evaluate(()=>window.tabsApp.getStore().idle());};
+  let draft='Tiếng Việt 世界 — retry';await start(draft);await reorder(tabs.id,tabs.ids[2],tabs.ids[3],true,orientation);
+  const before=await revision(),history=await page.evaluate(()=>window.tabsApp.getStore().residency().undoEntries);await end();
+  assert.equal(await titleInput().inputValue(),draft);assert.equal(await titleInput().isVisible(),true);assert.equal(await revision(),before);
+  await restore();draft+=' — second composition';await titleInput().evaluate((input,value)=>{input.focus();input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));input.value=value;input.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));},draft);
+  await page.evaluate(async()=>{await new Promise(requestAnimationFrame);await window.tabsApp.getStore().idle();});assert.equal(await revision(),before,'new composition after a failed save requires a new save request');assert.equal(await titleInput().inputValue(),draft);
+  await screenshot(`${orientation}-${nested?'nested':'root'}-recovery`);
+  await call('page_select',{pageId:destination});assert.equal(await titleInput().isVisible(),true);assert.equal(await titleInput().inputValue(),draft);assert.equal(await page.locator('#notices .tab-title-input').count(),1);
+  await page.evaluate(()=>{window.savedCopy=navigator.clipboard.writeText; navigator.clipboard.writeText=value=>{window.copiedTabDraft=value;return Promise.resolve();};});
+  await page.getByRole('button',{name:'Copy tab title draft',exact:true}).click();assert.equal(await page.evaluate(()=>window.copiedTabDraft),draft);assert.equal(await revision(),before);
+  await call('page_select',{pageId:sourcePage});assert.equal(await header(id).locator('..').locator('.tab-title-input').count(),1);assert.equal(await titleInput().inputValue(),draft);
+  await restore();await page.evaluate(()=>{const store=window.tabsApp.getStore();window.retryDispatch=store.dispatch;store.dispatch=(name,...args)=>name==='tab_update'?new Promise(resolve=>{window.completeRetry=()=>resolve(window.retryDispatch(name,...args));}):window.retryDispatch(name,...args);});
+  await page.getByRole('button',{name:'Retry tab rename',exact:true}).click();assert.equal(await titleInput().isEnabled(),false);assert.equal(await page.getByRole('button',{name:'Cancel tab rename',exact:true}).isEnabled(),false);
+  await page.evaluate(()=>{window.tabsApp.getStore().dispatch=window.retryDispatch;window.completeRetry();});await settled();assert.equal(await titleOf(tabs,id),draft);assert.equal(await revision(),before+1);assert.equal(await page.evaluate(()=>window.tabsApp.getStore().residency().undoEntries),history+1);assert.equal(await page.locator('.tab-title-recovery').count(),0);
+  await start('Cancel this composed draft');const ids=(await block(tabs.id)).tabs.map(t=>t.id);await reorder(tabs.id,ids.at(-1),ids[0],false,orientation);const cancelBefore=await revision();await end();
+  await page.getByRole('button',{name:'Cancel tab rename',exact:true}).click();assert.equal(await titleInput().count(),0);assert.equal(await revision(),cancelBefore);await restore();assert.equal(await titleOf(tabs,id),draft);
+  await header(id).press('F2');await titleInput().fill('Disconnected plain draft');const detachedBefore=await revision();await fail();
+  await call('page_select',{pageId:destination});await page.getByRole('button',{name:'Retry tab rename',exact:true}).waitFor();assert.equal(await titleInput().inputValue(),'Disconnected plain draft');
+  await call('page_select',{pageId:sourcePage});assert.equal(await header(id).locator('..').locator('.tab-title-input').count(),1,'failed plain draft remains observed and reattaches after navigation');
+  await page.getByRole('button',{name:'Cancel tab rename',exact:true}).click();await restore();assert.equal(await revision(),detachedBefore);assert.equal(await titleOf(tabs,id),draft);
+  await page.evaluate(()=>{navigator.clipboard.writeText=window.savedCopy;});await page.getByRole('button',{name:'Dismiss message'}).evaluateAll(buttons=>buttons.forEach(button=>button.click()));
+  await page.reload();await ready();assert.equal(await titleOf(tabs,id),draft);
+  console.log(`${engine} ${basePath||'/'}: ${orientation} ${nested?'nested':'root'} IME quota failure retains inline draft across redraw/navigation, copy, retry and cancel passed.`);
+}
+
+async function inactiveDoubleClick(orientation,nested=false) {
+  await call('page_add',{title:`Double-click ${orientation} ${nested?'nested':'root'}`});
+  const outer=await group(nested?(orientation==='horizontal'?'vertical':'horizontal'):orientation,null,'Quick edits');
+  const tabs=nested?await group(orientation,outer.ids[0],'Nested quick edits'):outer,id=tabs.ids[1];
+  for(let attempt=0;attempt<12;attempt++){
+    await header(tabs.ids[0]).click();await settled();const before=await revision(),old=await titleOf(tabs,id);
+    await page.evaluate(()=>{window.tabClickTrace=[];if(!window.traceTabs){window.traceTabs=event=>{window.tabClickTrace.push([event.type,event.detail,event.target.id,event.target.className,performance.now(),document.querySelectorAll('.tab-title-input').length]);};for(const name of ['mousedown','mouseup','click','dblclick'])document.addEventListener(name,window.traceTabs,true);}});
+    await header(id).dblclick({delay:0});try{await titleInput().waitFor();}catch(error){console.log(await page.evaluate(()=>window.tabClickTrace));await screenshot(`${orientation}-${nested?'nested':'root'}-dblclick-failure`);throw error;}await page.evaluate(async()=>{await window.tabsApp.getStore().idle();await new Promise(requestAnimationFrame);});
+    assert.equal(await titleInput().isVisible(),true);assert.equal(await titleInput().inputValue(),old);assert.equal(await header(id).locator('..').locator('.tab-title-input').count(),1);assert.equal((await block(tabs.id)).activeTabId,id);assert.equal(await revision(),before+1);
+    if(attempt===0)await screenshot(`${orientation}-${nested?'nested':'root'}-inactive-dblclick`);
+    await titleInput().fill('Zero-delay inline edit');await titleInput().press('Enter');await settled();assert.equal(await titleOf(tabs,id),'Zero-delay inline edit');assert.equal(await revision(),before+2);
+    await page.locator('#undo-button').click();await settled();assert.equal(await titleOf(tabs,id),old);await header(id).click();await settled();assert.equal(await page.evaluate(()=>window.tabsApp.getStore().canRedo()),true);
+  }
+  console.log(`${engine} ${basePath||'/'}: ${orientation} ${nested?'nested':'root'} zero-delay inactive double-click retains live editor and one rename history entry passed.`);
+}
+
 try {
   await new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.once('error',reject);server.once('exit',code=>reject(new Error(`Server exited: ${code}`)));});
   browser=await ({chromium,webkit}[engine]).launch({headless:true});
@@ -119,6 +193,10 @@ try {
   page=await context.newPage();page.on('pageerror',error=>errors.push(error.message));
   await page.goto(url);await ready();
   await mkdir(`${root}/test-results`,{recursive:true});
+
+  for(const orientation of ['horizontal','vertical'])await staleTabControls(orientation);
+  for(const orientation of ['horizontal','vertical'])for(const nested of [false,true])await failedRenameRecovery(orientation,nested);
+  for(const orientation of ['horizontal','vertical'])for(const nested of [false,true])await inactiveDoubleClick(orientation,nested);
 
   for(const orientation of ['horizontal','vertical']) {
     await call('page_add',{title:`Drag ${orientation} tabs without losing your work`});

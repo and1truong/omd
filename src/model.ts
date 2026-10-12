@@ -256,7 +256,7 @@ export function mutatePage(doc:Page,action:CommandName,input:InternalInput = {},
     }
     case 'tab_add': fields(input, ['blockId', 'title', 'index']); { const b = block('tabs'); const tab = { id: uid(), title: input.title ?? 'New tab', blocks: [] }; insert(b.tabs, tab, input.index); b.activeTabId = tab.id; result = { tabId: tab.id }; } break;
     case 'tab_update': fields(input, ['blockId', 'tabId', 'title']); member(block('tabs').tabs, input.tabId).title = input.title!; break;
-    case 'tab_select': fields(input, ['blockId', 'tabId']); { const b = block('tabs'); member(b.tabs, input.tabId); b.activeTabId = input.tabId!; } break;
+    case 'tab_select': fields(input, ['blockId', 'tabId']); { const b = block('tabs'); member(b.tabs, input.tabId); if(b.activeTabId===input.tabId){if(validate)validateNotebook(doc);return {state:doc,result};} b.activeTabId = input.tabId!; } break;
     case 'tab_move': fields(input, ['blockId', 'tabId', 'index']); move(block('tabs').tabs, input.tabId, input.index); break;
     case 'tab_remove': fields(input, ['blockId', 'tabId']); { const b = block('tabs'); assert(b.tabs.length > 1, 'Keep at least one tab.'); remove(b.tabs, input.tabId); if (!b.tabs.some(t => t.id === b.activeTabId)) b.activeTabId = b.tabs[0].id; } break;
     case 'accordion_add': fields(input, ['blockId', 'title', 'index']); { const item = { id: uid(), title: input.title ?? 'New item', open: true, blocks: [] }; insert(block('accordion').items, item, input.index); result = { itemId: item.id }; } break;

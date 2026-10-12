@@ -82,6 +82,7 @@ export async function createStore(storage:StorageLike,options:StoreOptions = {})
           const records=target===current.meta.activePageId?current.records:await repository.page(target);
           const page=target===current.meta.activePageId?current.page:freeze(makeMaterializer()(records,target),true);
           let output:ReturnType<typeof mutatePage>;const edited=produce(page,draft=>{output=mutatePage(draft,action,args,false);});result=output!.result;validateNotebook(edited);
+          if(action==='tab_select'&&edited===page)return {...result,revision:current.meta.revision} as MutationResult<K>;
           changes=recordChanges(records,pageRecords(edited));
           const {blocks,...metadata}=edited;
           next={...current.meta,pages:current.meta.pages.map(p=>p.id===target?{...metadata,blocks:[]}:p),revision:current.meta.revision+1,updatedAt:new Date().toISOString()};validateBook(next);
