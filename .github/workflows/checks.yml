@@ -25,6 +25,9 @@ jobs:
           path: dist
   browser:
     runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble
+      options: --init --shm-size=1g
     timeout-minutes: 10
     strategy:
       matrix:
@@ -42,7 +45,6 @@ jobs:
           node-version: '22'
       - run: npm install --ignore-scripts --no-audit --no-fund
       - run: npm run typecheck
-      - run: npx playwright install --with-deps chromium
       - run: npm run build
       - run: npm run check:static
       - run: node tests/browser.mjs
@@ -54,6 +56,9 @@ jobs:
           if-no-files-found: ignore
   startup:
     runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble
+      options: --init --shm-size=1g
     timeout-minutes: 10
     strategy:
       matrix:
@@ -68,7 +73,6 @@ jobs:
         with:
           node-version: '22'
       - run: npm install --ignore-scripts --no-audit --no-fund
-      - run: npx playwright install --with-deps ${{ matrix.engine }}
       - run: npm run build
       - run: npm run test:startup
       - run: npm run test:theme
@@ -76,3 +80,4 @@ jobs:
       - run: npm run test:checklist
       - run: npm run test:editor
       - run: npm run test:table
+      - run: npm run test:tabs
