@@ -22,7 +22,7 @@ const ready=async target=>{
 try{
   await new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.once('error',reject);server.once('exit',code=>reject(new Error(`Server exited: ${code}`)));});
   browser=await ({chromium,webkit}[engine]).launch({headless:true,...(process.env.OMD_BROWSER_EXECUTABLE?{executablePath:process.env.OMD_BROWSER_EXECUTABLE}:{})});
-  const context=await browser.newContext();context.setDefaultTimeout(10000);
+  const context=await browser.newContext({viewport:{width:1440,height:1000}});context.setDefaultTimeout(10000);
   const watch=target=>target.on('pageerror',error=>errors.push(error.message));
   page=await context.newPage();watch(page);
   await page.goto(url);await ready(page);
@@ -30,8 +30,25 @@ try{
   const saved=await page.evaluate(async()=>{
     const store=(await import('./src/app.js')).getStore();await store.idle();return store.export();
   });
+  // The visible width toggle must resize the actual page and persist without editing content.
+  const widthToggle=page.getByRole('button',{name:'Fluid page width',exact:true});
+  const paperWidth=async()=> (await page.locator('.paper').boundingBox()).width;
+  assert.equal(await widthToggle.innerText(),'Fixed');assert.equal(await paperWidth(),900);
+  await widthToggle.click();assert.equal(await widthToggle.innerText(),'Fluid');assert.equal(await paperWidth(),1200);
+  await page.setViewportSize({width:1600,height:1000});assert.equal(await paperWidth(),1360);
   await page.reload();await ready(page);
+  assert.equal(await widthToggle.innerText(),'Fluid');assert.equal(await widthToggle.getAttribute('aria-pressed'),'true');assert.equal(await paperWidth(),1360);
   assert.equal(await page.locator('#page-title').inputValue(),'Saved before reopening');
+  assert.equal(await page.evaluate(async()=>(await import('./src/app.js')).getStore().export()),saved);
+  // Keep both choices reachable and within the viewport on the smallest supported screen.
+  await page.setViewportSize({width:320,height:700});
+  assert.equal(await paperWidth(),320);await widthToggle.click();assert.equal(await widthToggle.innerText(),'Fixed');assert.equal(await paperWidth(),320);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),320);
+  const toggleBounds=await widthToggle.boundingBox();assert.ok(toggleBounds.x>=0&&toggleBounds.x+toggleBounds.width<=320);
+  await widthToggle.focus();await widthToggle.press('Space');assert.equal(await widthToggle.innerText(),'Fluid');assert.equal(await paperWidth(),320);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),320);
+  await page.setViewportSize({width:1440,height:1000});
+  await widthToggle.click();assert.equal(await paperWidth(),900);
   assert.equal(await page.evaluate(async()=>(await import('./src/app.js')).getStore().export()),saved);
 
   // Exercise empty and populated owner indexes, duplicate journal owners, and
@@ -75,7 +92,7 @@ try{
   assert.equal(await migrated.evaluate(()=>localStorage.getItem('omd.notebook.v1')),saved);
   await legacy.close();await context.close();
   assert.deepEqual(errors,[]);
-  console.log(`${engine} ${basePath||'/'}: fresh startup, saved reload, owner deduplication, live/dead session history and migration passed.`);
+  console.log(`${engine} ${basePath||'/'}: fresh startup, saved reload, Fixed/Fluid layout, owner deduplication, live/dead session history and migration passed.`);
 }catch(error){
   if(page)console.error({engine,errors,body:(await page.locator('body').innerText()).slice(0,1000)});
   throw error;

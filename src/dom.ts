@@ -17,7 +17,7 @@ type UI = {
   'redo-button':HTMLElementTagNameMap['button'];
   'page-menu':HTMLElementTagNameMap['details'];
   'page-new-child':HTMLElementTagNameMap['button'];
-  'wide-page':HTMLElementTagNameMap['input'];
+  'page-width':HTMLElementTagNameMap['button'];
   'export-button':HTMLElementTagNameMap['button'];
   'import-button':HTMLElementTagNameMap['button'];
   'settings-button':HTMLElementTagNameMap['button'];

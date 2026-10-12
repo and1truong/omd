@@ -41,6 +41,7 @@ try {
   await page.locator('#sidebar-toggle').click();await settle();assert.deepEqual(await call('get_view'),{sidebarOpen:false,contentWidth:'reading',collapsedPageIds:[]});
   await call('set_view',{sidebarOpen:true,contentWidth:'wide'});assert.ok(await page.locator('#sidebar').isVisible());
   assert.equal(await page.locator('body').getAttribute('data-content-width'),'wide');
+  assert.equal(await page.locator('#page-width').innerText(),'Fluid');assert.equal(await page.locator('#page-width').getAttribute('aria-pressed'),'true');
   assert.equal((await call('get_notebook')).revision,contentRevision,'Layout preferences must not edit notebook content.');
   await call('set_view',{contentWidth:'reading'});
   const firstPage = (await call('get_notebook')).id;
@@ -253,12 +254,11 @@ try {
   assert.equal((await call('list_pages')).find(p=>p.pageId===mobileChild).parentId,createdPage);
   await call('set_view',{sidebarOpen:true});await page.screenshot({path:`${root}/test-results/mobile-page-tree.png`});await call('set_view',{sidebarOpen:false});await call('page_remove',{pageId:mobileChild});await call('page_select',{pageId:firstPage});
   await call('set_view',{sidebarOpen:true});await page.keyboard.press('Escape');assert.ok(await page.locator('#sidebar').isHidden());
-  await page.locator('#page-menu > summary').click();await settle();await page.locator('#wide-page').check();await settle();assert.equal((await call('get_view')).contentWidth,'wide');await page.locator('#wide-page').uncheck();await settle();await page.locator('#page-menu > summary').click();await settle();
-  // A failed localStorage preference write must restore the already-changed checkbox.
-  await page.locator('#page-menu > summary').click();await settle();
+  await page.locator('#page-width').click();await settle();assert.equal((await call('get_view')).contentWidth,'wide');await page.locator('#page-width').click();await settle();
+  // A failed localStorage preference write must leave the visible layout unchanged.
   await page.evaluate(async()=>{const {VIEW_KEY}=await import(new URL('./src/view.js',location.href).href);window.omdOriginalSet=Storage.prototype.setItem;Storage.prototype.setItem=function(key,value){if(key===VIEW_KEY)throw new DOMException('quota','QuotaExceededError');return window.omdOriginalSet.call(this,key,value);};});
-  await page.locator('#wide-page').click();await settle();assert.equal(await page.locator('#wide-page').isChecked(),false);assert.equal(await page.locator('body').getAttribute('data-content-width'),'reading');
-  await page.evaluate(()=>{Storage.prototype.setItem=window.omdOriginalSet;delete window.omdOriginalSet;});await page.locator('#page-menu > summary').click();await settle();
+  await page.locator('#page-width').click();await settle();assert.equal(await page.locator('#page-width').getAttribute('aria-pressed'),'false');assert.equal(await page.locator('#page-width').innerText(),'Fixed');assert.equal(await page.locator('body').getAttribute('data-content-width'),'reading');
+  await page.evaluate(()=>{Storage.prototype.setItem=window.omdOriginalSet;delete window.omdOriginalSet;});
   const menuBlock=(await call('add_block',{type:'text',text:'Context menu fixture'})).block;
   const menuShell=page.locator(`[data-block-id="${menuBlock.id}"]`);
   await menuShell.getByRole('button',{name:'Block actions',exact:true}).click();await settle();await page.locator('#block-actions-dialog').getByRole('button',{name:'Move block up',exact:true}).click();await settle();
