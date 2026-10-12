@@ -25,18 +25,22 @@ async function verifyInFlightNativeIme() {
       const tick=()=>{const get=meta.get('book');get.onsuccess=()=>{if(nativeHolding)tick();};};tick();
       window.releaseNativeTransaction=async()=>{nativeHolding=false;await finished;db.close();};
     });
-  for(const same of [false,true])for(const kind of ['page','title','cell']){
-    const input=kind==='page'?page.locator('#page-title'):kind==='title'?block().getByRole('textbox',{name:'table title',exact:true}):cell(2,1),original=await input.inputValue(),before=`Before ${kind} ${same?'same':'new'} IME`,preedit=same?before:`PREEDIT ${kind}`;
+  for(const same of [false,true])for(const kind of ['page','subtitle','title','cell']){
+    const input=kind==='page'?page.locator('#page-title'):kind==='subtitle'?page.locator('#page-subtitle'):kind==='title'?block().getByRole('textbox',{name:'table title',exact:true}):cell(2,1),original=await input.inputValue(),before=`Before ${kind} ${same?'same':'new'} IME`,preedit=same?before:`PREEDIT ${kind}`;
     await hold();
     try {
       await input.fill(before);await input.evaluate((el,preedit)=>{el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.value=preedit;el.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));},preedit);
       await page.evaluate(()=>releaseNativeTransaction());await page.evaluate(async()=>{await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));await tableApp.getStore().idle();});
-      const saved=await page.evaluate(({kind,id})=>{const p=tableApp.getStore().getState(),b=p.blocks.find(b=>b.id===id);return kind==='page'?p.title:kind==='title'?b.title:b.rows[1].cells[0];},{kind,id});
+      const saved=await page.evaluate(({kind,id})=>{const p=tableApp.getStore().getState(),b=p.blocks.find(b=>b.id===id);return kind==='page'?p.title:kind==='subtitle'?p.subtitle:kind==='title'?b.title:b.rows[1].cells[0];},{kind,id});
       assert.equal(saved,before);assert.equal(await input.inputValue(),preedit);assert.match(await page.locator('#save-status').innerText(),/^Saving/);
       await hold();await input.evaluate((el,kind)=>{el.value=`Final ${kind} Việt 日本語`;el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));},kind);
       await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));assert.match(await page.locator('#save-status').innerText(),/^Saving/);
       assert.equal(await input.evaluate(el=>el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}))),true);
-      await page.evaluate(()=>releaseNativeTransaction());await settled();assert.equal(await input.inputValue(),`Final ${kind} Việt 日本語`);
+      await input.press('End');await input.pressSequentially(' suffix');
+      assert.equal(await input.inputValue(),`Final ${kind} Việt 日本語 suffix`);
+      await page.evaluate(()=>releaseNativeTransaction());
+      await page.waitForFunction(({kind,id})=>{const p=tableApp.getStore().getState(),b=p.blocks.find(b=>b.id===id),value=kind==='page'?p.title:kind==='subtitle'?p.subtitle:kind==='title'?b.title:b.rows[1].cells[0];return value===`Final ${kind} Việt 日本語 suffix`&&document.getElementById('save-status').textContent==='Saved';},{kind,id});
+      assert.equal(await input.inputValue(),`Final ${kind} Việt 日本語 suffix`);
       await input.fill(original);await settled();
     } finally {await page.evaluate(()=>releaseNativeTransaction());}
   }

@@ -17,6 +17,7 @@ async function ready(page) {
   await page.evaluate(async()=>{
     window.lifecycleApp=await import(new URL('./src/app.js',document.baseURI).href);await lifecycleApp.ready;
     window.lifecycleStore=lifecycleApp.getStore();window.lifecycleModel=await import(new URL('./src/model.js',document.baseURI).href);
+    window.lifecycleTools=(await import(new URL('./src/webmcp.js',document.baseURI).href)).createTools(lifecycleStore,{flushPending:lifecycleApp.flushPending});
   });
 }
 const call=(page,name,input={})=>page.evaluate(async({name,input})=>{await lifecycleApp.flushPending();return lifecycleStore.dispatch(name,input);},{name,input});
@@ -160,8 +161,28 @@ async function importedFocus() {
   const input=editor(page,'page-title'),focus=()=>page.waitForFunction(()=>document.activeElement?.closest('[data-checklist-editor]')?.dataset.checklistEditor==='page-title');
   const editorId=await input.getAttribute('id');assert.notEqual(editorId,'page-title');assert.equal(await page.locator('[id="page-title"]').count(),1);
   await input.press('Tab');await page.waitForFunction(()=>lifecycleStore.getState().blocks[0].items[0].children?.[0]?.id==='page-title');await focus();
-  assert.equal(await input.getAttribute('id'),editorId);await input.press('Shift+Tab');await page.waitForFunction(()=>lifecycleStore.getState().blocks[0].items[1]?.id==='page-title');await focus();
-  const title=await page.locator('#page-title').inputValue();await input.press('End');await page.keyboard.type(' stays focused');await flush(page);
+  assert.equal(await input.getAttribute('id'),editorId);
+  await page.evaluate(()=>{
+    const raf=requestAnimationFrame;window.pendingChecklistFocus=null;
+    window.requestAnimationFrame=function(callback){
+      if(String(callback).includes('revealChecklistItem(target)')){
+        window.pendingChecklistFocus=()=>{window.requestAnimationFrame=raf;callback(performance.now());};return 0;
+      }
+      return raf.call(this,callback);
+    };
+  });
+  await input.press('Shift+Tab');await page.waitForFunction(()=>lifecycleStore.getState().blocks[0].items[1]?.id==='page-title'&&!!window.pendingChecklistFocus);
+  const {before,after,wouldReset}=await input.evaluate(el=>{
+    el.focus();el.editor.commands.setTextSelection(1);
+    const node=el.querySelector('p').firstChild,range=document.createRange(),selection=getSelection();
+    range.setStart(node,node.length);range.collapse(true);selection.removeAllRanges();selection.addRange(range);
+    const before=selection.anchorOffset;
+    el.editor.view.focus();const wouldReset=selection.anchorOffset===0;
+    selection.removeAllRanges();selection.addRange(range);window.pendingChecklistFocus();
+    return {before,after:selection.anchorOffset,wouldReset};
+  });
+  assert.equal(before,'Imported task'.length);assert.equal(wouldReset,true);assert.equal(after,before);
+  await focus();const title=await page.locator('#page-title').inputValue();await page.keyboard.type(' stays focused');await flush(page);
   assert.equal(await page.locator('#page-title').inputValue(),title);assert.equal(await text(page,{...f,itemId:'page-title'}),'Imported task stays focused');
   await page.locator('[data-item-id="page-title"] > .check-row').getByRole('button',{name:'Checklist item actions',exact:true}).click();
   await page.locator('#block-actions-dialog').getByRole('button',{name:'Move checklist item up',exact:true}).click();
@@ -184,6 +205,56 @@ async function scopedSettlement() {
   });await context.close();
 }
 
+async function richToolAndSidebarBarriers(type) {
+  const {context,page}=await fresh(),f=await fixture(page,{type}),input=f.itemId?editor(page,f.itemId):textEditor(page,f.blockId);
+  const next=(await call(page,'page_add',{title:`Sidebar destination ${type}`})).pageId;
+  await call(page,'page_select',{pageId:f.pageId});
+  const other=(await call(page,'add_block',{type:'text',text:'Unrelated saved note'})).blockId;
+  const original=await text(page,f),draft=`Rich PREEDIT ${type} Việt 日本語`;
+  await composed(page,input,draft);
+  await page.evaluate(other=>{
+    const tool=name=>lifecycleTools.find(tool=>tool.name===`omd_${name}`);
+    window.richReadDone=window.richScalarDone=false;
+    window.richRead=tool('get_notebook').execute({}).then(()=>{richReadDone=true;});
+    window.richScalar=tool('update_block').execute({blockId:other,patch:{text:'Scalar changed unrelated note'}}).then(()=>{richScalarDone=true;});
+  },other);
+  await page.waitForFunction(()=>richReadDone&&richScalarDone);
+  assert.equal(await text(page,f),original);assert.equal(await input.innerText(),draft);
+  assert.equal(await text(page,{blockId:other,pageId:f.pageId}),'Scalar changed unrelated note');
+  const count=await page.evaluate(()=>lifecycleStore.getState().blocks.length);
+  await page.evaluate(()=>{
+    const tool=name=>lifecycleTools.find(tool=>tool.name===`omd_${name}`);
+    window.richStructureDone=window.richExportDone=false;
+    window.richStructure=tool('add_block').execute({type:'divider'}).then(()=>{richStructureDone=true;});
+    window.richExport=tool('export_notebook').execute({}).then(()=>{richExportDone=true;});
+  });
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  assert.deepEqual(await page.evaluate(()=>[richStructureDone,richExportDone]),[false,false]);
+  assert.equal(await page.evaluate(()=>lifecycleStore.getState().blocks.length),count);assert.equal(await text(page,f),original);
+  await input.dispatchEvent('compositionend');await page.evaluate(()=>Promise.all([richStructure,richExport]));
+  assert.equal(await text(page,f),draft);
+  await page.waitForFunction(({blockId,itemId})=>!document.querySelector(itemId?`[data-checklist-editor="${itemId}"] .markdown-editor`:`[data-text-editor="${blockId}"] .markdown-editor`).editor.view.composing,f);
+  const final=`Sidebar final ${type} on original identity`;
+  await composed(page,input,final);await input.evaluate(el=>{window.richSidebarEditor=el;window.richSidebarPath=location.pathname;});
+  await page.locator(`a[href$="/page/${next}"]`).first().click();
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  assert.deepEqual(await page.evaluate(()=>[lifecycleStore.getActivePageId(),location.pathname===richSidebarPath,richSidebarEditor.isConnected]),[f.pageId,true,true]);
+  await page.evaluate(async()=>{
+    const request=indexedDB.open(lifecycleStore.databaseName()),db=await new Promise((resolve,reject)=>{request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
+    const tx=db.transaction('meta','readwrite'),meta=tx.objectStore('meta');window.richHold=true;
+    const finished=new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error);});
+    const tick=()=>{const request=meta.get('book');request.onsuccess=()=>{if(richHold)tick();};};tick();
+    window.releaseRichTransaction=async()=>{richHold=false;await finished;db.close();};
+  });
+  await input.dispatchEvent('compositionend');
+  await page.waitForFunction(()=>document.getElementById('save-status').dataset.state==='pending');
+  assert.deepEqual(await page.evaluate(()=>[lifecycleStore.getActivePageId(),location.pathname===richSidebarPath,richSidebarEditor.isConnected]),[f.pageId,true,true]);
+  await page.evaluate(()=>releaseRichTransaction());await page.waitForFunction(next=>lifecycleStore.getActivePageId()===next,next);
+  assert.equal(await text(page,f),final);assert.equal(await page.evaluate(()=>richSidebarEditor.isConnected),false);
+  assert.equal(await page.evaluate(()=>lifecycleStore.getState().blocks.length),0);
+  await screenshot(page,`${type}-sidebar-final-ack`);await context.close();
+}
+
 async function composingDeletion() {
   const {context,page}=await fresh(),f=await fixture(page),input=editor(page,f.itemId),draft='漢字 còn giữ sau khi xóa từ tab khác';
   await composed(page,input,draft);const peer=await context.newPage();await ready(peer);await call(peer,'page_select',{pageId:f.pageId});await call(peer,'remove_block',{blockId:f.blockId});
@@ -198,6 +269,6 @@ try {
   await new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.once('error',reject);server.once('exit',code=>reject(new Error(`Server exited: ${code}`)));});
   await mkdir(`${root}/test-results`,{recursive:true});browser=await ({chromium,webkit}[engine]).launch({headless:true});
   await historyBarrier();await retainedDrafts('checklist');await retainedDrafts('text');await deletedDrafts();await deletedDrafts(true);
-  await compositionBarrier('checklist');await compositionBarrier('text');await importedFocus();await scopedSettlement();await composingDeletion();assert.deepEqual(errors,[]);
+  await compositionBarrier('checklist');await compositionBarrier('text');await richToolAndSidebarBarriers('text');await richToolAndSidebarBarriers('checklist');await importedFocus();await scopedSettlement();await composingDeletion();assert.deepEqual(errors,[]);
   console.log(`${engine} ${basePath||'/'}: history/draft recovery, strict scoped composition/export, original-page navigation and imported focus identity passed.`);
 } finally {await browser?.close();server.kill();}

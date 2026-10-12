@@ -49,9 +49,9 @@ let tabTitleEdit:{flush:()=>Promise<unknown>}|undefined;
 export const openPalette = () => {shell?.closeMobile();palette?.open();};
 export const getView = () => shell!.getView();
 export const setView = async (patch:PartialView) => {if(patch.sidebarOpen)await beforeNavigate();return shell!.setView(patch);};
-export async function flushPending(options:{settle?:boolean}={}){await tabTitleEdit?.flush();await nativeEdits?.flushAll(options);await textEditors?.flushAll();await diagrams?.flushAll();await nativeEdits?.flushAll(options);}
+export async function flushPending(options:{settle?:boolean}={}){await tabTitleEdit?.flush();await nativeEdits?.flushAll(options);await textEditors?.flushAll(options);await diagrams?.flushAll();await nativeEdits?.flushAll(options);}
 export const flushDiagrams=flushPending;
-async function beforeNavigate(){await tabTitleEdit?.flush();await nativeEdits?.flushAll();await textEditors?.flushAll({settle:false});await diagrams?.beforeNavigate();await nativeEdits?.flushAll();}
+async function beforeNavigate(){await tabTitleEdit?.flush();await nativeEdits?.flushAll();await textEditors?.flushAll();await diagrams?.beforeNavigate();await nativeEdits?.flushAll();}
 export async function openCanvas(blockId:string,pageId?:string) {
   const page=await store.getPage(pageId);findBlock(page,blockId,'excalidraw');await flushPending();
   shell?.closeMobile();
@@ -106,7 +106,7 @@ function editable(value:string,aria:string,fn:(value:string,pageId:string)=>unkn
   const pageId=store.getActivePageId();
   function write() { const result=draft?writeNative(draft,input.value,aria):fn(input.value,pageId); if(multiline)fit(input);return result; }
   composition.track(input,write,()=>pageId);
-  input.addEventListener('input',()=>{if(draft)nativeEdits!.stage(draft,input.value,aria);if(!composition.isComposing(input))write();});
+  input.addEventListener('input',event=>{if(draft)nativeEdits!.stage(draft,input.value,aria);if(!(event instanceof InputEvent&&event.isComposing)&&!composition.isPreediting(input))write();});
   if (multiline) input.dataset.autofit = 'true'; return input;
 }
 function writeNative(target:NativeTarget,value:string,label:string) {
@@ -255,7 +255,7 @@ function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
     requestAnimationFrame(()=>{
       if(pageId!==store.getActivePageId())return;
       const block=[...document.querySelectorAll<HTMLElement>('.block-type-checklist')].find(block=>block.dataset.blockId===b.id),entry=block&&[...block.querySelectorAll<HTMLElement>('[data-item-id]')].find(entry=>entry.dataset.itemId===itemId),target=entry?.querySelector<HTMLElement>(':scope > .check-row .markdown-editor');
-      if(target){revealChecklistItem(target);textEditors!.focusChecklist(b.id,itemId,pageId);}
+      if(target){revealChecklistItem(target);if(document.activeElement!==target)textEditors!.focusChecklist(b.id,itemId,pageId);}
     });
   }
   async function addItem(parentId?:string,index?:number) {const result=await action('checklist_add',{pageId,blockId:b.id,parentId,index});if(result)focusItem(result.itemId);}
@@ -679,7 +679,7 @@ async function boot() {
     const el=domId(key==='title'?'page-title':'page-subtitle');
     const target=(pageId:string):NativeTarget=>({kind:'page',pageId,field:key}),label=key==='title'?'Page title':'Page description';
     const write = (pageId:string) => {const saved=writeNative(target(pageId),el.value,label);fit(el);return saved;};
-    composition.track(el,write,()=>renderPageId);el.addEventListener('input',()=>{const pageId=renderPageId;nativeEdits!.stage(target(pageId),el.value,label);if(!composition.isComposing(el))write(pageId);});
+    composition.track(el,write,()=>renderPageId);el.addEventListener('input',event=>{const pageId=renderPageId;nativeEdits!.stage(target(pageId),el.value,label);if(!(event instanceof InputEvent&&event.isComposing)&&!composition.isPreediting(el))write(pageId);});
     if(key==='title') {
       let finishing=false;
       el.addEventListener('keydown',async event=>{
