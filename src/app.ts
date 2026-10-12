@@ -45,11 +45,11 @@ function revealChecklistItem(target:HTMLElement) {
 interface InsertionAnchor {blockId:string;side:'before'|'after'}
 interface DragData {containerId?:string;kind:'block'|'card'|'column'|'tab';blockId:string;cardId?:string;columnId?:string;tabId?:string;pageId?:string}
 let suppressTabClick=false;
-let tabTitleEdit:{flush:()=>Promise<unknown>}|undefined;
+let tabTitleEdit:{flush:(options?:{settle?:boolean;pageId?:string})=>Promise<unknown>}|undefined;
 export const openPalette = () => {shell?.closeMobile();palette?.open();};
 export const getView = () => shell!.getView();
 export const setView = async (patch:PartialView) => {if(patch.sidebarOpen)await beforeNavigate();return shell!.setView(patch);};
-export async function flushPending(options:{settle?:boolean}={}){await tabTitleEdit?.flush();await nativeEdits?.flushAll(options);await textEditors?.flushAll();await diagrams?.flushAll();await nativeEdits?.flushAll(options);}
+export async function flushPending(options:{settle?:boolean}={}){await tabTitleEdit?.flush(options);await nativeEdits?.flushAll(options);await textEditors?.flushAll();await diagrams?.flushAll();await nativeEdits?.flushAll(options);}
 export const flushDiagrams=flushPending;
 async function beforeNavigate(){await tabTitleEdit?.flush();await nativeEdits?.flushAll();await textEditors?.flushAll({settle:false});await diagrams?.beforeNavigate();await nativeEdits?.flushAll();}
 export async function openCanvas(blockId:string,pageId?:string) {
@@ -432,9 +432,17 @@ function renderTabs(shell:HTMLElement,b:BlockOf<'tabs'>) {
       if(header.querySelector('input')||store.getActivePageId()!==pageId)return;
       let value:string;try{value=findBlock(store.getRenderState(),b.id,'tabs').block.tabs.find(tab=>tab.id===t.id)!.title;}catch{return;}
       const input=element('input','tab-title-input');input.type='text';input.value=value;input.id=`${t.id}-label`;input.setAttribute('aria-label','Rename tab');input.size=Math.max(5,input.value.length);
-      const original=input.value;let finished=false,requested=false,failed=false,pending:Promise<void>|undefined;
+      const original=input.value;let finished=false,requested=false,failed=false,pending:Promise<void>|undefined,saveError:Error|undefined;
       let editHeader:HTMLElement=header;let editTab=tab,editRename=rename,recovery:HTMLElement|undefined,notice:HTMLElement|undefined;
-      const session={flush:()=>finish()};
+      const session={flush:async({settle=true,pageId:targetPageId}:{settle?:boolean;pageId?:string}={})=>{
+        if(targetPageId&&targetPageId!==pageId)return;
+        if(composition.isComposing(input)){
+          if(!settle)return;
+          requested=true;await composition.settled(target=>target===input);
+          if(failed&&!finished)throw saveError;
+        }
+        await finish();
+      }};
       function close(focus=false) {
         finished=true;observer.disconnect();if(tabTitleEdit===session)tabTitleEdit=undefined;
         input.remove();recovery?.remove();notice?.remove();editHeader.style.removeProperty('flex-wrap');editHeader.removeAttribute('role');for(const name of ['aria-label','aria-selected','aria-controls'])editHeader.removeAttribute(name);editTab.hidden=editRename.hidden=false;if(focus&&editTab.isConnected)editTab.focus();
@@ -465,7 +473,7 @@ function renderTabs(shell:HTMLElement,b:BlockOf<'tabs'>) {
           recovery?.querySelectorAll('button').forEach(button=>button.disabled=true);
           if(value!==original)await store.dispatch('tab_update',{pageId,blockId:b.id,tabId:t.id,title:value},{quiet:true});
           editTab.textContent=value||'Untitled';editTab.setAttribute('aria-label',`Open ${value||'tab'}`);editRename.setAttribute('aria-label',`Rename ${value||'Untitled'} tab`);close(focus);
-        }).catch(error=>{requested=false;input.disabled=false;recovery?.querySelectorAll('button').forEach(button=>button.disabled=false);failed=true;recover();notify(errorOf(error).message,'error',true);throw error;}).finally(()=>{pending=undefined;});return pending;
+        }).catch(error=>{saveError=errorOf(error);requested=false;input.disabled=false;recovery?.querySelectorAll('button').forEach(button=>button.disabled=false);failed=true;recover();notify(saveError.message,'error',true);throw error;}).finally(()=>{pending=undefined;});return pending;
       }
       const observer=new MutationObserver(()=>{if(failed&&!finished)recover();else if(!input.isConnected)void finish().catch(()=>{});});observer.observe(document.body,{childList:true,subtree:true});
       composition.track(input,()=>requested?finish(false,true).catch(()=>{}):undefined,()=>pageId);
