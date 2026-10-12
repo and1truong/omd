@@ -101,6 +101,6 @@ export async function migrationChecks({sourceRoot,extension='ts',startupVersion}
   const dbName=name(),live=await openRepository(storage(),{name:dbName,initial:emptyNotebook}),opening=indexedDB.open(dbName,5);const upgraded=await req(opening);await rejects(()=>live.commit({}, {}, []),/upgraded.*Reload/);upgraded.close();live.close();
   evidence.push({case:'new install / versionchange closes connection and rejects obsolete writer',passed:true});
   let startup;
-  if(startupVersion){const f=fixture();f.reminder.dueAt='2999-01-01T00:00:00Z';await seed('omd.notebook.records.v1',startupVersion,f);startup=f.book;}
+  if(startupVersion){const f=fixture();f.reminder.dueAt='2999-01-01T00:00:00Z';f.book.pages[0].blocks.find(b=>b.id===f.reminder.id).dueAt=f.reminder.dueAt;await seed('omd.notebook.records.v1',startupVersion,f);startup=f.book;}
   return {evidence,startup};
 }
