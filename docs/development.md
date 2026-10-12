@@ -39,6 +39,8 @@ The browser suite enables Chrome's native WebMCP feature and executes tools thro
 
 CI runs the native suite at both the origin root and `/omd/`, including lazy library/font URLs and canvas behavior.
 
+Route regression coverage uses two tabs sharing IndexedDB and native WebMCP to check independent selection/URLs, shared content, refresh, new-tab links, history, pending edits, invalid/deleted/imported pages and offline deep links. It also loads the generated static fallback with an HTTP 404 response; this simulates GitHub Pages, not a live deployment check.
+
 `npm run test:theme` checks legacy theme migration, page switching/creation/import, same-context tab synchronization, live OS appearance, reload/reopen, diagrams/canvas, unchanged notebook revisions/history and invalid/failed storage writes. Run with `OMD_BROWSER=chromium` or `webkit` and `OMD_BASE_PATH=/omd` for project hosting; CI runs all four combinations. This suite exercises the real WebMCP adapter without inventing a browser registry; `test:browser` separately proves native registration.
 
 The checklist browser suite checks four-level nesting, sibling ordering, Enter/Tab/Shift+Tab, composition, focus, independent checkboxes, undo/redo, persistence and touch controls. CI runs it on Chromium and WebKit at both the origin root and `/omd/`.
@@ -52,6 +54,8 @@ Schema v4 keeps the same database name. A single versionchange transaction copie
 ## Static hosting and GitHub Pages
 
 Run `npm run build` and serve `dist` from a static HTTPS host. Relative asset, manifest and worker URLs support deployment beneath a subpath.
+
+The local server falls back to `index.html` for `/page/:id` document requests, while missing scripts/styles remain 404s. The build emits `404.html` for GitHub Pages deep links. On other static hosts, configure an equivalent document fallback. The shell derives its base before loading assets; the service worker serves the cached shell for offline page routes. Deep links require notebook data in the same browser profile/origin: sharing a URL alone does not transfer local data.
 
 The GitHub Pages workflow runs only for pushes to `main` or a manual run on `main`. Both build and deploy jobs require `refs/heads/main`; a manual run selecting another branch skips them. Pull requests and feature branches use the separate Checks workflow. Set **Settings → Pages → Source** to **GitHub Actions**. Main then publishes to [omd](https://and1truong.github.io/omd/), unless a custom domain is configured. Generated files and a publishing branch are not committed.
 

@@ -5,6 +5,7 @@ import {icon} from './icons.js';
 import {createView,validateView,VIEW_KEY} from './view.js';
 import {reconcile} from './render-cache.js';
 import {pageAncestors,MAX_PAGE_LEVELS} from './notebook.js';
+import {pagePath,followPageLink} from './routes.js';
 
 interface MenuAction {label:string;icon:string;disabled?:boolean;danger?:boolean;run:()=>unknown}
 export function showMenu(id:'block-actions-dialog'|'page-actions-dialog',title:string,actions:MenuAction[],anchor:HTMLElement) {
@@ -13,7 +14,7 @@ export function showMenu(id:'block-actions-dialog'|'page-actions-dialog',title:s
   dialog.showModal();const r=anchor.getBoundingClientRect(),bounds=dialog.getBoundingClientRect();dialog.style.left=`${Math.max(8,Math.min(r.left,innerWidth-bounds.width-8))}px`;dialog.style.top=`${Math.max(8,Math.min(r.bottom+6,innerHeight-bounds.height-8))}px`;list.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
 }
 export function setupShell(store:NotebookStore,{beforeNavigate,openPalette,confirm,onError,onThemeChange}:{beforeNavigate:()=>Promise<unknown>;openPalette:()=>unknown;confirm:(title:string,message:string,yes?:string)=>Promise<boolean>;onError:ErrorHandler;onThemeChange:(theme:Theme)=>unknown}) {
-  const sidebar=domId('sidebar'),toggle=domId('sidebar-toggle'),pages=domId('sidebar-pages'),media=matchMedia('(max-width: 760px)'),view=createView({getItem:key=>localStorage.getItem(key),setItem:(key,value)=>localStorage.setItem(key,value)},store.getRenderState().theme),rows=new Map<string,{node:HTMLDivElement;expand:HTMLButtonElement;select:HTMLButtonElement;label:HTMLSpanElement;more:HTMLButtonElement}>();
+  const sidebar=domId('sidebar'),toggle=domId('sidebar-toggle'),pages=domId('sidebar-pages'),media=matchMedia('(max-width: 760px)'),view=createView({getItem:key=>localStorage.getItem(key),setItem:(key,value)=>localStorage.setItem(key,value)},store.getRenderState().theme),rows=new Map<string,{node:HTMLDivElement;expand:HTMLButtonElement;select:HTMLAnchorElement;label:HTMLSpanElement;more:HTMLButtonElement}>();
   const menu=domId('page-menu'),widthToggle=domId('page-width'),widthLabel=widthToggle.querySelector('span')!;let drawerOpen=false,lastActivePath:string|null=null,movingPageId:string|null=null,breadcrumbSignature='';
   async function run<K extends CommandName>(name:K,input:CommandInput<K>){try{await beforeNavigate();return await store.dispatch(name,input);}catch(error){onError(errorOf(error));return null;}}
   function closeMobile(){if(media.matches){drawerOpen=false;if(sidebar.open)sidebar.close();sync();}}
@@ -49,8 +50,8 @@ export function setupShell(store:NotebookStore,{beforeNavigate,openPalette,confi
         const node=document.createElement('div');node.className='sidebar-page';node.dataset.pageId=page.pageId;
         const expand=document.createElement('button');expand.type='button';expand.className='icon-button page-tree-toggle';
         expand.addEventListener('click',()=>{const ids=new Set(view.get().collapsedPageIds);if(ids.has(page.pageId))ids.delete(page.pageId);else ids.add(page.pageId);safeView({collapsedPageIds:[...ids]});});
-        const select=document.createElement('button');select.type='button';select.className='sidebar-page-select';select.append(icon('page'));const label=document.createElement('span');select.append(label);
-        select.addEventListener('click',()=>{closeMobile();run('page_select',{pageId:page.pageId});});
+        const select=document.createElement('a');select.href=pagePath(page.pageId);select.className='sidebar-page-select';select.append(icon('page'));const label=document.createElement('span');select.append(label);
+        select.addEventListener('click',event=>followPageLink(event,()=>{closeMobile();run('page_select',{pageId:page.pageId});}));
         const more=document.createElement('button');more.type='button';more.className='icon-button sidebar-page-more';more.append(icon('more'));
         more.addEventListener('click',()=>{
           const current=store.listPages(),p=current.find(p=>p.pageId===page.pageId)!;
@@ -75,7 +76,7 @@ export function setupShell(store:NotebookStore,{beforeNavigate,openPalette,confi
     if(focused?.isConnected&&document.activeElement!==focused)focused.focus({preventScroll:true});
     const heading=domId('app-page-title');if(heading.textContent!==state.title)heading.textContent=state.title||'Untitled page';heading.title=state.title||'Untitled page';
     domId('page-new-child').disabled=byId.get(state.id)!.depth+1>=MAX_PAGE_LEVELS;
-    const signature=JSON.stringify(ancestors.map(p=>[p.pageId,p.title]));if(signature!==breadcrumbSignature){const trail=domId('page-ancestors');trail.replaceChildren();for(const parent of ancestors){const segment=document.createElement('span');segment.className='ancestor-segment';const link=document.createElement('button');link.textContent=parent.title||'Untitled page';link.title=link.textContent;link.setAttribute('aria-label',`Open parent page ${link.textContent}`);link.addEventListener('click',()=>{closeMobile();run('page_select',{pageId:parent.pageId});});const divider=document.createElement('span');divider.textContent='/';divider.setAttribute('aria-hidden','true');segment.append(link,divider);trail.append(segment);}trail.hidden=!ancestors.length;breadcrumbSignature=signature;}
+    const signature=JSON.stringify(ancestors.map(p=>[p.pageId,p.title]));if(signature!==breadcrumbSignature){const trail=domId('page-ancestors');trail.replaceChildren();for(const parent of ancestors){const segment=document.createElement('span');segment.className='ancestor-segment';const link=document.createElement('a');link.href=pagePath(parent.pageId);link.textContent=parent.title||'Untitled page';link.title=link.textContent;link.setAttribute('aria-label',`Open parent page ${link.textContent}`);link.addEventListener('click',event=>followPageLink(event,()=>{closeMobile();run('page_select',{pageId:parent.pageId});}));const divider=document.createElement('span');divider.textContent='/';divider.setAttribute('aria-hidden','true');segment.append(link,divider);trail.append(segment);}trail.hidden=!ancestors.length;breadcrumbSignature=signature;}
   }
   async function createPage(parentId=''){closeMobile();menu.open=false;if(await run('page_add',{parentId})){const title=domId('page-title');title.focus();title.select();}}
   function openMove(pageId:string){
@@ -97,7 +98,7 @@ export function setupShell(store:NotebookStore,{beforeNavigate,openPalette,confi
   sidebar.addEventListener('close',()=>{if(media.matches&&!sidebar.open){drawerOpen=false;toggle.setAttribute('aria-expanded','false');}});
   sidebar.addEventListener('keydown',event=>{
     if(!media.matches||!sidebar.open||(event as KeyboardEvent).key!=='Tab')return;
-    const buttons=[...sidebar.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')],first=buttons[0],last=buttons.at(-1);
+    const buttons=[...sidebar.querySelectorAll<HTMLElement>('button:not(:disabled),a[href]')],first=buttons[0],last=buttons.at(-1);
     if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus();}
     else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}
   });

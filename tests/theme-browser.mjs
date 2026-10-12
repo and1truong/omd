@@ -14,10 +14,10 @@ const legacyPage=(id,theme)=>({format:'omd',version:1,id,revision:0,title:`Legac
   {id:`canvas-${id}`,type:'excalidraw',title:'Global theme canvas',scene:{elements:[],appState:{},files:{}}}
 ]});
 const book={format:'omd-notebook',version:3,id:'theme-notebook',revision:0,activePageId:'old-dark',updatedAt:date,parents:{'old-dark':'','old-light':''},pages:[legacyPage('old-dark','dark'),legacyPage('old-light','light')]};
-const ready=target=>target.evaluate(async()=>{const app=await import('./src/app.js');await app.ready;if(!app.getStore())throw new Error(document.body.innerText);});
-const call=(target,name,input={})=>target.evaluate(async({name,input})=>{const app=await import('./src/app.js'),{createTools}=await import('./src/webmcp.js');return createTools(app.getStore(),{getView:app.getView,setView:app.setView,flushPending:app.flushPending}).find(t=>t.name===`omd_${name}`).execute(input);},{name,input});
-const settle=target=>target.evaluate(async()=>{await new Promise(requestAnimationFrame);await new Promise(requestAnimationFrame);const app=await import('./src/app.js');await app.flushPending();await app.getStore().idle();});
-const snapshot=target=>target.evaluate(async()=>{const app=await import('./src/app.js');await app.flushPending();const store=app.getStore();await store.idle();return {json:await store.export(),revision:store.getRevision(),history:store.residency().undoEntries,active:store.getActivePageId()};});
+const ready=target=>target.evaluate(async()=>{const app=await import(new URL('./src/app.js',document.baseURI).href);await app.ready;if(!app.getStore())throw new Error(document.body.innerText);});
+const call=(target,name,input={})=>target.evaluate(async({name,input})=>{const app=await import(new URL('./src/app.js',document.baseURI).href),{createTools}=await import(new URL('./src/webmcp.js',document.baseURI).href);return createTools(app.getStore(),{getView:app.getView,setView:app.setView,flushPending:app.flushPending}).find(t=>t.name===`omd_${name}`).execute(input);},{name,input});
+const settle=target=>target.evaluate(async()=>{await new Promise(requestAnimationFrame);await new Promise(requestAnimationFrame);const app=await import(new URL('./src/app.js',document.baseURI).href);await app.flushPending();await app.getStore().idle();});
+const snapshot=target=>target.evaluate(async()=>{const app=await import(new URL('./src/app.js',document.baseURI).href);await app.flushPending();const store=app.getStore();await store.idle();return {json:await store.export(),revision:store.getRevision(),history:store.residency().undoEntries,active:store.getActivePageId()};});
 const expectTheme=async(target,mode,resolved)=>{await target.waitForFunction(({mode,resolved})=>document.documentElement.dataset.theme===resolved&&document.getElementById('theme').value===mode,{mode,resolved});assert.equal((await call(target,'get_view')).theme,mode);};
 const diagrams=async(target,id,resolved)=>{await target.locator(`[data-block-id="mermaid-${id}"] [data-mermaid-preview] svg`).waitFor({state:'attached'});await target.locator(`[data-diagram-block="canvas-${id}"] .excalidraw canvas`).first().waitFor();await target.waitForFunction(({id,resolved})=>document.querySelector(`[data-diagram-block="canvas-${id}"] .excalidraw`).classList.contains('theme--dark')===(resolved==='dark'),{id,resolved});await settle(target);};
 try{
@@ -28,17 +28,17 @@ try{
   await page.addInitScript(book=>{if(!localStorage.getItem('omd.notebook.v1')){localStorage.setItem('omd.notebook.v1',JSON.stringify(book));localStorage.setItem('omd.view.v1',JSON.stringify({sidebarOpen:true,contentWidth:'reading',collapsedPageIds:[]}));}},book);
   await page.goto(url);await ready(page);await expectTheme(page,'dark','dark');await diagrams(page,'old-dark','dark');
   assert.equal(await page.evaluate(()=>localStorage.getItem('omd.notebook.v1')),JSON.stringify(book));
-  await page.getByRole('button',{name:'Switch to Legacy light page',exact:true}).click();await settle(page);await expectTheme(page,'dark','dark');await diagrams(page,'old-light','dark');
+  await page.getByRole('link',{name:'Switch to Legacy light page',exact:true}).click();await settle(page);await expectTheme(page,'dark','dark');await diagrams(page,'old-light','dark');
   await mkdir(`${root}/test-results`,{recursive:true});
   const evidence=`${root}/test-results/theme-${engine}-${basePath?'omd':'root'}`;
   await page.screenshot({path:`${evidence}-light-page-dark-mode.png`});
-  await page.getByRole('button',{name:'Switch to Legacy dark page',exact:true}).click();await settle(page);await diagrams(page,'old-dark','dark');
+  await page.getByRole('link',{name:'Switch to Legacy dark page',exact:true}).click();await settle(page);await diagrams(page,'old-dark','dark');
   await page.screenshot({path:`${evidence}-dark-page-dark-mode.png`});
   const stored=JSON.parse((await snapshot(page)).json);assert.deepEqual(stored.pages.map(p=>p.theme),['dark','light']);
   const newPage=await call(page,'page_add',{title:'Created under global theme'});await expectTheme(page,'dark','dark');await call(page,'page_remove',{pageId:newPage.pageId});await expectTheme(page,'dark','dark');
   await call(page,'page_select',{pageId:'old-dark'});await diagrams(page,'old-dark','dark');
   const peer=await context.newPage();peer.on('pageerror',error=>errors.push(error.message));await peer.goto(url);await ready(peer);await diagrams(peer,'old-dark','dark');
-  await peer.evaluate(async()=>{const app=await import('./src/app.js');await app.openCanvas('canvas-old-dark');});
+  await peer.evaluate(async()=>{const app=await import(new URL('./src/app.js',document.baseURI).href);await app.openCanvas('canvas-old-dark');});
   const before=await snapshot(page),peerBefore=await snapshot(peer);
   const mermaidDark=await page.locator('[data-mermaid-preview] svg .node rect').first().evaluate(node=>getComputedStyle(node).fill);
   await page.evaluate(()=>document.getElementById('settings-dialog').showModal());await page.locator('#theme').selectOption('light');
@@ -53,7 +53,7 @@ try{
   await call(page,'set_view',{theme:'dark'});await page.emulateMedia({colorScheme:'light'});await expectTheme(page,'dark','dark');
   await peer.close();await page.reload();await ready(page);await expectTheme(page,'dark','dark');await diagrams(page,'old-dark','dark');
   // Imported legacy themes never replace an established global preference.
-  await page.evaluate(async book=>{const app=await import('./src/app.js');await app.getStore().import(JSON.stringify(book));},book);await expectTheme(page,'dark','dark');
+  await page.evaluate(async book=>{const app=await import(new URL('./src/app.js',document.baseURI).href);await app.getStore().import(JSON.stringify(book));},book);await expectTheme(page,'dark','dark');
   assert.deepEqual(JSON.parse((await snapshot(page)).json).pages.map(p=>p.theme),['dark','light']);
   await assert.rejects(()=>call(page,'set_view',{theme:'sepia'}));await expectTheme(page,'dark','dark');
   await page.evaluate(()=>{window.themeSetItem=Storage.prototype.setItem;Storage.prototype.setItem=function(key,value){if(key==='omd.view.v1')throw new Error('quota');return window.themeSetItem.call(this,key,value);};document.getElementById('settings-dialog').showModal();});

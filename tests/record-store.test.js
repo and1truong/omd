@@ -4,6 +4,24 @@ import {createStore,failWrites} from './store-helper.js';
 import {emptyNotebook,makeBlock,STORAGE_KEY} from '../src/model.ts';
 import {wrapPage} from '../src/notebook.ts';
 const memory=()=>{const values=new Map();return {getItem:k=>values.get(k)??null,setItem:(k,v)=>values.set(k,v)};};
+test('selection is tab-local, writes no revision/history and reload hydrates the same tab page',async()=>{
+  const data=memory(),a=await createStore(data,{initial:emptyNotebook}),first=a.getActivePageId();
+  const second=(await a.dispatch('page_add',{title:'Second'})).pageId;
+  const b=await createStore(data,{activePageId:second}),revision=a.getRevision(),history=a.residency().undoEntries,writes=trace(a);
+  try{
+    await a.dispatch('page_select',{pageId:first});
+    assert.equal(a.getRevision(),revision);assert.equal(a.residency().undoEntries,history);assert.deepEqual(writes.puts,[]);
+    await b.reload();assert.equal(b.getActivePageId(),second);
+    await a.dispatch('set_page',{title:'First edited'});await b.reload();
+    assert.equal(b.getActivePageId(),second);assert.equal((await b.getPage(first)).title,'First edited');
+    await b.dispatch('set_page',{title:'Second edited'});await a.reload();
+    assert.equal(a.getActivePageId(),first);assert.equal((await a.getPage(second)).title,'Second edited');
+    await a.dispatch('page_select',{pageId:second});await a.dispatch('set_page',{title:'Undo me'});await a.dispatch('page_select',{pageId:first});await a.undo();
+    assert.equal(a.getActivePageId(),first);assert.equal((await a.getPage(second)).title,'Second edited');
+    await b.reload();await b.dispatch('page_remove',{pageId:first});await a.reload();assert.equal(a.getActivePageId(),second);
+    await assert.rejects(()=>a.dispatch('page_select',{pageId:'missing'}),/not found/i);
+  }finally{writes.stop();await a.close();await b.close();}
+});
 function trace(store){const puts=[],reads=[],put=IDBObjectStore.prototype.put,getAll=IDBIndex.prototype.getAll;
   IDBObjectStore.prototype.put=function(value,key){if(this.transaction.db.name===store.databaseName())puts.push({store:this.name,key,value});return put.call(this,value,key);};
   IDBIndex.prototype.getAll=function(query,...args){if(this.objectStore.transaction.db.name===store.databaseName())reads.push(query);return getAll.call(this,query,...args);};

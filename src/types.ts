@@ -81,4 +81,4 @@ export interface RecordChange {key:RecordKey;before:StoredRecord|null;after:Stor
 export type Notify = (message:string,kind?:string,sticky?:boolean)=>void;
 export type ErrorHandler = (error:Error)=>void;
 export interface Journal {owner:string;before:Notebook;after:Notebook;changes:{key:RecordKey;forward:import('immer').Patch[];inverse:import('immer').Patch[]}[]}
-export interface StoreOptions {key?:string;name?:string;indexedDB?:IDBFactory;initial?:()=>Notebook|Page;locks?:LockManager}
+export interface StoreOptions {key?:string;name?:string;indexedDB?:IDBFactory;initial?:()=>Notebook|Page;locks?:LockManager;activePageId?:string}
