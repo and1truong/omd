@@ -131,7 +131,7 @@ export async function openRepository(storage:StorageLike,{key=STORAGE_KEY,name='
     async records(keys:RecordKey[]){const {tx,done}=transaction();const rows=await Promise.all(keys.map(key=>request<StoredRecord|undefined>(tx.objectStore('records').get(key))));await done;return new Map(keys.map((key,i)=>[recordKey(...key),rows[i]??null]));},
     async page(pageId:string){const {tx,done}=transaction();const rows=await request<StoredRecord[]>(tx.objectStore('records').index('pageId').getAll(pageId));await done;if(!rows.length)throw new Error('Page not found.');return recordsMap(rows);},
     async export(){const {tx,done}=transaction();const meta=await request<Notebook|undefined>(tx.objectStore('meta').get('book'));const rows=await request<StoredRecord[]>(tx.objectStore('records').getAll());await done;const records=recordsMap(rows);return {...meta!,pages:meta!.pages.map(p=>makeMaterializer()(records,p.id))};},
-    async due(now:number){const {tx,done}=transaction();const rows=await request<DueReminder[]>(tx.objectStore('reminders').index('due').getAll(IDBKeyRange.upperBound(now)));await done;return rows;},
+    async due(now:number){const {tx,done}=transaction();const rows=await request<DueReminder[]>(tx.objectStore('reminders').index('due').getAll(IDBKeyRange.upperBound(now)));const delivered=await Promise.all(rows.map(r=>request(tx.objectStore('delivery').getKey([r.pageId,r.id,r.dueAt]))));await done;return rows.filter((_,i)=>delivered[i]===undefined);},
     async history(id:string){const {tx,done}=transaction();const value=await request<Journal>(tx.objectStore('history').get(id));await done;return value;},
     async commit(expected:Notebook,meta:Notebook,changes:RecordChange[],{journal,journalId,deleteHistory=[]}:{journal?:Journal|null;journalId?:string|null;deleteHistory?:string[]}={}) {
       const {tx,done}=transaction('readwrite');let resident:Records|undefined;
@@ -140,8 +140,9 @@ export async function openRepository(storage:StorageLike,{key=STORAGE_KEY,name='
         if(!latest||latest.id!==expected.id||latest.revision!==expected.revision)throw new Error('Another window changed this notebook. Reload before editing.');
         for(const change of changes){let value=change.after;if(value?.kind==='block'&&value.data.type==='reminder'){
           const b=value.data,deliveryKey=[value.pageId,b.id,b.dueAt];
-          if(b.firedAt)tx.objectStore('delivery').put(b.firedAt,deliveryKey);
-          else {const fired=await request<string|undefined>(tx.objectStore('delivery').get(deliveryKey));if(fired)value={...value,data:{...b,firedAt:fired}};}
+          const fired=await request<string|undefined>(tx.objectStore('delivery').get(deliveryKey));
+          if(fired!==undefined)value={...value,data:{...b,firedAt:fired}};
+          else if(b.firedAt)tx.objectStore('delivery').put(b.firedAt,deliveryKey);
           change.after=value;
         }put(tx,change.key,value);}
         // The schema retains a default page for old clients/exports, not a live tab selection.
