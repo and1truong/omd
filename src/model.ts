@@ -4,7 +4,10 @@ import { emptyScene, validateScene } from './scene.js';
 export const FORMAT_VERSION = 1;
 export const STORAGE_KEY = 'omd.notebook.v1';
 export const MAX_CHECKLIST_LEVELS = 4;
-export const BLOCK_TYPES = ['text', 'heading', 'checklist', 'tabs', 'toggle', 'accordion', 'reminder', 'kanban', 'divider', 'mermaid', 'excalidraw'];
+export const BLOCK_TYPES = ['text', 'heading', 'checklist', 'table', 'tabs', 'toggle', 'accordion', 'reminder', 'kanban', 'divider', 'mermaid', 'excalidraw'];
+export const MAX_TABLE_ROWS = 100;
+export const MAX_TABLE_COLUMNS = 20;
+export const MAX_TABLE_CELL_LENGTH = 10000;
 const THEMES = ['system', 'light', 'dark'];
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/;
 const MODES = ['notification', 'alert', 'toast'];
@@ -12,11 +15,12 @@ export const uid = () => globalThis.crypto.randomUUID();
 const copy = <T>(value:T):T => structuredClone(value);
 function assert(test:unknown,message:string):asserts test {if(!test)throw new Error(message);}
 const object = (value:unknown):value is Record<string,unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
-function string(value:unknown,label:string) {
+function string(value:unknown,label:string):asserts value is string {
   assert(typeof value === 'string', `${label} must be text.`);
 }
 function integer(value:unknown,max:number) { assert(typeof value==='number'&&Number.isInteger(value) && value >= 0 && value <= max, 'Invalid position.'); }
 function boolean(value:unknown,label:string) { assert(typeof value === 'boolean', `${label} must be true or false.`); }
+function tableSize(value:unknown,max:number) { integer(value,max);assert(typeof value==='number'&&value>0,`Tables need 1–${max} rows/columns.`); }
 function date(value:unknown,label:string) { assert(typeof value === 'string' && ISO_DATE.test(value) && Number.isFinite(Date.parse(value)), `${label} must be an ISO date-time with a timezone.`); }
 function fields(value:unknown,allowed:readonly string[]) {
   assert(object(value), 'Expected an object.');
@@ -37,6 +41,12 @@ export function makeBlock(type:BlockType, options:BlockOptions = {}):Block {
     case 'text': return { ...base,type:'text', text: options.text ?? '' };
     case 'heading': return { ...base,type:'heading', text: options.text ?? 'A new section' };
     case 'divider': return {...base,type:'divider'};
+    case 'table': {
+      const rows=options.rowCount??3,columns=options.columnCount??3;
+      tableSize(rows,MAX_TABLE_ROWS);tableSize(columns,MAX_TABLE_COLUMNS);
+      const headerRow=options.headerRow??true,pinnedHeader=options.pinnedHeader??true,pinnedColumns=options.pinnedColumns??0;boolean(headerRow,'Header row');boolean(pinnedHeader,'Pinned header');integer(pinnedColumns,columns);
+      return {...base,type:'table',title:options.title??'A little table',headerRow,pinnedHeader,pinnedColumns,columns:Array.from({length:columns},()=>({id:uid()})),rows:Array.from({length:rows},()=>({id:uid(),cells:Array.from({length:columns},()=> '')}))};
+    }
     case 'mermaid': return { ...base,type:'mermaid', title: options.title ?? 'A diagram in words', source: options.source ?? 'flowchart LR\n  Idea --> Plan\n  Plan --> Do' };
     case 'excalidraw': return { ...base,type:'excalidraw', title: options.title ?? 'A little drawing space', scene: options.scene ?? emptyScene() };
     case 'checklist': return { ...base,type:'checklist', title: options.title ?? 'A few things to do', items: [] };
@@ -81,6 +91,13 @@ export function validateNotebook(raw:unknown):Page {
       switch (b.type) {
         case 'text': case 'heading': fields(b, ['id', 'type', 'text']); string(b.text, 'Block text'); break;
         case 'divider': fields(b, ['id', 'type']); break;
+        case 'table':
+          fields(b,['id','type','title','headerRow','pinnedHeader','pinnedColumns','columns','rows']);string(b.title,'Table title');boolean(b.headerRow,'Header row');boolean(b.pinnedHeader,'Pinned header');
+          list(b.rows);list(b.columns);tableSize(b.rows.length,MAX_TABLE_ROWS);tableSize(b.columns.length,MAX_TABLE_COLUMNS);
+          integer(b.pinnedColumns,b.columns.length);
+          for(const column of b.columns){fields(column,['id']);id(column.id);}
+          for(const row of b.rows){fields(row,['id','cells']);id(row.id);list(row.cells);assert(row.cells.length===b.columns.length,'Table rows must be rectangular.');for(const cell of row.cells){string(cell,'Table cell');assert(cell.length<=MAX_TABLE_CELL_LENGTH,'Table cell is too long.');}}
+          break;
         case 'mermaid': fields(b, ['id','type','title','source']); string(b.title,'Diagram title'); string(b.source,'Mermaid source'); break;
         case 'excalidraw': fields(b, ['id','type','title','scene']); string(b.title,'Canvas title'); validateScene(b.scene); break;
         case 'checklist':
@@ -190,18 +207,32 @@ export function mutatePage(doc:Page,action:CommandName,input:InternalInput = {},
     case 'set_page':
       fields(input, ['title', 'subtitle', 'theme', 'notificationMode']); Object.assign(doc, input); break;
     case 'add_block': {
-      fields(input, ['type', 'containerId', 'index', 'text', 'title', 'orientation', 'dueAt','source','scene']);
+      fields(input, ['type', 'containerId', 'index', 'text', 'title', 'orientation', 'dueAt','source','scene','rowCount','columnCount','headerRow','pinnedHeader','pinnedColumns']);
       const container = findContainer(doc, input.containerId);
       const b = makeBlock(input.type!, input); insert(container.blocks, b, input.index); result = { blockId: b.id, block: copy(b) }; break;
     }
     case 'update_block': {
       fields(input, ['blockId', 'patch']); const b = block();
-      const allowed = { text: ['text'], heading: ['text'], checklist: ['title'], tabs: ['title', 'orientation'], toggle: ['title', 'open'], accordion: ['title'], reminder: ['title', 'dueAt', 'enabled'], kanban: ['title'], divider: [], mermaid:['title','source'], excalidraw:['title','scene'] };
+      const allowed = { text: ['text'], heading: ['text'], checklist: ['title'], table:['title','headerRow','pinnedHeader','pinnedColumns'], tabs: ['title', 'orientation'], toggle: ['title', 'open'], accordion: ['title'], reminder: ['title', 'dueAt', 'enabled'], kanban: ['title'], divider: [], mermaid:['title','source'], excalidraw:['title','scene'] };
       fields(input.patch, allowed[b.type]); Object.assign(b, input.patch);
       if (b.type === 'reminder' && ('dueAt' in input.patch! || input.patch!.enabled === true)) b.firedAt = null;
       result = { blockId: b.id }; break;
     }
     case 'remove_block': fields(input, ['blockId']); { const f = findBlock(doc, input.blockId); remove(f.siblings, input.blockId); } break;
+    case 'table_cell_update': {
+      fields(input,['blockId','rowId','columnId','text']);const b=block('table');member(b.columns,input.columnId);string(input.text,'Table cell');assert(input.text.length<=MAX_TABLE_CELL_LENGTH,'Table cell is too long.');
+      member(b.rows,input.rowId).cells[b.columns.findIndex(column=>column.id===input.columnId)]=input.text;break;
+    }
+    case 'table_row_add': {
+      fields(input,['blockId','index']);const b=block('table');assert(b.rows.length<MAX_TABLE_ROWS,'Table row limit reached.');const row={id:uid(),cells:b.columns.map(()=> '')};insert(b.rows,row,input.index);result={rowId:row.id};break;
+    }
+    case 'table_column_add': {
+      fields(input,['blockId','index']);const b=block('table');assert(b.columns.length<MAX_TABLE_COLUMNS,'Table column limit reached.');const index=input.index??b.columns.length;const column={id:uid()};insert(b.columns,column,index);for(const row of b.rows)row.cells.splice(index,0,'');result={columnId:column.id};break;
+    }
+    case 'table_row_remove': fields(input,['blockId','rowId']);{const b=block('table');assert(b.rows.length>1,'Keep at least one table row.');remove(b.rows,input.rowId);}break;
+    case 'table_column_remove': {
+      fields(input,['blockId','columnId']);const b=block('table');assert(b.columns.length>1,'Keep at least one table column.');member(b.columns,input.columnId);const index=b.columns.findIndex(column=>column.id===input.columnId);remove(b.columns,input.columnId);for(const row of b.rows)row.cells.splice(index,1);b.pinnedColumns=Math.min(b.pinnedColumns,b.columns.length);break;
+    }
     case 'move_block': {
       fields(input, ['blockId', 'containerId', 'index']);
       const target = findContainer(doc, input.containerId);

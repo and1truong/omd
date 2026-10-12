@@ -11,19 +11,22 @@ import { createRenderCache, reconcile, revealActions } from './render-cache.js';
 import { setupShell, showMenu } from './shell.js';
 import { icon, labelIcon } from './icons.js';
 import {createTextEditors} from './text-editors.js';
+import {createTableEdits} from './table-edits.js';
+import {MAX_TABLE_ROWS,MAX_TABLE_COLUMNS} from './model.js';
 import {appBase,routePageId,setupRoutes} from './routes.js';
 
 function $<T extends HTMLElement=HTMLElement>(selector:string):T {if(selector.startsWith('#'))return domId<T>(selector.slice(1));const node=document.querySelector<T>(selector);if(!node)throw new Error(`Missing element: ${selector}`);return node;}
 let store:NotebookStore,palette:ReturnType<typeof setupPalette>|undefined,diagrams:ReturnType<typeof createDiagramManager>|undefined,renderer:ReturnType<typeof createRenderCache>,shell:ReturnType<typeof setupShell>|undefined,dragData:DragData|null|undefined;
 let textEditors:ReturnType<typeof createTextEditors>|undefined;
+let tableEdits:ReturnType<typeof createTableEdits>|undefined;
 interface InsertionAnchor {blockId:string;side:'before'|'after'}
 interface DragData {containerId?:string;kind:'block'|'card'|'column';blockId:string;cardId?:string;columnId?:string}
 export const openPalette = () => {shell?.closeMobile();palette?.open();};
 export const getView = () => shell!.getView();
 export const setView = async (patch:PartialView) => {if(patch.sidebarOpen)await beforeNavigate();return shell!.setView(patch);};
-export async function flushPending(){await textEditors?.flushAll();await diagrams?.flushAll();}
+export async function flushPending(){await tableEdits?.flushAll();await textEditors?.flushAll();await diagrams?.flushAll();}
 export const flushDiagrams=flushPending;
-async function beforeNavigate(){await textEditors?.flushAll();await diagrams?.beforeNavigate();}
+async function beforeNavigate(){await tableEdits?.flushAll();await textEditors?.flushAll();await diagrams?.beforeNavigate();}
 export async function openCanvas(blockId:string,pageId?:string) {
   const page=await store.getPage(pageId);findBlock(page,blockId,'excalidraw');await flushPending();
   shell?.closeMobile();
@@ -138,6 +141,7 @@ function renderBlock(b:Block,containerId:string,index:number,count:number) {
     }
     case 'divider': shell.append(element('hr')); break;
     case 'checklist': renderChecklist(shell, b); break;
+    case 'table': renderTable(shell,b);break;
     case 'tabs': renderTabs(shell, b); break;
     case 'toggle': renderToggle(shell, b); break;
     case 'accordion': renderAccordion(shell, b); break;
@@ -188,6 +192,61 @@ function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
   }
   const head=title(b,'☑'),progress=element('span','checklist-progress'),items=renderItems(b.items);progress.textContent=`${done} / ${total}`;head.append(progress);shell.append(head,items);
   shell.append(button('+ Add an item', 'Add checklist item', async () => { const r = await action('checklist_add', { blockId: b.id }); if (r) requestAnimationFrame(() => domId(r.itemId)?.focus()); }, 'add-inline'));
+}
+function renderTable(shell:HTMLElement,b:BlockOf<'table'>) {
+  const pageId=store.getActivePageId(),cellKey=(rowId:string,columnId:string)=>`table-cell-${encodeURIComponent(JSON.stringify([b.id,rowId,columnId]))}`,cellId=(r:number,c:number)=>cellKey(b.rows[r].id,b.columns[c].id);
+  const toolbar=element('div','table-toolbar'),size=element('span','muted');size.textContent=`${b.rows.length} rows × ${b.columns.length} columns`;
+  const addRow=async(index?:number)=>{const result=await action('table_row_add',{pageId,blockId:b.id,index});if(result)requestAnimationFrame(()=>document.getElementById(cellKey(result.rowId,b.columns[0].id))?.focus());};
+  const addColumn=async(index?:number)=>{const result=await action('table_column_add',{pageId,blockId:b.id,index});if(result)requestAnimationFrame(()=>document.getElementById(cellKey(b.rows[0].id,result.columnId))?.focus());};
+  const rowButton=button('+ Row','Add table row',()=>addRow(),'add-inline'),columnButton=button('+ Column','Add table column',()=>addColumn(),'add-inline');
+  rowButton.disabled=b.rows.length>=MAX_TABLE_ROWS;columnButton.disabled=b.columns.length>=MAX_TABLE_COLUMNS;
+  const checkbox=(label:string,checked:boolean,patch:'headerRow'|'pinnedHeader')=>{
+    const wrapper=element('label'),input=element('input');input.type='checkbox';input.checked=checked;input.setAttribute('aria-label',label);
+    input.addEventListener('change',async()=>{if(!await action('update_block',{pageId,blockId:b.id,patch:{[patch]:input.checked}}))input.checked=checked;});wrapper.append(input,document.createTextNode(label));return wrapper;
+  };
+  const pins=element('label'),select=element('select');select.setAttribute('aria-label','Pinned first columns');select.id=`${b.id}-pins`;
+  for(let i=0;i<=b.columns.length;i++){const option=element('option');option.value=String(i);option.textContent=String(i);select.append(option);}select.value=String(b.pinnedColumns);
+  select.addEventListener('change',async()=>{if(!await action('update_block',{pageId,blockId:b.id,patch:{pinnedColumns:Number(select.value)}}))select.value=String(b.pinnedColumns);});pins.append(document.createTextNode('Pin first columns '),select);
+  toolbar.append(size,rowButton,columnButton,checkbox('Header row',b.headerRow,'headerRow'),checkbox('Pin header',b.pinnedHeader,'pinnedHeader'),pins);
+  const scroll=element('div','table-scroll'),table=element('table','data-table'),caption=element('caption','sr-only');caption.textContent=b.title||'Table';table.append(caption);
+  scroll.tabIndex=0;scroll.setAttribute('role','region');scroll.setAttribute('aria-label',`${b.title||'Table'} — scrollable grid`);
+  const pin=(cell:HTMLElement,c:number)=>{if(c<b.pinnedColumns){cell.classList.add('table-pinned');cell.style.left=`${c*160}px`;}};
+  const head=element('thead'),columnTools=element('tr','table-column-tools');
+  b.columns.forEach((column,c)=>{
+    const th=element('th');th.scope='col';pin(th,c);
+    const more=button('…',`Column ${c+1} actions`,()=>showMenu('block-actions-dialog',`Column ${c+1}`,[
+      {label:'Insert column before',icon:'plus',disabled:b.columns.length>=MAX_TABLE_COLUMNS,run:()=>addColumn(c)},
+      {label:'Insert column after',icon:'plus',disabled:b.columns.length>=MAX_TABLE_COLUMNS,run:()=>addColumn(c+1)},
+      {label:'Delete column',icon:'trash',danger:true,disabled:b.columns.length===1,run:async()=>{if(await confirmAction('Delete this column?','All cells in this column will be removed. You can undo it.','Delete column'))await action('table_column_remove',{pageId,blockId:b.id,columnId:column.id},{focus:cellId(0,c===b.columns.length-1?c-1:c+1)});}},
+    ],more));th.append(document.createTextNode(`${c+1} `),more);columnTools.append(th);
+  });columnTools.append(element('td'));head.append(columnTools);const body=element('tbody');
+  b.rows.forEach((row,r)=>{
+    const tr=element('tr');tr.dataset.rowId=row.id;
+    if(r===0&&b.headerRow){tr.className=b.pinnedHeader?'table-header table-header-pinned':'table-header';}
+    b.columns.forEach((column,c)=>{
+      const cell=element(r===0&&b.headerRow?'th':'td');if(cell instanceof HTMLTableCellElement&&cell.tagName==='TH')cell.scope='col';pin(cell,c);
+      const saved=tableEdits!.value(pageId,b.id,row.id,column.id,row.cells[c]);
+      const input=editable(saved,`Table row ${r+1}, column ${c+1}`,(value,capturedPageId)=>tableEdits!.write(capturedPageId,b.id,row.id,column.id,value).catch(error=>{notify(errorOf(error).message,'error',true);}),{multiline:true,className:'table-cell',id:cellId(r,c)});
+      input.addEventListener('keydown',event=>{
+        const key=event as KeyboardEvent;if(key.isComposing||key.keyCode===229||composition.isComposing(input)||key.altKey)return;
+        let nextR=r,nextC=c;
+        if(key.key==='Tab'&&!key.ctrlKey&&!key.metaKey){const index=r*b.columns.length+c+(key.shiftKey?-1:1);if(index<0||index>=b.rows.length*b.columns.length)return;nextR=Math.floor(index/b.columns.length);nextC=index%b.columns.length;}
+        else if(key.key==='Enter'&&!key.shiftKey&&!key.ctrlKey&&!key.metaKey)nextR=r+1;
+        else if((key.ctrlKey||key.metaKey)&&key.key.startsWith('Arrow')){if(key.key==='ArrowUp')nextR--;if(key.key==='ArrowDown')nextR++;if(key.key==='ArrowLeft')nextC--;if(key.key==='ArrowRight')nextC++;}
+        else return;
+        key.preventDefault();if(nextR>=0&&nextR<b.rows.length&&nextC>=0&&nextC<b.columns.length)document.getElementById(cellId(nextR,nextC))?.focus();
+      });cell.append(input);tr.append(cell);
+    });
+    const tools=element('td','table-row-tools');if(r===0&&b.headerRow&&b.pinnedHeader)tools.classList.add('table-header-tool');
+    const more=button('…',`Row ${r+1} actions`,()=>showMenu('block-actions-dialog',`Row ${r+1}`,[
+      {label:'Insert row above',icon:'plus',disabled:b.rows.length>=MAX_TABLE_ROWS,run:()=>addRow(r)},
+      {label:'Insert row below',icon:'plus',disabled:b.rows.length>=MAX_TABLE_ROWS,run:()=>addRow(r+1)},
+      {label:'Delete row',icon:'trash',danger:true,disabled:b.rows.length===1,run:async()=>{if(await confirmAction('Delete this row?','All cells in this row will be removed. You can undo it.','Delete row'))await action('table_row_remove',{pageId,blockId:b.id,rowId:row.id},{focus:cellId(r===b.rows.length-1?r-1:r+1,0)});}},
+    ],more));tools.append(more);tr.append(tools);if(r===0&&b.headerRow)head.append(tr);else body.append(tr);
+  });table.append(head,body);scroll.append(table);
+  const old=document.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(b.id)}"] .table-scroll`),position=old?[old.scrollLeft,old.scrollTop]:[0,0];
+  requestAnimationFrame(()=>{scroll.scrollLeft=position[0];scroll.scrollTop=position[1];});
+  shell.append(title(b,'▦'),toolbar,scroll);const hint=element('small','muted');hint.textContent='Tab: next cell · Enter: next row · Shift+Enter: new line · Ctrl/⌘ + arrows: adjacent cell';shell.append(hint);
 }
 function renderTabs(shell:HTMLElement,b:BlockOf<'tabs'>) {
   shell.append(title(b, '▤')); const group = element('div', 'tab-group'); const layout = element('div', `tabs-layout ${b.orientation}`);
@@ -261,6 +320,7 @@ function renderKanban(shell:HTMLElement,b:BlockOf<'kanban'>) {
 const options: [BlockType,'horizontal'|'vertical'|null,string,string,string][] = [
   ['text', null, 'T', 'Text', 'An idea, a note, anything'], ['heading', null, 'H', 'Heading', 'Give a thought its own space'],
   ['checklist', null, '☑', 'Checklist', 'Little things, checked off'], ['tabs', 'horizontal', '▤', 'Horizontal tabs', 'Chapters, side by side'],
+  ['table',null,'▦','Table','A grid for your notes'],
   ['tabs', 'vertical', '▥', 'Vertical tabs', 'A tidy list of spaces'], ['toggle', null, '▸', 'Expandable block', 'Tuck a thought away'],
   ['accordion', null, '≡', 'Accordion', 'A few collapsible sections'], ['reminder', null, '◴', 'Reminder', 'A gentle nudge for later'],
   ['kanban', null, '▦', 'Kanban board', 'Keep things moving'], ['divider', null, '—', 'Divider', 'A little breathing room'],
@@ -361,6 +421,7 @@ async function boot() {
   for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', e => { if (e.target === dialog) { const rect = dialog.getBoundingClientRect(); if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) dialog.close(); } });
   diagrams=createDiagramManager(store,{notify});
   textEditors=createTextEditors(store,{composition,notify,createNext:createTextAfter});
+  tableEdits=createTableEdits(store,{settled:()=>composition.settled(input=>input instanceof Element&&input.classList.contains('table-cell'))});
   const dirtyContainers=new Set<string>();
   renderer=createRenderCache({makeBlock:renderBlock,makeList:makeBlockList,
     observeBlock:(id,fn)=>store.subscribeBlock(id,fn),observeList:(id,fn)=>store.subscribeContainer(id,fn),

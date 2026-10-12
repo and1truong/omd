@@ -20,7 +20,7 @@ try {
   page = await context.newPage(); page.on('pageerror', error => errors.push(error.message));page.on('console',msg=>{if(msg.type()==='error')consoleErrors.push(msg.text());});
   page.on('request',request=>{if(/\/(?:excalidraw|mermaid)-engine\.(?:js|css)/.test(request.url()))engineRequests.push(request.url());});
   await page.goto(appURL);
-  await page.waitForFunction(() => document.getElementById('agent-status').textContent.includes('50 tools'));
+  await page.waitForFunction(() => document.getElementById('agent-status').textContent.includes('55 tools'));
   const call = (name, input = {}, target = page) => target.evaluate(async ({name,input}) => {
     const registry = document.modelContext;
     if (!registry?.getTools || !registry?.executeTool) throw new Error('Native document.modelContext discovery/execution unavailable.');
@@ -38,6 +38,13 @@ try {
   await call('set_page', { title: 'My verified day', notificationMode: 'toast' });
   assert.equal(await page.locator('#page-title').inputValue(), 'My verified day');
   assert.ok(await page.locator('#sidebar').isVisible());
+  const table=(await call('add_block',{type:'table',rowCount:2,columnCount:2,pinnedColumns:1})).block;
+  await call('table_cell_update',{blockId:table.id,rowId:table.rows[1].id,columnId:table.columns[1].id,text:'Native WebMCP table'});
+  const tableRow=(await call('table_row_add',{blockId:table.id,index:1})).rowId,tableColumn=(await call('table_column_add',{blockId:table.id,index:1})).columnId;
+  assert.equal((await call('get_notebook')).blocks.find(b=>b.id===table.id).rows[2].cells[2],'Native WebMCP table');
+  await call('table_row_remove',{blockId:table.id,rowId:tableRow});await call('table_column_remove',{blockId:table.id,columnId:tableColumn});
+  assert.equal(await page.locator(`[data-block-id="${table.id}"]`).getByRole('textbox',{name:'Table row 2, column 2',exact:true}).inputValue(),'Native WebMCP table');
+  await call('remove_block',{blockId:table.id});
   const contentRevision=(await call('get_notebook')).revision;
   await page.locator('#sidebar-toggle').click();await settle();assert.deepEqual(await call('get_view'),{sidebarOpen:false,contentWidth:'reading',collapsedPageIds:[],theme:'system'});
   await call('set_view',{sidebarOpen:true,contentWidth:'wide'});assert.ok(await page.locator('#sidebar').isVisible());
@@ -74,7 +81,7 @@ try {
   assert.ok(await page.getByRole('link',{name:'Open parent page Tree root',exact:true}).isVisible());assert.ok(await page.getByRole('link',{name:'Open parent page Project branch',exact:true}).isVisible());
   await mkdir(`${root}/test-results`,{recursive:true});await page.screenshot({path:`${root}/test-results/page-tree.png`});
   await page.getByRole('button',{name:'Collapse subpages of Tree root',exact:true}).click();await settle();assert.equal(await page.locator(`.sidebar-page[data-page-id="${treeLeaf}"]`).count(),0);
-  await page.reload();await page.waitForFunction(()=>document.getElementById('agent-status').textContent.includes('50 tools'));
+  await page.reload();await page.waitForFunction(()=>document.getElementById('agent-status').textContent.includes('55 tools'));
   assert.equal((await call('get_notebook')).id,treeLeaf);assert.equal(await page.locator(`.sidebar-page[data-page-id="${treeLeaf}"]`).count(),0);
   await page.keyboard.press('Control+k');await page.locator('#page-search').fill('Milestone');await page.locator('#page-search').press('Enter');await settle();
   assert.ok(await page.getByRole('link',{name:'Switch to Milestone',exact:true}).isVisible());assert.equal(await page.getByRole('textbox',{name:'text content',exact:true}).innerText(),'Nested page content');
@@ -101,7 +108,7 @@ try {
   await call('checklist_remove',{blockId:checklist.id,itemId:nestedTask});
   await page.locator('#page-title').fill('Written by a person');
   await call('set_view',{sidebarOpen:false,contentWidth:'wide',collapsedPageIds:[]});
-  await page.reload(); await page.waitForFunction(() => document.getElementById('agent-status').textContent.includes('50 tools'));
+  await page.reload(); await page.waitForFunction(() => document.getElementById('agent-status').textContent.includes('55 tools'));
   assert.deepEqual(await call('get_view'),{sidebarOpen:false,contentWidth:'wide',collapsedPageIds:[],theme:'system'});await call('set_view',{sidebarOpen:true,contentWidth:'reading'});
   assert.equal(await page.locator('#page-title').inputValue(), 'Written by a person');
   assert.ok((await call('get_notebook')).blocks[0].items[0].done);
@@ -269,10 +276,10 @@ try {
   assert.equal(await menuShell.count(),0);
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Page must not overflow on mobile.');
   await page.evaluate(()=>scrollTo(0,0));await page.screenshot({ path: `${root}/test-results/mobile.png` });
-  await context.setOffline(true); await page.reload();await page.waitForFunction(()=>document.getElementById('agent-status').textContent.includes('50 tools'));
+  await context.setOffline(true); await page.reload();await page.waitForFunction(()=>document.getElementById('agent-status').textContent.includes('55 tools'));
   assert.equal(await page.locator('#page-title').inputValue(), 'Undo this');
   await page.locator('#page-title').fill('Edited offline');
-  await page.waitForFunction(()=>document.getElementById('save-status').textContent==='Saved');await page.reload();await page.waitForFunction(()=>document.getElementById('agent-status').textContent.includes('50 tools'));assert.equal(await page.locator('#page-title').inputValue(), 'Edited offline');
+  await page.waitForFunction(()=>document.getElementById('save-status').textContent==='Saved');await page.reload();await page.waitForFunction(()=>document.getElementById('agent-status').textContent.includes('55 tools'));assert.equal(await page.locator('#page-title').inputValue(), 'Edited offline');
   // Chrome 151 also emits an expected rejected tool callback as a pageerror.
   // Keep the explicit negative-input assertion above; permit only that one report.
   const validationErrors = errors.filter(error => error === 'Tabs are limited to two levels.');
@@ -290,7 +297,7 @@ try {
   const engineGate=new Promise(resolve=>{releaseEngine=resolve;}),requested=new Promise(resolve=>{engineRequested=resolve;});
   await racePage.route('**/src/excalidraw-engine.js',async route=>{engineRequested();await engineGate;await route.continue();});
   await racePage.goto(appURL,{waitUntil:'domcontentloaded'});
-  await requested;await racePage.waitForFunction(()=>document.getElementById('agent-status').textContent.includes('50 tools'));
+  await requested;await racePage.waitForFunction(()=>document.getElementById('agent-status').textContent.includes('55 tools'));
   const latestScene={elements:[{id:'edited-during-download',type:'rectangle',x:50,y:50,width:220,height:80}],appState:{},files:{}};
   await call('excalidraw_set_scene',{blockId:drawing.id,json:JSON.stringify(latestScene)},racePage);
   releaseEngine();await racePage.locator('.excalidraw canvas').first().waitFor();
@@ -298,7 +305,7 @@ try {
   // data must still be the agent's newest shape, never the old empty snapshot.
   await racePage.waitForFunction(async id=>{const b=(await import(new URL('./src/app.js',document.baseURI).href)).getStore().getRenderState().blocks.find(b=>b.id===id);return b.scene.elements[0]?.id==='edited-during-download'&&b.scene.elements[0]?.version!==undefined;},drawing.id);
   // Other native tabs reload committed data through BroadcastChannel and keep only the destination page resident.
-  const peer=await raceContext.newPage();peer.on('pageerror',error=>errors.push(error.message));await peer.goto(appURL);await peer.waitForFunction(()=>document.getElementById('agent-status').textContent.includes('50 tools'));
+  const peer=await raceContext.newPage();peer.on('pageerror',error=>errors.push(error.message));await peer.goto(appURL);await peer.waitForFunction(()=>document.getElementById('agent-status').textContent.includes('55 tools'));
   await call('set_page',{title:'Shared IndexedDB edit'},racePage);await peer.waitForFunction(()=>document.getElementById('page-title').value==='Shared IndexedDB edit');
   const residentFirst=(await call('get_notebook',{},racePage)).id;
   const residentSecond=(await call('page_add',{title:'Hydrated destination'},racePage)).pageId;
@@ -319,7 +326,7 @@ try {
   const edgeContext=await browser.newContext({serviceWorkers:'block'}),edgePage=await edgeContext.newPage();edgePage.on('pageerror',error=>errors.push(error.message));
   const edgeBook=JSON.parse(exported),template=edgeBook.pages[0],edgeScene={elements:[],appState:{},files:{}};
   edgeBook.id='edge-notebook';edgeBook.activePageId='a:b';edgeBook.pages=[['a:b','c'],['a','b:c'],['quoted-page','quote"\\canvas']].map(([id,blockId])=>({...template,id,title:id,blocks:[{id:blockId,type:'excalidraw',title:'ID fixture',scene:edgeScene}]}));edgeBook.parents=Object.fromEntries(edgeBook.pages.map(p=>[p.id,'']));
-  await edgePage.addInitScript(book=>localStorage.setItem('omd.notebook.v1',JSON.stringify(book)),edgeBook);await edgePage.goto(appURL);await edgePage.waitForFunction(()=>document.getElementById('agent-status').textContent.includes('50 tools'));await edgePage.locator('.excalidraw canvas').first().waitFor();
+  await edgePage.addInitScript(book=>localStorage.setItem('omd.notebook.v1',JSON.stringify(book)),edgeBook);await edgePage.goto(appURL);await edgePage.waitForFunction(()=>document.getElementById('agent-status').textContent.includes('55 tools'));await edgePage.locator('.excalidraw canvas').first().waitFor();
   await call('page_select',{pageId:'a'},edgePage);await edgePage.locator('.excalidraw canvas').first().waitFor();await call('excalidraw_set_scene',{blockId:'b:c',json:JSON.stringify(latestScene)},edgePage);await settle(edgePage);
   assert.equal((await call('get_page',{pageId:'a:b'},edgePage)).blocks[0].scene.elements.length,0);assert.equal((await call('get_page',{pageId:'a'},edgePage)).blocks[0].scene.elements[0].id,'edited-during-download');
   await call('open_canvas',{pageId:'quoted-page',blockId:'quote"\\canvas'},edgePage);await edgePage.locator('#canvas-stage .excalidraw canvas').first().waitFor();await call('close_canvas',{},edgePage);assert.ok(await edgePage.locator('#canvas-stage').isHidden());

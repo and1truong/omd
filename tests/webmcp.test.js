@@ -29,7 +29,7 @@ test('checklist tools expose nested parent selection and reject fifth levels and
 test('registered tools execute shared actions and read back their persistent results', async () => {
   const store = (await setup()); const registry = new Map();
   const registered = await registerWebMCP(store, {}, { registry: { registerTool(tool, { signal }) { registry.set(tool.name, tool); signal.addEventListener('abort', () => registry.delete(tool.name)); } } });
-  assert.ok(registered.supported); assert.equal(registered.count, 50);
+  assert.ok(registered.supported); assert.equal(registered.count, 55);
   const tools = [...registry.values()];
   const outer = (await call(tools, 'add_block', { type: 'tabs', orientation: 'horizontal' })).block;
   const inner = (await call(tools, 'add_block', { type: 'tabs', orientation: 'vertical', containerId: outer.tabs[0].id })).block;
