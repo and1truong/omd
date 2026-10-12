@@ -105,6 +105,33 @@ async function styleCases() {
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await page.screenshot({path:`${root}/test-results/checklist-style-${engine}-mobile.png`,fullPage:true});
   await page.setViewportSize({width:320,height:844});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  // A fold waits for pending writes and never hides a failed draft.
+  await page.evaluate(async()=>{
+    const store=(await import(new URL('./src/app.js',document.baseURI).href)).getStore(),dispatch=store.dispatch;
+    store.dispatch=async(name,input,options)=>{if(name==='checklist_update'&&input.patch?.text==='Pending fold save'){window.omdFoldSaving=true;await new Promise(resolve=>{window.omdFinishFoldSave=resolve;});}return dispatch(name,input,options);};
+    window.omdRestoreFoldDispatch=()=>{store.dispatch=dispatch;};
+  });
+  await input(ids.long).fill('Pending fold save');await page.waitForFunction(()=>window.omdFoldSaving);
+  await fold().click();assert.equal(await fold().getAttribute('aria-expanded'),'true');
+  await page.evaluate(()=>{window.omdRestoreFoldDispatch();window.omdFinishFoldSave();});await branch().waitFor({state:'hidden'});
+  assert.equal((await children(ids.mobile))[0].text,'Pending fold save');
+  await fold().click();await branch().waitFor({state:'visible'});
+  await page.evaluate(async()=>{
+    const store=(await import(new URL('./src/app.js',document.baseURI).href)).getStore(),dispatch=store.dispatch;
+    store.dispatch=async(name,input,options)=>{if(name==='checklist_update'&&input.patch?.text==='Retry fold draft')throw new Error('Fold draft write failed');return dispatch(name,input,options);};
+    window.omdRestoreFoldDispatch=()=>{store.dispatch=dispatch;};
+  });
+  await input(ids.long).fill('Retry fold draft');await fold().click();await page.locator('.notice').filter({hasText:'Fold draft write failed'}).first().waitFor();
+  assert.equal(await fold().getAttribute('aria-expanded'),'true');assert.equal(await input(ids.long).innerText(),'Retry fold draft');
+  await page.evaluate(()=>window.omdRestoreFoldDispatch());await items();
+  assert.equal((await children(ids.mobile))[0].text,'Retry fold draft');
+  await call('checklist_update',{blockId,itemId:ids.long,patch:{text:'Kiểm tra dòng dài, [đường dẫn](https://example.com) và `inline code` ở cấp 4.'}});
+  // Detached controls retain the page that created them, not the new selection.
+  await row(ids.publish).getByRole('checkbox').evaluate(el=>{window.omdStaleChecklistCheck=el;});
+  await call('page_select',{pageId:another});await page.evaluate(()=>window.omdStaleChecklistCheck.click());
+  await page.waitForFunction(async({pageId,blockId,id})=>{const store=(await import(new URL('./src/app.js',document.baseURI).href)).getStore();return (await store.getPage(pageId)).blocks.find(b=>b.id===blockId).items.find(i=>i.id===id).done;},{pageId,blockId,id:ids.publish});
+  assert.equal(await page.evaluate(async()=> (await import(new URL('./src/app.js',document.baseURI).href)).getStore().getState().blocks.length),0);
+  await call('page_select',{pageId});await call('checklist_update',{blockId,itemId:ids.publish,patch:{done:false}});
   await fold().click();await branch().waitFor({state:'hidden'});await page.reload();await page.evaluate(async()=>await (await import(new URL('./src/app.js',document.baseURI).href)).ready);
   assert.equal(await fold().getAttribute('aria-expanded'),'true');assert.equal(await row(ids.experience).locator('.checklist-branch-progress').innerText(),'3/7');
   assert.deepEqual(await items(),original,'View changes, reload, and add/remove must preserve original Markdown sources.');
