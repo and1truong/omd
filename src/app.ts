@@ -492,7 +492,7 @@ function render(state:Page, { quiet = false, reminderBlockId, reminderPageId, ch
   const focused=document.activeElement as HTMLInputElement|HTMLTextAreaElement|null; const focusId = focused?.id; const selection = focused?.selectionStart == null ? null : [focused.selectionStart, focused.selectionEnd!] as const;
   const editorFocus=textEditors?.captureFocus()??null;
   const scroll=[scrollX,scrollY] as const;
-  for(const field of ['title','subtitle'] as const){const el=domId(field==='title'?'page-title':'page-subtitle'),value=nativeEdits!.value({kind:'page',pageId:state.id,field},state[field]);if(el.value!==value){el.value=value;fit(el);}}
+  for(const field of ['title','subtitle'] as const){const el=domId(field==='title'?'page-title':'page-subtitle'),target:NativeTarget={kind:'page',pageId:state.id,field},value=nativeEdits!.value(target,state[field]);el.dataset.nativeDraft=nativeEdits!.id(target);if(el.value!==value){el.value=value;fit(el);}}
   if(renderPageId===state.id&&!reset)return;
   renderPageId=state.id;diagrams?.begin();renderer.begin(state.id);
   reconcile(domId('notebook'),[renderer.list(state.blocks,'page')]);renderer.end();diagrams?.end();textEditors?.end();
@@ -563,14 +563,14 @@ async function boot() {
     const el=domId(key==='title'?'page-title':'page-subtitle');
     const target=(pageId:string):NativeTarget=>({kind:'page',pageId,field:key}),label=key==='title'?'Page title':'Page description';
     const write = (pageId:string) => {const saved=writeNative(target(pageId),el.value,label);fit(el);return saved;};
-    composition.track(el,write,()=>store.getActivePageId());el.addEventListener('input',()=>{const pageId=store.getActivePageId();el.dataset.nativeDraft=nativeEdits!.id(target(pageId));nativeEdits!.stage(target(pageId),el.value,label);if(!composition.isComposing(el))write(pageId);});
+    composition.track(el,write,()=>renderPageId);el.addEventListener('input',()=>{const pageId=renderPageId;nativeEdits!.stage(target(pageId),el.value,label);if(!composition.isComposing(el))write(pageId);});
     if(key==='title') {
       let finishing=false;
       el.addEventListener('keydown',async event=>{
         const key=event as KeyboardEvent;
         if(key.key!=='Enter'||key.isComposing||key.keyCode===229||composition.isComposing(el))return;
         key.preventDefault();if(key.repeat||finishing)return;
-        finishing=true;const pageId=store.getActivePageId(),title=el.value;
+        finishing=true;const pageId=renderPageId,title=el.value;
         try {
           if(store.getPageMetadata(pageId)?.title!==title)nativeEdits!.stage(target(pageId),title,label);
           await nativeEdits!.flushAll();
