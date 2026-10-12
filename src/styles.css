@@ -136,8 +136,10 @@ body[data-content-width=wide] .paper { max-width: none; }
 .checklist-item>.checklist-items { margin-left: 24px; }
 .check-row .row-controls { flex-shrink: 0; }
 .check-row input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; cursor: pointer; flex-shrink: 0; }
-.check-row input[type=text] { font-size: 13px; padding: 5px 0; }
-.check-row.done input[type=text] { text-decoration: line-through; color: var(--secondary); }
+.checklist-text-editor { flex: 1; }
+.checklist-text-editor .markdown-editor { font-size: 13px; padding: 5px 0; }
+.checklist-text-editor[data-empty=true] .markdown-editor>p:first-child::before { content: 'A little thing to do'; }
+.check-row.done .markdown-editor { text-decoration: line-through; color: var(--secondary); }
 .row-controls { display: flex; gap: 0; opacity: 0; align-items: center; margin-left: auto; }
 .check-row:hover .row-controls, .check-row:focus-within .row-controls, .accordion-head:hover .row-controls, .accordion-head:focus-within .row-controls, .kanban-column:hover>.column-header .row-controls, .kanban-column:focus-within>.column-header .row-controls, .kanban-card:hover .row-controls, .kanban-card:focus-within .row-controls { opacity: 1; }
 .row-controls .icon-button { min-width: 23px; min-height: 25px; padding: 3px; }

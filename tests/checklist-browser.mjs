@@ -9,10 +9,10 @@ assert.ok(['chromium','webkit'].includes(engine));
 const server=spawn(process.execPath,['scripts/serve.mjs'],{cwd:root,env:{...process.env,OMD_PORT:'4321',OMD_STATIC_DIR:'dist'},stdio:['ignore','pipe','pipe']});
 let browser,page,blockId;const errors=[];
 const call=(name,input={})=>page.evaluate(async({name,input})=>{
-  const store=(await import(new URL('./src/app.js',document.baseURI).href)).getStore();return name==='undo'?store.undo():name==='redo'?store.redo():store.dispatch(name,input);
+  const app=await import(new URL('./src/app.js',document.baseURI).href);await app.flushPending();const store=app.getStore();return name==='undo'?store.undo():name==='redo'?store.redo():store.dispatch(name,input);
 },{name,input});
 const items=()=>page.evaluate(async blockId=>{
-  const store=(await import(new URL('./src/app.js',document.baseURI).href)).getStore();await store.idle();
+  const app=await import(new URL('./src/app.js',document.baseURI).href);await app.flushPending();const store=app.getStore();
   const {findBlock}=await import(new URL('./src/model.js',document.baseURI).href);return findBlock(store.getState(),blockId,'checklist').block.items;
 },blockId);
 const input=id=>page.locator(`[id="${id}"]`);
@@ -58,7 +58,7 @@ try {
   const child=await addChild(second);await input(child).fill('Child');
   const grandchild=await addChild(child);await input(grandchild).fill('Grandchild');
   const leaf=await addChild(grandchild);await input(leaf).fill('Leaf');
-  assert.equal(await input(leaf).locator('..').locator('..').getAttribute('data-level'),'4');
+  assert.equal(await input(leaf).evaluate(el=>el.closest('[data-item-id]').dataset.level),'4');
   let actions=await menu(leaf);
   assert.equal(await actions.getByRole('button',{name:'Add child checklist item',exact:true}).isDisabled(),true);
   assert.equal(await actions.getByRole('button',{name:'Indent checklist item',exact:true}).isDisabled(),true);
