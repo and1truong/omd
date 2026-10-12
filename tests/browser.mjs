@@ -19,7 +19,7 @@ try {
   page.on('request',request=>{if(/\/(?:excalidraw|mermaid)-engine\.(?:js|css)/.test(request.url()))engineRequests.push(request.url());});
   await page.goto('http://localhost:4317/');
   await page.waitForFunction(() => document.getElementById('agent-status').textContent.includes('48 tools'));
-  const call = (name, input = {}) => page.evaluate(async ({name,input}) => {
+  const call = (name, input = {}, target = page) => target.evaluate(async ({name,input}) => {
     const registry = document.modelContext;
     if (!registry?.getTools || !registry?.executeTool) throw new Error('Native document.modelContext discovery/execution unavailable.');
     const tool = (await registry.getTools()).find(t => t.name === `omd_${name}`);
@@ -187,6 +187,25 @@ try {
   assert.ok(validationErrors.length <= 1);
   await page.locator(`[data-block-id="${diagram.id}"] [data-mermaid-preview] svg`).waitFor();
   assert.ok((await call('get_notebook')).blocks.find(b=>b.id===drawing.id).scene.elements.length>0);
+  // Hold an actual first-use library request while executing a real native tool.
+  // Separate context blocks SW interception; the main context tested offline above.
+  const raceContext=await browser.newContext({serviceWorkers:'block'}),racePage=await raceContext.newPage();
+  racePage.on('pageerror',error=>errors.push(error.message));
+  const raceBook=JSON.parse(exported),raceBookPage=raceBook.pages.find(p=>p.id===raceBook.activePageId);
+  raceBookPage.blocks=[{...drawing,scene:{elements:[],appState:{},files:{}}}];
+  await racePage.addInitScript(book=>localStorage.setItem('omd.notebook.v1',JSON.stringify(book)),raceBook);
+  let releaseEngine,engineRequested;
+  const engineGate=new Promise(resolve=>{releaseEngine=resolve;}),requested=new Promise(resolve=>{engineRequested=resolve;});
+  await racePage.route('**/src/excalidraw-engine.js',async route=>{engineRequested();await engineGate;await route.continue();});
+  await racePage.goto('http://localhost:4317/',{waitUntil:'domcontentloaded'});
+  await requested;await racePage.waitForFunction(()=>document.getElementById('agent-status').textContent.includes('48 tools'));
+  const latestScene={elements:[{id:'edited-during-download',type:'rectangle',x:50,y:50,width:220,height:80}],appState:{},files:{}};
+  await call('excalidraw_set_scene',{blockId:drawing.id,json:JSON.stringify(latestScene)},racePage);
+  releaseEngine();await racePage.locator('.excalidraw canvas').first().waitFor();
+  // A rendered initial scene is normalized and saved by onChange. The normalized
+  // data must still be the agent's newest shape, never the old empty snapshot.
+  await racePage.waitForFunction(id=>{const b=JSON.parse(localStorage.getItem('omd.notebook.v1')).pages.find(p=>p.blocks.some(b=>b.id===id)).blocks.find(b=>b.id===id);return b.scene.elements[0]?.id==='edited-during-download'&&b.scene.elements[0]?.version!==undefined;},drawing.id);
+  await raceContext.close();
   assert.deepEqual(errors.filter(error => error !== 'Tabs are limited to two levels.'), []);
   console.log('Native WebMCP, lazy engine loading/teardown, block identity/focus, notebook UI, persistence, mobile, theme, reminders, import/export, and offline reload passed.');
 } catch(error) {

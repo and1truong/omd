@@ -33,14 +33,22 @@ export function createDiagramManager(store,{notify}) {
       } catch(error) { if(!entry.disposed && token===entry.token) { entry.preview.replaceChildren(); entry.error.textContent=`Diagram syntax: ${error.message}`; } }
     },200);
   }
-  async function initializeCanvas(entry,scene) {
+  function syncScene(entry,scene) {
+    if(!entry.api || !entry.renderer || entry.pending || entry.saved===JSON.stringify(scene))return;
+    entry.saved=JSON.stringify(scene);entry.api.updateScene({...entry.renderer.restore(scene),appState:{...scene.appState,theme:theme()},captureUpdate:'NEVER'});
+    if(Object.keys(scene.files).length)entry.api.addFiles(Object.values(scene.files));
+  }
+  async function initializeCanvas(entry) {
     try {
       window.EXCALIDRAW_ASSET_PATH=new URL('../excalidraw-assets/',import.meta.url).href;
       const cssURL=new URL('./excalidraw-engine.css',import.meta.url).href;
       if(!document.querySelector('link[data-excalidraw-css]')) { const css=document.createElement('link'); css.rel='stylesheet'; css.href=cssURL;css.dataset.excalidrawCss='true';document.head.append(css); }
       const engine=await import('./excalidraw-engine.js'); if(entry.disposed)return;
       entry.host.replaceChildren();
-      entry.renderer=engine.mountCanvas(entry.host,scene,theme(),(...args)=>canvasChange(entry,...args),api=>{entry.api=api;});
+      // Agent edits can arrive while the library chunk is still downloading.
+      // Read the latest scene at mount, then reconcile again when its API is ready.
+      const scene=get(entry.pageId,entry.blockId).scene;entry.saved=JSON.stringify(scene);
+      entry.renderer=engine.mountCanvas(entry.host,scene,theme(),(...args)=>canvasChange(entry,...args),api=>{entry.api=api;if(!entry.disposed)syncScene(entry,get(entry.pageId,entry.blockId).scene);});
     } catch(error) { entry.host.textContent=`Canvas could not load: ${error.message}`; }
   }
   function mount(block,pageId) {
@@ -51,12 +59,9 @@ export function createDiagramManager(store,{notify}) {
       const host=document.createElement('div');host.className=block.type==='mermaid'?'mermaid-body':'excalidraw-host'; host.dataset.diagramBlock=block.id;
       entry={host,pageId,blockId:block.id,type:block.type,token:0,saved:block.scene?JSON.stringify(block.scene):null,disposed:false};entries.set(id,entry);
       if(block.type==='mermaid') { entry.preview=document.createElement('div');entry.preview.className='mermaid-preview';entry.preview.dataset.mermaidPreview='true';entry.preview.setAttribute('role','img');entry.preview.setAttribute('aria-label',block.title);entry.error=document.createElement('p');entry.error.className='diagram-error';entry.error.setAttribute('role','status');host.append(entry.preview,entry.error);scheduleMermaid(entry,block.source); }
-      else { host.textContent='Opening your canvas…'; initializeCanvas(entry,block.scene); }
+      else { host.textContent='Opening your canvas…'; initializeCanvas(entry); }
     } else if(block.type==='mermaid') { if(entry.source!==block.source) scheduleMermaid(entry,block.source); }
-    else if(entry.api && entry.saved!==JSON.stringify(block.scene) && !entry.pending) {
-      entry.saved=JSON.stringify(block.scene);entry.api.updateScene({...entry.renderer.restore(block.scene),appState:{...block.scene.appState,theme:theme()},captureUpdate:'NEVER'});
-      if(Object.keys(block.scene.files).length) entry.api.addFiles(Object.values(block.scene.files));
-    }
+    else syncScene(entry,block.scene);
     return entry.host;
   }
   function closeFocus() {
@@ -72,7 +77,7 @@ export function createDiagramManager(store,{notify}) {
     document.getElementById('canvas-stage').hidden=false;document.getElementById('canvas-stage-host').replaceChildren(host);document.body.classList.add('canvas-focused');
     requestAnimationFrame(()=>window.dispatchEvent(new Event('resize')));
   }
-  function cleanup(entry) { flush(entry);entry.disposed=true;clearTimeout(entry.timer);clearTimeout(entry.saveTimer);entry.renderer?.unmount();entry.api=null;entry.renderer=null;entry.pending=null;entry.host.replaceChildren();entries.delete(key(entry.pageId,entry.blockId)); }
+  function cleanup(entry) { flush(entry);entry.disposed=true;clearTimeout(entry.timer);clearTimeout(entry.saveTimer);entry.renderer?.unmount();entry.api=null;entry.renderer=null;entry.pending=null;entry.saved=null;entry.source=null;entry.host.replaceChildren();entries.delete(key(entry.pageId,entry.blockId)); }
   return {
     mount,openFocus,closeFocus,
     updateSource(blockId,source) { const entry=entries.get(key(store.getState().id,blockId));if(entry)scheduleMermaid(entry,source); },
