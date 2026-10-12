@@ -110,6 +110,15 @@ try {
   await box(next).evaluate(el=>el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));await saved(next,'Đang gõ tiếng Việt');
   assert.equal((await order('page')).length,count);
 
+  // Once composition settles, the next shortcut creates a focused sibling without losing composed text.
+  await page.waitForFunction(id=>!document.getElementById(`${id}-text`).editor.view.composing,next);
+  const composedNext=await nextBlock(next);
+  assert.equal(await box(next).innerText(),'Đang gõ tiếng Việt');
+  assert.equal((await state()).blocks.find(b=>b.id===composedNext).text,'');
+  await page.keyboard.type('After composition');await saved(composedNext,'After composition');
+  assert.equal(await box(next).innerText(),'Đang gõ tiếng Việt');
+  await call('remove_block',{blockId:composedNext});
+
   for(const type of ['tabs','toggle','accordion']) {
     const parent=(await call('add_block',{type})).block,containerId=type==='tabs'?parent.tabs[0].id:type==='toggle'?parent.id:parent.items[0].id;
     const child=(await call('add_block',{type:'text',containerId,text:'Nested text'})).blockId;

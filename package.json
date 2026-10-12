@@ -1,6 +1,6 @@
 {
   "name": "omd",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "private": true,
   "type": "module",
   "description": "oh my day \u2014 a local-first notebook",
