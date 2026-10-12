@@ -157,12 +157,13 @@ try {
   await page.evaluate(()=>delete window.omdIdentity);
   // Composition keeps the real DOM control connected through an external edit of the same block.
   const composeItem=(await call('get_notebook')).blocks.find(b=>b.id===checklist.id).items[0];
-  await page.evaluate(id=>{const input=document.getElementById(id);window.omdComposing=input;input.focus();input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));input.value='Đang chọn chữ';input.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));},composeItem.id);
+  await page.evaluate(id=>{const input=document.getElementById(id);window.omdComposing=input;input.focus();input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));input.replaceChildren(Object.assign(document.createElement('p'),{textContent:'Đang chọn chữ'}));input.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));},composeItem.id);
   await call('checklist_update',{blockId:checklist.id,itemId:composeItem.id,patch:{done:false}});
-  assert.deepEqual(await page.evaluate(()=>[window.omdComposing.isConnected,window.omdComposing.value]),[true,'Đang chọn chữ']);
-  await page.evaluate(()=>window.omdComposing.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));await settle();
+  assert.deepEqual(await page.evaluate(()=>[window.omdComposing.isConnected,window.omdComposing.textContent]),[true,'Đang chọn chữ']);
+  await page.evaluate(async()=>{const app=await import(new URL('./src/app.js',document.baseURI).href);window.omdCompositionStore=app.getStore();window.omdComposing.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));});
+  await page.waitForFunction(blockId=>window.omdCompositionStore.getState().blocks.find(b=>b.id===blockId)?.items[0]?.text==='Đang chọn chữ',checklist.id);await settle();
   assert.equal((await call('get_notebook')).blocks.find(b=>b.id===checklist.id).items[0].text,'Đang chọn chữ');
-  await call('checklist_update',{blockId:checklist.id,itemId:composeItem.id,patch:{text:composeItem.text,done:composeItem.done}});await page.evaluate(()=>delete window.omdComposing);
+  await call('checklist_update',{blockId:checklist.id,itemId:composeItem.id,patch:{text:composeItem.text,done:composeItem.done}});await page.evaluate(()=>{delete window.omdComposing;delete window.omdCompositionStore;});
   await page.evaluate(()=>{const input=document.getElementById('page-title');input.focus();input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));input.value='Tiêu đề đang chọn';input.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));});
   await call('card_update',{blockId:board.id,cardId:card,patch:{description:'Background edit during title composition'}});assert.equal(await page.locator('#page-title').inputValue(),'Tiêu đề đang chọn');
   await page.locator('#page-title').dispatchEvent('compositionend');await settle();assert.equal((await call('get_notebook')).title,'Tiêu đề đang chọn');await call('set_page',{title:'Written by a person'});
