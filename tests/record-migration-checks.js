@@ -83,6 +83,7 @@ export async function migrationChecks({sourceRoot,extension='ts',startupVersion}
     ['alias collision',tx=>{const k='["bad", "$block:x"]';tx.objectStore('records').put({key:k,kind:'block',pageId:'bad',data:{id:'x',type:'text',text:'bad'}},k);const other='["bad","$block:x"]';tx.objectStore('records').put({key:other,kind:'block',pageId:'bad',data:{id:'x',type:'text',text:'bad'}},other);}],
     ['orphan record',tx=>{const k=JSON.stringify(['bad','$block:orphan']);tx.objectStore('records').put({key:k,kind:'block',pageId:'bad',data:{id:'orphan',type:'text',text:'bad'}},k);}],
     ['malformed reminder',tx=>tx.objectStore('reminders').put({pageId:'bad',id:'bad',type:'reminder'},'not JSON')],
+    ['malformed empty metadata',tx=>{tx.objectStore('meta').put(null,'book');tx.objectStore('records').clear();tx.objectStore('reminders').clear();}],
     ['malformed delivery',tx=>tx.objectStore('delivery').put('2020-01-02T00:00:00Z',JSON.stringify(['bad','unparseable']))],
     ['unknown container data',(tx,f)=>alterRecord(tx,f,'container','page',row=>row.data.unknown='must not silently discard')],
     ['embedded hidden tab blocks',(tx,f)=>alterRecord(tx,f,'block','tabs:"',row=>row.data.tabs[0].blocks=[{id:'lost',type:'text',text:'must not silently discard'}])],

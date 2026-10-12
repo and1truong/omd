@@ -57,7 +57,7 @@ function migrate(db:IDBDatabase,tx:IDBTransaction,fail:(error:unknown)=>void) {
     const meta=tx.objectStore('meta').get('book');meta.onsuccess=()=>{
       const rows=records.getAll();rows.onsuccess=()=>guard(()=>{
         const book=meta.result as Notebook|undefined,mapped=recordsMap(rows.result);
-        if(book){
+        if(book!==undefined){
           const full=validateBook({...book,pages:book.pages.map(p=>makeMaterializer()(mapped,p.id))});
           const normalized=bookRecords(structuredClone(full));
           if(!equalValue(metadataBook(full),book)||normalized.size!==mapped.size||[...mapped].some(([key,row])=>!equalValue(row,normalized.get(key))))throw new Error('Legacy records contain orphaned or inconsistent data.');
