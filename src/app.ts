@@ -116,7 +116,7 @@ async function createTextAfter(blockId:string,pageId:string) {
 }
 function title(b:Extract<Block,{title:string}>,glyph:string) {
   const head = element('div', 'block-heading'); const glyphIcon=icon(b.type);glyphIcon.classList.add('type-glyph');
-  head.append(glyphIcon, editable(b.title, `${b.type} title`, ()=>{}, { className: 'block-title', placeholder: 'Untitled',draft:{kind:'title',pageId:store.getActivePageId(),blockId:b.id} })); return head;
+  head.append(glyphIcon, editable(b.title, `${b.type} title`, ()=>{}, { className: 'block-title', placeholder: 'Untitled',id:`native-title-${encodeURIComponent(JSON.stringify([store.getActivePageId(),b.id]))}`,draft:{kind:'title',pageId:store.getActivePageId(),blockId:b.id} })); return head;
 }
 function rowsControls(onUp:()=>unknown,onDown:()=>unknown,onRemove:()=>unknown,upDisabled:boolean,downDisabled:boolean,label:string) {
   const tools = element('div', 'row-controls');

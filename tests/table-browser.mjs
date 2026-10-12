@@ -17,6 +17,74 @@ const focus=async(r,c)=>assert.equal(await cell(r,c).evaluate(el=>el===document.
 const settled=()=>page.evaluate(async()=>{await tableApp.flushPending();});
 const shape=async(rows,columns)=>{await page.waitForFunction(({id,rows,columns})=>{const block=document.querySelector(`[data-block-id="${id}"]`);return block?.querySelectorAll('.table-cell').length===rows*columns&&block.querySelector('.table-toolbar span')?.textContent===`${rows} rows × ${columns} columns`;},{id,rows,columns});};
 const shot=async(name)=>page.screenshot({path:`${root}/test-results/table-${engine}-${base?'omd':'root'}-${name}.png`});
+async function verifyNativeDrafts(context,current,other) {
+  const title=page.locator('#page-title'),description=page.locator('#page-subtitle'),tableTitle=()=>block().getByRole('textbox',{name:'table title',exact:true});
+  const fields=await page.evaluate(()=>{const p=tableApp.getStore().getState();return {title:p.title,subtitle:p.subtitle};});
+  const drafts=page.getByRole('region',{name:'Unsaved edits'}),savedFields=()=>page.evaluate(()=>{const p=tableApp.getStore().getState();return {title:p.title,subtitle:p.subtitle};});
+  const quota=async value=>page.evaluate(value=>{
+    window.nativePut??=IDBObjectStore.prototype.put;window.nativeFail=value;const name=tableApp.getStore().databaseName();
+    IDBObjectStore.prototype.put=function(...args){if(this.transaction.db.name===name&&(nativeFail===true||typeof nativeFail==='string'&&JSON.stringify(args[0]).includes(nativeFail)))throw new DOMException('Native draft quota test','QuotaExceededError');return nativePut.apply(this,args);};
+  },value);
+  const restore=()=>page.evaluate(()=>{IDBObjectStore.prototype.put=nativePut;});
+  const select=async pageId=>{await page.evaluate(()=>tableApp.openPalette());await page.locator(`#palette-${pageId}`).click();await page.waitForFunction(pageId=>tableApp.getStore().getActivePageId()===pageId,pageId);await settled();};
+  const clearNotices=()=>page.evaluate(()=>document.querySelectorAll('.notice.error').forEach(node=>node.remove()));
+  // Delay native field commits across a real unrelated non-quiet store redraw.
+  await page.evaluate(()=>{
+    const store=tableApp.getStore(),dispatch=store.dispatch,gate=new Promise(resolve=>window.releaseNativeFields=resolve);
+    window.restoreNativeDispatch=()=>{store.dispatch=dispatch;releaseNativeFields();};
+    store.dispatch=(name,input,options)=>name==='set_page'?gate.then(()=>dispatch(name,input,options)):dispatch(name,input,options);
+  });
+  await title.fill('New native title');await description.fill('New native description');
+  await page.evaluate(()=>tableApp.getStore().dispatch('add_block',{type:'divider'}));
+  assert.equal(await title.inputValue(),'New native title');assert.equal(await description.inputValue(),'New native description');
+  assert.deepEqual(await savedFields(),fields);
+  await page.evaluate(()=>restoreNativeDispatch());await settled();await title.press('Enter');await settled();
+  assert.deepEqual(await savedFields(),{title:'New native title',subtitle:'New native description'});
+  await title.fill(fields.title);await description.fill(fields.subtitle);await settled();
+  const peer=await context.newPage();peer.on('pageerror',e=>errors.push(e.message));await peer.goto(url);await peer.evaluate(async source=>{window.tableApp=await import(`${source}app.js`);await tableApp.ready;},source);
+  await peer.evaluate(current=>tableApp.getStore().dispatch('page_select',{pageId:current}),current);
+  const peerWrite=async(name,input)=>{await peer.evaluate(async({name,input})=>{const store=tableApp.getStore();await store.reload();await store.dispatch(name,input);},{name,input:{...input,pageId:current}});await page.evaluate(()=>tableApp.getStore().reload());};
+  try {
+    // Failed block title survives peer redraw; Add row retries it before committing dimensions.
+    await quota(true);await tableTitle().fill('Nháp block còn nguyên');await drafts.getByRole('textbox',{name:'Unsaved table title',exact:true}).waitFor();
+    await peerWrite('add_block',{type:'divider'});assert.equal(await tableTitle().inputValue(),'Nháp block còn nguyên');assert.notEqual((await grid()).title,'Nháp block còn nguyên');
+    await restore();await block().getByRole('button',{name:'Add table row',exact:true}).click();await shape(5,4);await settled();assert.equal((await grid()).title,'Nháp block còn nguyên');await call('undo');await shape(4,4);
+    // Failed IME title retains its final text/focus across a peer write, then Retry persists it.
+    await quota(true);await tableTitle().evaluate(el=>{el.focus();el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.value='IME Việt 日本語';el.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,isComposing:true}));});
+    await peerWrite('update_block',{blockId:id,patch:{title:'Peer title while composing'}});
+    assert.equal(await tableTitle().inputValue(),'IME Việt 日本語');await tableTitle().evaluate(el=>el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));
+    await drafts.getByRole('textbox',{name:'Unsaved table title',exact:true}).waitFor();assert.equal(await tableTitle().inputValue(),'IME Việt 日本語');assert.equal(await tableTitle().evaluate(el=>el===document.activeElement),true);
+    await restore();await drafts.getByRole('button',{name:'Retry unsaved edit',exact:true}).click();await settled();assert.equal((await grid()).title,'IME Việt 日本語');
+    // Page title/description failures survive both remote redraw and forced store selection.
+    await quota(true);await title.fill('Native recovery title');await description.fill('Native recovery description');await drafts.getByRole('textbox',{name:'Unsaved Page description',exact:true}).waitFor();
+    await peerWrite('add_block',{type:'divider'});assert.equal(await title.inputValue(),'Native recovery title');assert.equal(await description.inputValue(),'Native recovery description');
+    const notices=await page.locator('.notice.error').count();await page.evaluate(()=>tableApp.openPalette());await page.locator(`#palette-${other}`).click();
+    await page.waitForFunction(count=>document.querySelectorAll('.notice.error').length>count,notices);assert.equal(await page.evaluate(()=>tableApp.getStore().getActivePageId()),current);await page.keyboard.press('Escape');
+    await page.evaluate(other=>tableApp.getStore().dispatch('page_select',{pageId:other}),other);assert.equal(await title.inputValue(),'Other page');
+    await page.evaluate(current=>tableApp.getStore().dispatch('page_select',{pageId:current}),current);assert.equal(await title.inputValue(),'Native recovery title');assert.equal(await description.inputValue(),'Native recovery description');
+    await page.evaluate(other=>tableApp.getStore().dispatch('page_select',{pageId:other}),other);await restore();await select(current);
+    assert.deepEqual(await savedFields(),{title:'Native recovery title',subtitle:'Native recovery description'});assert.equal(await title.inputValue(),'Native recovery title');
+    assert.equal(await page.evaluate(async other=>(await tableApp.getStore().getPage(other)).title,other),'Other page');
+    await title.fill(fields.title);await description.fill(fields.subtitle);await settled();
+    // Success for cell B cannot claim Saved while failed A remains; peer deletion cannot retarget A.
+    await clearNotices();await quota('Draft A must not move');await cell(2,1).fill('Draft A must not move');await drafts.getByRole('textbox',{name:'Unsaved Table row 2, column 1',exact:true}).waitFor();
+    await cell(2,2).fill('Successful B');await page.evaluate(()=>tableApp.getStore().idle());assert.equal((await grid()).rows[1].cells[1],'Successful B');assert.match(await page.locator('#save-status').innerText(),/Not saved/);
+    const removed=(await grid()).rows[1].id,following=(await grid()).rows[2];await peerWrite('table_row_remove',{blockId:id,rowId:removed});await shape(3,4);await restore();
+    await assert.rejects(()=>settled(),/not found/i);assert.equal(await drafts.getByRole('textbox',{name:'Unsaved Table row 2, column 1',exact:true}).inputValue(),'Draft A must not move');
+    assert.deepEqual((await grid()).rows[1],following);await assert.rejects(()=>page.evaluate(()=>tableApp.downloadJson()),/not found/i);
+    const blockedNotices=await page.locator('.notice.error').count();await page.evaluate(()=>tableApp.openPalette());await page.locator(`#palette-${other}`).click();await page.waitForFunction(count=>document.querySelectorAll('.notice.error').length>count,blockedNotices);
+    assert.equal(await page.evaluate(()=>tableApp.getStore().getActivePageId()),current);await page.keyboard.press('Escape');
+    await drafts.getByRole('button',{name:'Retry unsaved edit',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.draft-recovery-item p')?.textContent.includes('not found'));
+    const downloadEvent=page.waitForEvent('download');await drafts.getByRole('button',{name:'Download unsaved edit',exact:true}).click();const download=await downloadEvent,recovered=JSON.parse(await readFile(await download.path(),'utf8'));
+    assert.equal(recovered.value,'Draft A must not move');assert.equal(recovered.target.rowId,removed);assert.equal(recovered.target.pageId,current);
+    await page.setViewportSize({width:320,height:700});await drafts.scrollIntoViewIfNeeded();assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await mkdir(`${root}/test-results`,{recursive:true});await shot('native-orphan-recovery-mobile');
+    await page.setViewportSize({width:1280,height:900});await clearNotices();await drafts.scrollIntoViewIfNeeded();await shot('native-orphan-recovery');
+    await drafts.getByRole('button',{name:'Discard unsaved edit',exact:true}).click();await page.locator('#confirm-cancel').click();assert.equal(await drafts.getByRole('textbox',{name:'Unsaved Table row 2, column 1',exact:true}).inputValue(),'Draft A must not move');
+    await drafts.getByRole('button',{name:'Discard unsaved edit',exact:true}).click();await page.locator('#confirm-ok').click();await settled();assert.deepEqual((await grid()).rows[1],following);assert.equal(await drafts.isVisible(),false);assert.equal(await page.locator('#save-status').innerText(),'Saved');
+    await select(other);await select(current);await call('table_row_add',{blockId:id,index:1});await shape(4,4);
+    await tableTitle().fill('Kế hoạch tuần');await settled();await clearNotices();
+  } finally {await restore();await peer.close();}
+}
 try{
   await new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.once('error',reject);server.once('exit',code=>reject(new Error(`Server exited ${code}`)));});
   browser=await({chromium,webkit}[engine]).launch({headless:true});const context=await browser.newContext({viewport:{width:1280,height:900},acceptDownloads:true});context.setDefaultTimeout(10000);page=await context.newPage();await ready();
@@ -49,6 +117,7 @@ try{
   await page.evaluate(async()=>{try{await tableApp.setView({sidebarOpen:true});}catch{}});assert.equal(await cell(2,1).inputValue(),'Bản nháp còn nguyên');assert.equal(await page.evaluate(()=>tableApp.getStore().getActivePageId()),current);assert.notEqual((await grid()).rows[1].cells[0],'Bản nháp còn nguyên');
   await page.evaluate(()=>{IDBObjectStore.prototype.put=tablePut;});await settled();assert.equal((await grid()).rows[1].cells[0],'Bản nháp còn nguyên');
   for(const notice of await page.locator('.notice.error button').all())await notice.click();
+  await verifyNativeDrafts(context,current,other);
   // Navigation through the real palette waits for the final composing cell and its captured page.
   await page.evaluate(()=>tableApp.openPalette());await page.locator('#page-search').fill('Other page');
   await cell(2,1).evaluate(el=>{el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.value='最後の文字';});
