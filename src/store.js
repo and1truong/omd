@@ -28,11 +28,11 @@ export async function createStore(storage, options = {}) {
   async function commit(next,changes,event,{history=true,journal}={}) {
     const current=state.getState();const id=history?crypto.randomUUID():null;
     const entry=history?{before:current.meta,after:next,changes:patchChanges(changes)}:journal;
-    await repository.commit(current.meta,next,changes,{journal:history?entry:null,journalId:id});
+    const hydrated=await repository.commit(current.meta,next,changes,{journal:history?entry:null,journalId:id});
     if(history){undoStack.push(id);redoStack.length=0;}
     let records;
     if(next.activePageId===current.meta.activePageId){records=new Map(current.records);for(const c of changes)if((c.after??c.before)?.pageId===next.activePageId){if(c.after)records.set(c.key,c.after);else records.delete(c.key);}}
-    else records=await repository.page(next.activePageId);
+    else records=hydrated;
     publish(next,records,event);channel?.postMessage(next.revision);
   }
   let channel=typeof window!=='undefined'&&typeof BroadcastChannel!=='undefined'?new BroadcastChannel(`${repository.name}.changes`):null;
@@ -92,9 +92,9 @@ export async function createStore(storage, options = {}) {
     const current=state.getState(),entry=await repository.history(from.at(-1));
     const records=await repository.records(entry.changes.map(p=>p.key)),changes=entry.changes.map(p=>({key:p.key,before:records.get(p.key)??null,after:applyPatches({value:records.get(p.key)??null},p[direction]).value}));
     let next=structuredClone(direction==='inverse'?entry.before:entry.after);next.revision=current.meta.revision+1;next.updatedAt=new Date().toISOString();if(next.pages.some(p=>p.id===current.meta.activePageId))next.activePageId=current.meta.activePageId;
-    validateBook(next);await repository.commit(current.meta,next,changes);const id=from.pop();to.push(id);let resident;
+    validateBook(next);const hydrated=await repository.commit(current.meta,next,changes);const id=from.pop();to.push(id);let resident;
     if(next.activePageId===current.meta.activePageId){resident=new Map(current.records);for(const c of changes)if((c.after??c.before)?.pageId===next.activePageId){if(c.after)resident.set(c.key,c.after);else resident.delete(c.key);}}
-    else resident=await repository.page(next.activePageId);
+    else resident=hydrated;
     publish(next,resident);channel?.postMessage(next.revision);return true;
   });}
   if(channel)channel.onmessage=()=>{if(!closed)api.reload().catch(()=>{});};

@@ -42,7 +42,7 @@ export async function openRepository(storage,{key=STORAGE_KEY,name='omd.notebook
     async due(now){const {tx,done}=transaction();const rows=await request(tx.objectStore('reminders').index('due').getAll(IDBKeyRange.upperBound(now)));await done;return rows;},
     async history(id){const {tx,done}=transaction();const value=await request(tx.objectStore('history').get(id));await done;return value;},
     async commit(expected,meta,changes,{journal,journalId,fail}={}) {
-      const {tx,done}=transaction('readwrite');
+      const {tx,done}=transaction('readwrite');let resident;
       try {
         const latest=await request(tx.objectStore('meta').get('book'));
         if(latest.id!==expected.id||latest.revision!==expected.revision)throw new Error('Another window changed this notebook. Reload before editing.');
@@ -55,7 +55,8 @@ export async function openRepository(storage,{key=STORAGE_KEY,name='omd.notebook
         tx.objectStore('meta').put(meta,'book');
         if(journal)tx.objectStore('history').put(journal,journalId);
         if(fail)throw new Error('Injected transaction failure.');
-      } catch(error){tx.abort();await done.catch(()=>{});throw error;}await done;
+        if(meta.activePageId!==expected.activePageId){const rows=await request(tx.objectStore('records').index('pageId').getAll(meta.activePageId));resident=new Map(rows.map(r=>[r.key,r]));}
+      } catch(error){tx.abort();await done.catch(()=>{});throw error;}await done;return resident;
     },
     close(){db.close();}
   };
