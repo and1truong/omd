@@ -39,11 +39,12 @@ export async function verifyPageRoutes({browser,appURL,call,root}) {
       window.omdRouteClick=null;
       window.addEventListener('click',event=>{window.omdRouteClick={ctrl:event.ctrlKey,meta:event.metaKey,button:event.button,trusted:event.isTrusted,prevented:event.defaultPrevented,href:event.target.closest('a')?.getAttribute('href'),focused:document.hasFocus(),active:document.activeElement===node};},{once:true});
     });
-    await b.keyboard.down('ControlOrMeta');let third;
+    await b.keyboard.down('ControlOrMeta');let third,clickCompleted=false;
     try {
-      [third]=await Promise.all([context.waitForEvent('page'),link.click({modifiers:['ControlOrMeta'],delay:50})]);
+      [third]=await Promise.all([context.waitForEvent('page'),link.click({modifiers:['ControlOrMeta'],delay:50}).then(()=>{clickCompleted=true;})]);
     } catch(error) {
-      error.message+=`\nNative link diagnostics: ${JSON.stringify(await b.evaluate(()=>({url:location.href,click:window.omdRouteClick})))}`;throw error;
+      const snapshot=await b.evaluate(()=>({url:location.href,click:window.omdRouteClick})).catch(snapshotError=>({error:String(snapshotError)}));
+      throw new Error(`Native link diagnostics: ${JSON.stringify({snapshot,clickCompleted,pages:context.pages().map(page=>page.url())})}`,{cause:error});
     } finally {await b.keyboard.up('ControlOrMeta');}
     assert.deepEqual(await b.evaluate(()=>window.omdRouteClick),{ctrl:process.platform!=='darwin',meta:process.platform==='darwin',button:0,trusted:true,prevented:false,href:new URL(path(second)).pathname,focused:true,active:true});
     await ready(third);
