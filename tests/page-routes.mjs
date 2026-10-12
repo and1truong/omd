@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
 
 export async function verifyPageRoutes({browser,appURL,call,root}) {
   const context=await browser.newContext({viewport:{width:1280,height:900}}),a=await context.newPage(),b=await context.newPage();
@@ -92,7 +93,7 @@ export async function verifyPageRoutes({browser,appURL,call,root}) {
     const fallbackContext=await browser.newContext({serviceWorkers:'block'}),fallback=await fallbackContext.newPage();
     try {
       await fallback.addInitScript(book=>localStorage.setItem('omd.notebook.v1',JSON.stringify(book)),imported);
-      const html=await (await context.request.get(new URL('404.html',appURL).href)).text();
+      const html=await readFile(`${root}/dist/404.html`,'utf8');
       await fallback.route(path(second),route=>route.fulfill({status:404,contentType:'text/html',body:html}));
       await fallback.goto(path(second));await ready(fallback);assert.equal(await active(fallback),second);assert.equal(fallback.url(),path(second));
       assert.equal(await fallback.evaluate(()=>document.baseURI),appURL);
