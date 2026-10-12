@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import {verifyPageRoutes} from './page-routes.mjs';
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 const root = new URL('..', import.meta.url).pathname;
@@ -326,6 +327,7 @@ try {
   await edgePage.evaluate(()=>{const input=document.getElementById('page-title');input.focus();input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));input.value='Original-page IME edit';});
   await call('page_select',{pageId:'a'},edgePage);await edgePage.locator('#page-title').dispatchEvent('compositionend');await settle(edgePage);assert.equal((await call('get_page',{pageId:'quoted-page'},edgePage)).title,'Original-page IME edit');assert.equal((await call('get_notebook',{},edgePage)).id,'a');
   await edgeContext.close();
+  await verifyPageRoutes({browser,appURL,call,root});
   assert.deepEqual(errors.filter(error => error !== 'Tabs are limited to two levels.'), []);
   console.log(`Static base ${basePath||'/'} passed.`);
   console.log('Native WebMCP, app shell/sidebar, view persistence, mobile drawer/focus/menu, lazy engine loading/teardown, block identity, theme, reminders, import/export, and offline reload passed.');

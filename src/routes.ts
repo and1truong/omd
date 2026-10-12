@@ -15,7 +15,7 @@ export function followPageLink(event:MouseEvent,navigate:()=>unknown) {
   event.preventDefault();navigate();
 }
 export function setupRoutes(store:NotebookStore,{beforeNavigate,onError}:{beforeNavigate:()=>Promise<unknown>;onError:ErrorHandler}) {
-  let traversing=false,queue=Promise.resolve();
+  let traversing=false,queue=Promise.resolve(),previousPageId=store.getActivePageId();
   function sync(push=false) {
     const path=pagePath(store.getActivePageId());
     if(location.pathname!==path)history[push?'pushState':'replaceState'](null,'',path);
@@ -23,7 +23,11 @@ export function setupRoutes(store:NotebookStore,{beforeNavigate,onError}:{before
   const initial=routePageId();
   if(initial===null||initial!==undefined&&initial!==store.getActivePageId())onError(new Error('That page is missing or was deleted. Opened an existing notebook page instead.'));
   sync();
-  store.subscribe((_page,event)=>{if(!traversing)sync(event.actionName==='page_select'||event.actionName==='page_add');});
+  store.subscribe((_page,event)=>{
+    if(event.reset&&!store.getPageMetadata(previousPageId))onError(new Error('That page is missing or was deleted. Opened an existing notebook page instead.'));
+    previousPageId=store.getActivePageId();
+    if(!traversing)sync(event.actionName==='page_select'||event.actionName==='page_add');
+  });
   window.addEventListener('popstate',()=>{
     const id=routePageId();
     queue=queue.then(async()=>{
