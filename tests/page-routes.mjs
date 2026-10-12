@@ -114,7 +114,10 @@ export async function verifyPageRoutes({browser,appURL,call,root}) {
 export async function verifySurrogatePageRoutes({browser,appURL,call,root}) {
   const context=await browser.newContext({viewport:{width:1280,height:900}}),a=await context.newPage(),b=await context.newPage(),errors=[];
   for(const target of [a,b])target.on('pageerror',error=>errors.push(error.message));
-  const ready=target=>target.waitForFunction(()=>document.getElementById('agent-status')?.textContent.includes('55 tools'));
+  const ready=async target=>{
+    await target.evaluate(async()=>{const app=await import(new URL('./src/app.js',document.baseURI).href);await app.ready;});
+    await target.waitForFunction(()=>!document.modelContext?.getTools||document.getElementById('agent-status')?.textContent.includes('55 tools'));
+  };
   const ids=['lone-\uD800','lone-\uDC00','mix-\uD800🚀/\0%~\uDC00','slash/\0%~','~u006c006f006e0065002dd800','paired-🚀'];
   const path=id=>{
     let segment;
@@ -156,6 +159,23 @@ export async function verifySurrogatePageRoutes({browser,appURL,call,root}) {
     finally{await b.keyboard.up('ControlOrMeta');}
     try{await ready(third);await selected(third,ids[0]);await selected(b,ids.at(-1));}finally{await third.close();}
     await a.goto(appURL);await ready(a);await selected(a,ids[0]);
+    for(const activePageId of ids.slice(0,3)){
+      const savedContext=await browser.newContext({serviceWorkers:'block'}),savedPage=await savedContext.newPage();
+      savedPage.on('pageerror',error=>errors.push(error.message));
+      try{
+        await savedPage.route(appURL,route=>route.fulfill({contentType:'text/html',body:`<html><head><base href="${appURL}"></head><body>Storage seed only</body></html>`}));
+        await savedPage.goto(appURL);
+        const before=await savedPage.evaluate(async book=>{
+          if(document.getElementById('agent-status'))throw new Error('Storage must be seeded before app startup.');
+          const {openRepository}=await import(new URL('./src/repository.js',document.baseURI).href);
+          const repository=await openRepository(localStorage,{initial:()=>book});
+          try{return await repository.export();}finally{repository.close();}
+        },{...book,activePageId});
+        await savedPage.unroute(appURL);await savedPage.reload();await ready(savedPage);await selected(savedPage,activePageId);
+        assert.deepEqual(await savedPage.evaluate(()=>window.omdSurrogateStore.getNotebook()),before);
+        await savedPage.reload();await ready(savedPage);await selected(savedPage,activePageId);
+      }finally{await savedContext.close();}
+    }
     const saved=await a.evaluate(async()=>{
       const store=window.omdSurrogateStore,book=JSON.parse(await store.export());
       const request=req=>new Promise((resolve,reject)=>{req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});
@@ -169,6 +189,6 @@ export async function verifySurrogatePageRoutes({browser,appURL,call,root}) {
     assert.deepEqual(saved.meta.pages.map(page=>page.id),ids);assert.deepEqual(saved.meta.parents,book.parents);assert.equal(saved.meta.activePageId,ids[0]);
     assert.deepEqual(saved.recordIds.sort(),[...ids].sort());assert.deepEqual(errors,[]);
     await a.screenshot({path:`${root}/test-results/routes-utf16${new URL(appURL).pathname==='/'?'-root':'-omd'}.png`});
-    console.log(`${new URL(appURL).pathname}: UTF-16 import, persisted exact IDs/parents, startup, reload/direct/native new-tab routes and back/forward passed.`);
+    console.log(`${new URL(appURL).pathname}: UTF-16 import, persisted exact IDs/parents, pre-existing IDB startup, reload/direct/native new-tab routes and back/forward passed.`);
   }finally{await context.close();}
 }
