@@ -67,7 +67,7 @@ try{
   assert.equal(await title.inputValue(),newTitle);assert.equal(afterTitle.revision,beforeTitle.revision+1);
   assert.equal(afterTitle.history,beforeTitle.history+1);assert.deepEqual(afterTitle.page.blocks,beforeTitle.page.blocks);
   assert.equal(await page.locator('#app-page-title').innerText(),newTitle);
-  assert.ok(await page.getByRole('button',{name:`Switch to ${newTitle}`,exact:true}).isVisible());
+  assert.ok(await page.getByRole('link',{name:`Switch to ${newTitle}`,exact:true}).isVisible());
   // Repeated Enter cannot add history, content, or blocks, even if the textarea is focused again.
   await title.focus();await title.evaluate(el=>{
     for(const repeat of [false,true,false])el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',repeat,bubbles:true,cancelable:true}));
@@ -76,7 +76,7 @@ try{
   assert.deepEqual(await snapshot(),afterTitle);
   await page.reload();await ready(page);assert.equal(await title.inputValue(),newTitle);
   assert.equal(await page.locator('#app-page-title').innerText(),newTitle);
-  assert.ok(await page.getByRole('button',{name:`Switch to ${newTitle}`,exact:true}).isVisible());
+  assert.ok(await page.getByRole('link',{name:`Switch to ${newTitle}`,exact:true}).isVisible());
   assert.match(await page.locator('#save-status').innerText(),/Saved/);
   await mkdir(new URL('../test-results/',import.meta.url),{recursive:true});
   await page.screenshot({path:new URL(`../test-results/title-enter-${engine}-${basePath?'omd':'root'}.png`,import.meta.url).pathname,fullPage:true});

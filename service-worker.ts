@@ -3,6 +3,7 @@ declare const self:ServiceWorkerGlobalScope;
 const CACHE = 'omd-shell-__OMD_BUILD__';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icons/icon-192.png', './icons/icon-512.png', './src/styles.css', './src/model.js', './src/notebook.js', './src/store.js', './src/palette.js', './src/reminders.js', './src/app.js', './src/webmcp.js', './src/pwa.js', './src/integrations.js'];
 const paths = new Set(SHELL.map(path => new URL(path, self.registration.scope).pathname));
+const basePath=new URL(self.registration.scope).pathname;
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting()));
 });
@@ -12,9 +13,11 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
-  if (url.origin !== self.location.origin || !paths.has(url.pathname)) return;
+  const pageNavigation=event.request.mode==='navigate'&&url.pathname.startsWith(basePath)&&/^page(?:\/[^/]*)?\/?$/.test(url.pathname.slice(basePath.length));
+  if (url.origin !== self.location.origin || !paths.has(url.pathname)&&!pageNavigation) return;
   event.respondWith((async () => {
     const cache = await caches.open(CACHE);
+    if(pageNavigation)return await cache.match(new URL('index.html',self.registration.scope))??fetch(event.request);
     try {
       const response = await fetch(event.request);
       if (response.ok) { await cache.put(event.request, response.clone()); return response; }

@@ -15,7 +15,7 @@ export async function createStore(storage:StorageLike,options:StoreOptions = {})
     locks.request(`${repository.name}.history:${owner}`,()=>{readyLease();return new Promise<void>(resolve=>{releaseLease=resolve;});}).catch(rejectLease);await ready;
     for(const previous of await repository.historyOwners())await locks.request(`${repository.name}.history:${previous}`,{ifAvailable:true},async lock=>{if(lock)await repository.pruneOwner(previous);});
   }
-  let loaded=await repository.read(),materialize=makeMaterializer();
+  let loaded=await repository.read(undefined,options.activePageId),materialize=makeMaterializer();
   validateNotebook(materialize(loaded!.records!,loaded!.meta.activePageId));
   interface State {meta:Notebook;records:Records;options:ChangeEvent;page:Page}
   const state=createZustandStore<State>()(subscribeWithSelector<State>(()=>({meta:loaded!.meta,records:new Map(),options:{},page:{...loaded!.meta.pages.find(p=>p.id===loaded!.meta.activePageId)!,blocks:[]}})));
@@ -57,12 +57,18 @@ export async function createStore(storage:StorageLike,options:StoreOptions = {})
     subscribeStatus(fn){statusListeners.add(fn);fn(status());return ()=>statusListeners.delete(fn);},
     getPageMetadata:id=>state.getState().meta.pages.find(p=>p.id===id),
     async getPage(pageId=api.getActivePageId()){await queue;if(pageId===api.getActivePageId())return api.getState();return structuredClone(makeMaterializer()(await repository.page(pageId),pageId));},
-    async getNotebook(){await queue;return repository.export();},
+    async getNotebook(){await queue;const book=await repository.export();if(book.pages.some(p=>p.id===api.getActivePageId()))book.activePageId=api.getActivePageId();return book;},
     listPages:()=>listPages(state.getState().meta),
     dispatch<K extends CommandName>(action:K,input:CommandInput<K>,options:ChangeEvent={}) {
       const payload=structuredClone(input) as InternalInput;const target=payload.pageId??api.getActivePageId();
       return enqueue(async()=>{
         const current=state.getState();let next:Notebook,changes:RecordChange[],result:ActionResult;
+        if(action==='page_select') {
+          const out=applyBookAction(current.meta,action,payload);
+          const records=out.state.activePageId!==current.meta.activePageId?await repository.page(out.state.activePageId):current.records;
+          lastError=null;publish({...current.meta,activePageId:out.state.activePageId},records,{actionName:action,...options});
+          return {revision:current.meta.revision} as MutationResult<K>;
+        }
         if(action==='import_notebook') {
           const out=applyBookAction(current.meta,action,payload);next=metadataBook(out.state);result=out.result;
           const old=await repository.export();changes=recordChanges(bookRecords(old),bookRecords(out.state));
@@ -89,7 +95,7 @@ export async function createStore(storage:StorageLike,options:StoreOptions = {})
     subscribeContainer(id,fn){return state.subscribe(s=>s.records.get(recordKey(s.meta.activePageId,`$container:${id}`))?.data && (s.records.get(recordKey(s.meta.activePageId,`$container:${id}`))!.data as import('./types.js').ContainerRecord).blockIds,()=>fn(state.getState().page,state.getState().options));},
     export:async()=>JSON.stringify(await api.getNotebook(),null,2),
     import(raw,options){return api.dispatch('import_notebook',{notebook:parseBook(raw)},options);},
-    reload(){return enqueue(async()=>{const current=state.getState(),loaded=await repository.read(current.meta);if(!loaded)throw new Error('Saved notebook is missing.');if(loaded.meta.id===current.meta.id&&loaded.meta.revision===current.meta.revision)return;await repository.pruneHistory([...undoStack,...redoStack]);undoStack.length=redoStack.length=0;materialize=makeMaterializer();lastError=null;publish(loaded.meta,loaded.records!,{reset:true});});},
+    reload(){return enqueue(async()=>{const current=state.getState(),loaded=await repository.read(current.meta,current.meta.activePageId);if(!loaded)throw new Error('Saved notebook is missing.');if(loaded.meta.id===current.meta.id&&loaded.meta.revision===current.meta.revision)return;await repository.pruneHistory([...undoStack,...redoStack]);undoStack.length=redoStack.length=0;materialize=makeMaterializer();lastError=null;publish(loaded.meta,loaded.records!,{reset:true});});},
     dueReminders:now=>repository.due(now),
     canUndo:()=>undoStack.length>0,canRedo:()=>redoStack.length>0,
     undo:()=>restore(undoStack,redoStack,'inverse'),redo:()=>restore(redoStack,undoStack,'forward'),

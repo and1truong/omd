@@ -10,10 +10,10 @@ const basePath=process.env.OMD_BASE_PATH??'',url=`http://localhost:4320${basePat
 const server=spawn(process.execPath,['scripts/serve.mjs'],{cwd:root,env:{...process.env,OMD_PORT:'4320',OMD_STATIC_DIR:'dist'},stdio:['ignore','pipe','pipe']});
 let browser,page;const errors=[];
 const call=(name,input={})=>page.evaluate(async({name,input})=>{
-  const store=(await import('./src/app.js')).getStore();
+  const store=(await import(new URL('./src/app.js',document.baseURI).href)).getStore();
   return name==='undo'?store.undo():name==='redo'?store.redo():store.dispatch(name,input);
 },{name,input});
-const state=()=>page.evaluate(async()=>(await import('./src/app.js')).getStore().getPage());
+const state=()=>page.evaluate(async()=>(await import(new URL('./src/app.js',document.baseURI).href)).getStore().getPage());
 const order=async()=>((await state()).blocks.map(block=>block.id));
 const choose=async name=>{await page.locator('#picker').getByRole('button',{name:`Add ${name}`,exact:true}).click();await page.locator('#picker').waitFor({state:'hidden'});};
 const focused=async id=>page.waitForFunction(id=>document.activeElement?.closest('[data-block-id]')?.getAttribute('data-block-id')===id,id);
@@ -24,7 +24,7 @@ const fixture=async()=>{
 };
 const ready=async()=>{
   page.on('pageerror',error=>errors.push(error.message));
-  await page.goto(url);await page.evaluate(async()=>{const app=await import('./src/app.js');await app.ready;if(!app.getStore())throw new Error(document.body.innerText);});
+  await page.goto(url);await page.evaluate(async()=>{const app=await import(new URL('./src/app.js',document.baseURI).href);await app.ready;if(!app.getStore())throw new Error(document.body.innerText);});
 };
 
 try {
@@ -47,7 +47,7 @@ try {
   await page.locator(`[data-before-block="${first}"]`).focus();await page.keyboard.press('Enter');await choose('heading');
   const heading=(await order())[0];assert.deepEqual(await order(),[heading,...original]);await focused(heading);
   await page.locator(`[data-block-id="${heading}"] textarea`).fill('A section at the top');
-  await page.evaluate(async()=>(await import('./src/app.js')).getStore().idle());
+  await page.evaluate(async()=>(await import(new URL('./src/app.js',document.baseURI).href)).getStore().idle());
   await call('undo');await call('undo');assert.deepEqual(await order(),original);
   await call('redo');assert.deepEqual(await order(),[heading,...original]);await call('undo');
 
@@ -120,7 +120,7 @@ try {
   const divider=(await order())[1];await focused(divider);
   assert.equal(await page.evaluate(()=>document.activeElement.getAttribute('aria-label')),'Block actions');
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Insertion controls must fit mobile.');
-  await page.reload();await page.evaluate(async()=>await (await import('./src/app.js')).ready);
+  await page.reload();await page.evaluate(async()=>await (await import(new URL('./src/app.js',document.baseURI).href)).ready);
   assert.deepEqual(await order(),[mobileIds[0],divider,added,mobileIds[1],mobileIds[2]]);
   await mobile.close();assert.deepEqual(errors,[]);
   console.log(`${engine} ${basePath||'/'}: inline/menu insertion, keyboard/touch, nested order, focus, cancellation, undo/redo and persistence passed.`);
