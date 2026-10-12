@@ -67,6 +67,7 @@ export function validateNotebook(raw:unknown):Page {
   fields(notebook, ['format', 'version', 'id', 'revision', 'title', 'subtitle', 'theme', 'notificationMode', 'updatedAt', 'blocks']);
   assert(notebook.format === 'omd' && notebook.version === FORMAT_VERSION, 'Unsupported omd document version.');
   string(notebook.id, 'Notebook ID');
+  assert(notebook.id.length > 0, 'Notebook ID must be nonempty text.');
   integer(notebook.revision, Number.MAX_SAFE_INTEGER);
   string(notebook.title, 'Page title'); string(notebook.subtitle, 'Page subtitle');
   assert(THEMES.includes(notebook.theme), 'Invalid theme.');
