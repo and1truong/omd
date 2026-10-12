@@ -6,6 +6,7 @@ export function createCompositionGuard({onSettled=()=>{}}:{onSettled?:()=>void}=
   return {
     hasActive:()=>active.size>0,
     isComposing:(input:EventTarget)=>active.has(input),
+    isPreediting:(input:EventTarget)=>{const record=active.get(input);return !!record&&!record.finishing;},
     settled:(matches:(input:EventTarget)=>boolean=()=>true)=>hasMatching(matches)?new Promise<void>(resolve=>waiters.set(resolve,matches)):Promise.resolve(),
     track(input:EventTarget,write:(pageId:string)=>unknown,getPageId:()=>string) {
       input.addEventListener('compositionstart',()=>active.set(input,{pageId:getPageId()}));

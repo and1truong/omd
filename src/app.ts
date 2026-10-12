@@ -106,7 +106,7 @@ function editable(value:string,aria:string,fn:(value:string,pageId:string)=>unkn
   const pageId=store.getActivePageId();
   function write() { const result=draft?writeNative(draft,input.value,aria):fn(input.value,pageId); if(multiline)fit(input);return result; }
   composition.track(input,write,()=>pageId);
-  input.addEventListener('input',()=>{if(draft)nativeEdits!.stage(draft,input.value,aria);if(!composition.isComposing(input))write();});
+  input.addEventListener('input',event=>{if(draft)nativeEdits!.stage(draft,input.value,aria);if(!(event instanceof InputEvent&&event.isComposing)&&!composition.isPreediting(input))write();});
   if (multiline) input.dataset.autofit = 'true'; return input;
 }
 function writeNative(target:NativeTarget,value:string,label:string) {
@@ -679,7 +679,7 @@ async function boot() {
     const el=domId(key==='title'?'page-title':'page-subtitle');
     const target=(pageId:string):NativeTarget=>({kind:'page',pageId,field:key}),label=key==='title'?'Page title':'Page description';
     const write = (pageId:string) => {const saved=writeNative(target(pageId),el.value,label);fit(el);return saved;};
-    composition.track(el,write,()=>renderPageId);el.addEventListener('input',()=>{const pageId=renderPageId;nativeEdits!.stage(target(pageId),el.value,label);if(!composition.isComposing(el))write(pageId);});
+    composition.track(el,write,()=>renderPageId);el.addEventListener('input',event=>{const pageId=renderPageId;nativeEdits!.stage(target(pageId),el.value,label);if(!(event instanceof InputEvent&&event.isComposing)&&!composition.isPreediting(el))write(pageId);});
     if(key==='title') {
       let finishing=false;
       el.addEventListener('keydown',async event=>{
