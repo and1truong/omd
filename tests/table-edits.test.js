@@ -66,3 +66,11 @@ test('composition stages native drafts before writes and pending writes cannot b
   const saving=edits.retry(edits.id(target));assert.throws(()=>edits.discard(edits.id(target)),/finish saving/);
   resolve();await saving;assert.equal(edits.list().length,0);assert.equal(writes[0].pageId,'captured');
 });
+
+test('flush includes native drafts added while an unrelated queued write is settling',async()=>{
+  let release,waiting;const idle=new Promise(resolve=>release=resolve),started=new Promise(resolve=>waiting=resolve),writes=[];
+  const store={dispatch:async(name,input)=>writes.push(input),idle:async()=>{waiting();await idle;}};
+  const edits=createNativeEdits(store,createCompositionGuard()),target={kind:'page',pageId:'captured',field:'subtitle'};
+  const flushing=edits.flushAll();await started;edits.stage(target,'Arrived while waiting','Page description');release();await flushing;
+  assert.deepEqual(writes,[{pageId:'captured',subtitle:'Arrived while waiting'}]);assert.equal(edits.list().length,0);
+});

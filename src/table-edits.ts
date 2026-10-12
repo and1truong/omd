@@ -35,7 +35,7 @@ export function createNativeEdits(store:NotebookStore,composition:Pick<ReturnTyp
     list:()=>[...drafts].map(([id,draft])=>({id,target:{...draft.target},label:draft.label,value:draft.value,error:draft.error,saving:!!draft.saving})),
     async retry(id:string){const draft=drafts.get(id);if(draft)await flush(id,draft);},
     discard(id:string){const draft=drafts.get(id);if(draft?.saving)throw new Error('Wait for this edit to finish saving.');drafts.delete(id);onChange();},
-    async flushAll(){await composition.settled();await Promise.all([...drafts].map(([id,draft])=>flush(id,draft)));await store.idle();}
+    async flushAll(){do{await composition.settled();await Promise.all([...drafts].map(([id,draft])=>flush(id,draft)));await store.idle();}while(drafts.size);}
   };
 }
 export function createTableEdits(store:NotebookStore,composition:Pick<ReturnType<typeof createCompositionGuard>,'settled'>) {
