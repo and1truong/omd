@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync, spawn } from 'node:child_process';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
+const browserChecks = process.argv.includes('--browser');
+const basePath = browserChecks ? '/apps/page/demo' : '';
 const { version } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
 const name = `omd-v${version}`, output = join(root, 'release');
 const sums = await readFile(join(output, 'SHA256SUMS.txt'), 'utf8');
@@ -17,7 +19,7 @@ for (const extension of ['zip', 'tar.gz']) {
   assert.ok(sums.includes(`${hash}  ${filename}\n`), `Checksum mismatch: ${filename}`);
   // Extract outside the checkout, in a path with spaces, with no node_modules.
   const temporary = await mkdtemp(join(tmpdir(), 'omd release '));
-  let server;
+  let server, browser;
   try {
     if (extension === 'zip') execFileSync('unzip', ['-q', join(output, filename), '-d', temporary]);
     else execFileSync('tar', ['-xzf', join(output, filename), '-C', temporary]);
@@ -47,7 +49,7 @@ for (const extension of ['zip', 'tar.gz']) {
     const port = socket.address().port;
     await new Promise(resolve => socket.close(resolve));
     server = spawn(process.execPath, [join(folder, 'start.mjs')], {
-      cwd: tmpdir(), env: { ...process.env, OMD_PORT: String(port), OMD_BASE_PATH: '' },
+      cwd: tmpdir(), env: { ...process.env, OMD_PORT: String(port), OMD_BASE_PATH: basePath },
       stdio: ['ignore', 'pipe', 'pipe']
     });
     await new Promise((resolve, reject) => {
@@ -56,19 +58,69 @@ for (const extension of ['zip', 'tar.gz']) {
       server.once('exit', code => { clearTimeout(timeout); reject(new Error(`Packaged server exited: ${code}`)); });
       server.stdout.once('data', () => { clearTimeout(timeout); resolve(); });
     });
-    const base = `http://127.0.0.1:${port}/`;
+    const base = `http://127.0.0.1:${port}${basePath}/`;
     for (let index = 0; index < assets.length; index += 12) {
       await Promise.all(assets.slice(index, index + 12).map(async asset => {
         const response = await fetch(new URL(asset, base));
         assert.equal(response.status, 200, asset);
-        assert.deepEqual(Buffer.from(await response.arrayBuffer()), await readFile(join(root, 'dist', asset)), asset);
+        const original = await readFile(join(root, 'dist', asset));
+        assert.deepEqual(await readFile(join(folder, 'dist', asset)), original, `Archived asset: ${asset}`);
+        const served = asset.endsWith('.html') ? Buffer.from(original.toString('utf8').replace('<head>', `<head>\n  <base href="${basePath}/">`)) : original;
+        assert.deepEqual(Buffer.from(await response.arrayBuffer()), served, asset);
         if (asset.endsWith('.js')) assert.match(response.headers.get('content-type'), /^text\/javascript/);
       }));
     }
     assert.equal((await fetch(base)).status, 200);
     assert.equal((await fetch(base + '%2e%2e%2fscripts%2fserve.mjs')).status, 403);
+    for (const asset of ['src/missing.js', 'src/missing.css', 'page/missing.js']) {
+      const response = await fetch(base + asset, { headers: { 'Sec-Fetch-Dest': asset.endsWith('.js') ? 'script' : 'style' } });
+      assert.equal(response.status, 404, asset);
+      assert.doesNotMatch(response.headers.get('content-type') ?? '', /text\/html/, asset);
+    }
+    if (browserChecks) {
+      const { chromium } = await import('playwright');
+      browser = await chromium.launch({ headless: true });
+      const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+      context.setDefaultTimeout(10000);
+      await context.addInitScript(() => window.addEventListener('omd:ready', () => { window.omdReleaseReady = true; }));
+      const page = await context.newPage(), errors = [], missing = [];
+      page.on('pageerror', error => errors.push(error.message));
+      page.on('response', response => { if (response.status() >= 400) missing.push(response.url()); });
+      const ready = target => target.waitForFunction(() => window.omdReleaseReady === true);
+      assert.equal((await page.goto(base)).status(), 200); await ready(page);
+      assert.equal(await page.evaluate(() => document.baseURI), base);
+      assert.equal(await page.locator('base').count(), 1);
+      const id = await page.evaluate(async () => {
+        const store = (await import(new URL('src/app.js', document.baseURI).href)).getStore();
+        await store.dispatch('page_add', { title: 'Packaged prefix deep link' });
+        const id = store.getActivePageId();
+        await store.dispatch('add_block', { type: 'text', text: 'Saved inside the extracted archive deployment.' });
+        await store.dispatch('page_add', { title: 'Another packaged page' });
+        await store.idle(); return id;
+      });
+      const deep = new URL(`page/${encodeURIComponent(id)}`, base).href;
+      assert.equal((await page.goto(deep)).status(), 200); await ready(page);
+      assert.equal(page.url(), deep);
+      assert.equal(await page.evaluate(() => document.baseURI), base);
+      assert.equal(await page.locator('#page-title').inputValue(), 'Packaged prefix deep link');
+      assert.equal(await page.getByRole('textbox', { name: 'text content', exact: true }).innerText(), 'Saved inside the extracted archive deployment.');
+      const scope = await page.evaluate(async () => (await navigator.serviceWorker.ready).scope);
+      assert.equal(scope, base); await page.waitForFunction(() => !!navigator.serviceWorker.controller);
+      await context.setOffline(true); await page.reload(); await ready(page);
+      assert.equal(await page.evaluate(() => document.baseURI), base);
+      assert.equal(await page.locator('#page-title').inputValue(), 'Packaged prefix deep link');
+      const reopened = await context.newPage(); await reopened.goto(deep); await ready(reopened);
+      assert.equal(await reopened.locator('#page-title').inputValue(), 'Packaged prefix deep link');
+      assert.equal(await reopened.getByRole('textbox', { name: 'text content', exact: true }).innerText(), 'Saved inside the extracted archive deployment.');
+      assert.deepEqual(errors, []); assert.deepEqual(missing, []);
+      await mkdir(join(root, 'test-results'), { recursive: true });
+      await page.screenshot({ path: join(root, 'test-results', `release-prefix-${extension === 'zip' ? 'zip' : 'tar'}.png`), fullPage: true });
+      await context.close();
+      console.log(`${filename}: ${basePath}/ startup, persisted page deep link and offline reload/new tab passed.`);
+    }
     console.log(`${filename}: extracted launcher and ${assets.length} bundled assets pass without node_modules.`);
   } finally {
+    await browser?.close();
     if (server && server.exitCode === null) {
       await new Promise(resolve => { server.once('exit', resolve); server.kill(); });
     }
