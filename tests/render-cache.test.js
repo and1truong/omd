@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createRenderCache,reconcile,renderData,revealActions} from '../src/render-cache.js';
+import {createRenderCache,reconcile,renderData,revealActions} from '../src/render-cache.ts';
 // Minimal identity-preserving DOM for lifecycle tests. Native browser assertions
 // separately cover inputs, React teardown and real diagram engines.
 class Node {

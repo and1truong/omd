@@ -1,23 +1,26 @@
+import type {NotebookStore,CommandName,CommandInput,PageRow,ErrorHandler} from './types.js';
+import {errorOf} from './dom.js';
+import {byId as domId} from './dom.js';
 import {MAX_PAGE_LEVELS} from './notebook.js';
-export function setupPalette(store, { onError, beforeOpen = () => {}, beforeNavigate = () => {} } = {}) {
-  const dialog = document.getElementById('page-palette'), search = document.getElementById('page-search'), list = document.getElementById('palette-pages'), create = document.getElementById('palette-create'),parentSelect=document.getElementById('page-create-parent');
-  let selected = 0, matches = [];
-  const run = async (action, args) => { try { await beforeNavigate?.(); return await store.dispatch(action, args); } catch (error) { onError?.(error); return null; } };
-  const select = async pageId => { if(await run('page_select', { pageId }))dialog.close(); };
+export function setupPalette(store:NotebookStore,{onError,beforeOpen=()=>{},beforeNavigate=()=>{}}:{onError?:ErrorHandler;beforeOpen?:()=>unknown;beforeNavigate?:()=>unknown}={}) {
+  const dialog = domId('page-palette'), search = domId('page-search'), list = domId('palette-pages'), create = domId('palette-create'),parentSelect=domId('page-create-parent');
+  let selected = 0, matches:PageRow[] = [];
+  const run = async <K extends CommandName>(action:K,args:CommandInput<K>) => { try { await beforeNavigate?.(); return await store.dispatch(action, args); } catch (error) { onError?.(errorOf(error)); return null; } };
+  const select = async (pageId:string) => { if(await run('page_select', { pageId }))dialog.close(); };
   function render(reveal = false) {
     const pages = store.listPages(), query = search.value.toLocaleLowerCase().trim();
     const byId=new Map(pages.map(p=>[p.pageId,p])),chosen=parentSelect.value;
     parentSelect.replaceChildren();const root=document.createElement('option');root.value='';root.textContent='Notebook root';parentSelect.append(root);
-    for(const page of pages)if(page.depth+1<MAX_PAGE_LEVELS){const option=document.createElement('option');option.value=page.pageId;option.textContent=`${'  '.repeat(Math.min(page.depth,6))}${page.title||'Untitled page'}${page.parentId?` — ${byId.get(page.parentId).title||'Untitled page'}`:''}`;parentSelect.append(option);}parentSelect.value=byId.has(chosen)&&byId.get(chosen).depth+1<MAX_PAGE_LEVELS?chosen:'';
+    for(const page of pages)if(page.depth+1<MAX_PAGE_LEVELS){const option=document.createElement('option');option.value=page.pageId;option.textContent=`${'  '.repeat(Math.min(page.depth,6))}${page.title||'Untitled page'}${page.parentId?` — ${byId.get(page.parentId)!.title||'Untitled page'}`:''}`;parentSelect.append(option);}parentSelect.value=byId.has(chosen)&&byId.get(chosen)!.depth+1<MAX_PAGE_LEVELS?chosen:'';
     matches = pages.filter(p => `${p.title} ${p.subtitle} ${byId.get(p.parentId)?.title??''}`.toLocaleLowerCase().includes(query));
     selected = Math.min(selected, Math.max(0, matches.length - 1)); list.replaceChildren();
     matches.forEach((page, i) => {
       const row = document.createElement('div'); row.className = 'palette-page';
       const pick = document.createElement('button'); pick.className = `palette-pick ${i === selected ? 'highlighted' : ''}`;
       pick.type = 'button'; pick.setAttribute('role','option'); pick.setAttribute('aria-selected', String(i === selected)); pick.id = `palette-${page.pageId}`; pick.textContent = `${page.title || 'Untitled page'}${page.active ? ' · current' : ''}`; pick.addEventListener('click', async () => select(page.pageId));
-      if(page.parentId){const path=document.createElement('small');path.className='palette-page-path';path.textContent=`Under ${byId.get(page.parentId).title||'Untitled page'}`;pick.append(path);}
+      if(page.parentId){const path=document.createElement('small');path.className='palette-page-path';path.textContent=`Under ${byId.get(page.parentId)!.title||'Untitled page'}`;pick.append(path);}
       row.append(pick); const controls = document.createElement('div'); controls.className = 'palette-order';
-      for (const [label, name, index] of [['↑','up',page.index - 1],['↓','down',page.index + 1]]) {
+      for (const [label,name,index] of [['↑','up',page.index-1],['↓','down',page.index+1]] as [string,string,number][]) {
         const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.className = 'icon-button'; button.setAttribute('aria-label', `Move ${page.title || 'page'} ${name}`); button.disabled = index < 0 || index >= page.siblingCount;
         button.addEventListener('click', async () => { await run('page_move',{ pageId:page.pageId,index }); render(); }); controls.append(button);
       }
@@ -25,7 +28,7 @@ export function setupPalette(store, { onError, beforeOpen = () => {}, beforeNavi
     });
     if (!matches.length) { const empty = document.createElement('p'); empty.className = 'muted'; empty.textContent = 'No matching pages. Start a new one below.'; list.append(empty); }
     if (matches[selected]) search.setAttribute('aria-activedescendant',`palette-${matches[selected].pageId}`); else search.removeAttribute('aria-activedescendant');
-    if(reveal&&matches[selected])document.getElementById(`palette-${matches[selected].pageId}`)?.scrollIntoView({block:'nearest'});
+    if(reveal&&matches[selected])domId(`palette-${matches[selected].pageId}`)?.scrollIntoView({block:'nearest'});
     create.textContent = search.value.trim() ? `+ Create “${search.value.trim()}”` : '+ Create a new page';
   }
   function open() { beforeOpen();search.value = '';parentSelect.value=''; selected = 0; render(); if (!dialog.open) dialog.showModal(); search.focus(); }
@@ -37,7 +40,7 @@ export function setupPalette(store, { onError, beforeOpen = () => {}, beforeNavi
     if (e.key === 'Enter') { e.preventDefault(); if (matches[selected]) select(matches[selected].pageId); else create.click(); }
   });
   document.addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); e.stopPropagation(); if (dialog.open) dialog.close(); else open(); } }, true);
-  document.getElementById('pages-button').addEventListener('click', open);
-  function update() { document.getElementById('page-count').textContent = `${store.listPages().length} page${store.listPages().length === 1 ? '' : 's'}`; if (dialog.open) render(); }
+  domId('pages-button').addEventListener('click', open);
+  function update() { domId('page-count').textContent = `${store.listPages().length} page${store.listPages().length === 1 ? '' : 's'}`; if (dialog.open) render(); }
   store.subscribe(update); update(); return { open, close: () => dialog.close() };
 }

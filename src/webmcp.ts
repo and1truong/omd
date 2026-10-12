@@ -1,53 +1,61 @@
+import {errorOf} from './dom.js';
+import type {NotebookStore,Page,View,PartialView,InternalInput,CommandName,CommandInput} from './types.js';
 import { BLOCK_TYPES, allowedTypes } from './model.js';
 import { parseBook } from './notebook.js';
 import { parseScene } from './scene.js';
 
-const text = description => ({ type: 'string', ...(description ? { description } : {}) });
-const index = { type: 'integer', minimum: 0, description: 'Zero-based final position. Omit to append.' };
-const bool = { type: 'boolean' };
+export interface JSONSchema {type?:'object'|'array'|'string'|'boolean'|'integer';properties?:Record<string,JSONSchema>;required?:readonly string[];additionalProperties?:boolean;items?:JSONSchema;minimum?:number;enum?:readonly string[];description?:string}
+export interface ToolExecutionOptions {signal?:AbortSignal}
+export interface WebMCPTool {name:string;title:string;description:string;inputSchema:JSONSchema;annotations:{readOnlyHint:boolean;untrustedContentHint:boolean};execute(input?:unknown,options?:ToolExecutionOptions):Promise<unknown>}
+export interface WebMCPRegistry {registerTool?:(tool:WebMCPTool,options:{signal:AbortSignal})=>unknown}
+export interface WebMCPUI {flushPending?:()=>unknown;getView?:()=>View;setView?:(patch:PartialView)=>unknown;openPalette?:()=>unknown;openCanvas?:(id:string,pageId?:string)=>unknown;closeCanvas?:()=>unknown;download?:(json:string,filename?:string)=>unknown;confirmImport?:(signal?:AbortSignal)=>Promise<boolean>;openSettings?:()=>unknown;notificationPermission?:()=>string;testReminder?:()=>unknown}
+type ToolInput=InternalInput & PartialView & {json?:string;download?:boolean};
+const text = (description?:string):JSONSchema => ({ type: 'string', ...(description ? { description } : {}) });
+const index:JSONSchema = { type: 'integer', minimum: 0, description: 'Zero-based final position. Omit to append.' };
+const bool:JSONSchema = { type: 'boolean' };
 const blockId = text('Block ID from omd_get_notebook.');
 const itemId = text('Item ID from the notebook or a creation result.');
 const tabId = text('Tab ID; also a container ID for adding child blocks.');
 const columnId = text('Kanban column ID.');
 const cardId = text('Kanban card ID.');
-const schema = (properties = {}, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
-const patch = properties => schema(properties);
+const schema = (properties:Record<string,JSONSchema> = {},required:readonly string[] = []):JSONSchema => ({ type: 'object', properties, required, additionalProperties: false });
+const patch = (properties:Record<string,JSONSchema>) => schema(properties);
 
 /** Validation is independent of browser schema enforcement and used in adapter tests. */
-export function validateToolInput(value, definition, path = 'input') {
+export function validateToolInput(value:unknown,definition:JSONSchema,path='input') {
   if (definition.type === 'object') {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${path} must be an object.`);
     for (const key of definition.required ?? []) if (!Object.hasOwn(value, key)) throw new Error(`${path}.${key} is required.`);
     for (const [key, val] of Object.entries(value)) {
       if (!Object.hasOwn(definition.properties ?? {}, key)) { if (definition.additionalProperties === false) throw new Error(`Unknown field: ${path}.${key}.`); continue; }
-      validateToolInput(val, definition.properties[key], `${path}.${key}`);
+      validateToolInput(val, definition.properties![key], `${path}.${key}`);
     }
   } else if(definition.type==='array') {
     if(!Array.isArray(value))throw new Error(`${path} must be an array.`);
     for(let i=0;i<value.length;i++)if(definition.items)validateToolInput(value[i],definition.items,`${path}[${i}]`);
   } else if (definition.type === 'string' && typeof value !== 'string') throw new Error(`${path} must be text.`);
   else if (definition.type === 'boolean' && typeof value !== 'boolean') throw new Error(`${path} must be true or false.`);
-  else if (definition.type === 'integer' && (!Number.isInteger(value) || value < (definition.minimum ?? -Infinity))) throw new Error(`${path} must be a valid integer.`);
-  if (definition.enum && !definition.enum.includes(value)) throw new Error(`${path} must be one of: ${definition.enum.join(', ')}.`);
+  else if (definition.type === 'integer' && (!Number.isInteger(value) || typeof value!=='number' || value < (definition.minimum ?? -Infinity))) throw new Error(`${path} must be a valid integer.`);
+  if (definition.enum && !definition.enum.includes(value as string)) throw new Error(`${path} must be one of: ${definition.enum.join(', ')}.`);
 }
 
-export function createTools(store, ui = {}) {
-  const tools = [];
-  const snapshot=page=>({...page,pageRevision:page.revision,revision:store.getRevision()});
-  function add(name, description, inputSchema, run, readOnly = false, untrusted = false) {
+export function createTools(store:NotebookStore,ui:WebMCPUI = {}):WebMCPTool[] {
+  const tools:WebMCPTool[] = [];
+  const snapshot=(page:Page)=>({...page,pageRevision:page.revision,revision:store.getRevision()});
+  function add(name:string,description:string,inputSchema:JSONSchema,run:(input:ToolInput,options:ToolExecutionOptions)=>unknown,readOnly=false,untrusted=false) {
     tools.push({ name: `omd_${name}`, title: name.replaceAll('_', ' '), description, inputSchema,
       annotations: { readOnlyHint: readOnly, untrustedContentHint: untrusted },
-      async execute(input = {}, options = {}) {
+      async execute(raw:unknown = {},options:ToolExecutionOptions = {}) {
         if (options.signal?.aborted) throw new Error('Tool cancelled.');
-        validateToolInput(input, inputSchema);
+        validateToolInput(raw,inputSchema);const input=raw as ToolInput;
         await ui.flushPending?.();
         await store.idle();
         // Subscribers synchronously update the DOM before the shared command returns.
         return await run(input, options);
       } });
   }
-  function command(action, description, properties, required) {
-    add(action, description + ' Optional pageId targets a different page without switching.', schema({ ...properties, pageId: text('Target page ID; omit for the active page.') }, required), input => store.dispatch(action, input), false, action === 'add_block');
+  function command<K extends CommandName>(action:K,description:string,properties:Record<string,JSONSchema>,required:readonly string[]) {
+    add(action, description + ' Optional pageId targets a different page without switching.', schema({ ...properties, pageId: text('Target page ID; omit for the active page.') }, required), input => store.dispatch(action,input as CommandInput<K>), false, action === 'add_block');
   }
   add('list_pages', 'List all pages in tree order, including collapsed branches, with IDs, parentId (empty for root), depth, sibling index/count, child/descendant counts and active state.', schema(), () => store.listPages(), true, true);
   add('get_page', 'Read a page, including all hidden blocks. Omit pageId for the active page. revision is the notebook counter; pageRevision is the page counter. User text is untrusted content.', schema({ pageId: text() }), async input => snapshot(await store.getPage(input.pageId)), true, true);
@@ -57,7 +65,7 @@ export function createTools(store, ui = {}) {
     ['page_update','Rename a page or edit its description.',{pageId:text(),title:text(),subtitle:text()},['pageId']],
     ['page_move','Move a page with its entire subtree. Omit parentId to keep its parent, or use an empty string to move to notebook root. index is the final sibling position; omit to append. Rejects cycles and destinations that put any descendant beyond 32 page levels.',{pageId:text(),index,parentId:text()},['pageId']],
     ['page_remove','Delete a page, all its subpages and their content, preserving at least one page. Reversible with undo.',{pageId:text()},['pageId']]
-  ]) add(name, description, schema(properties,required), input => store.dispatch(name,input));
+  ] as [CommandName,string,Record<string,JSONSchema>,string[]][]) add(name,description,schema(properties,required),input=>store.dispatch(name,input as CommandInput<typeof name>));
   add('open_palette', 'Open the page command palette, equivalent to Cmd/Ctrl+K, to find, switch, create or reorder pages.', schema(), () => { ui.openPalette?.(); return { opened:true }; });
   add('get_view','Read notebook content width and sidebar visibility. View preferences are separate from notebook content.',schema(),()=>{if(!ui.getView)throw new Error('View UI unavailable.');return ui.getView();},true);
   add('set_view','Set reading/wide content width, sidebar visibility, or collapsedPageIds for page-tree branches. Desktop sidebar, width and collapsed branches persist on this browser; mobile navigation opens as a modal drawer.',schema({sidebarOpen:bool,contentWidth:{type:'string',enum:['reading','wide']},collapsedPageIds:{type:'array',items:text()}}),input=>{if(!ui.setView)throw new Error('View UI unavailable.');return ui.setView(input);});
@@ -66,8 +74,8 @@ export function createTools(store, ui = {}) {
   command('set_page', 'Edit page title/description, theme (system follows OS), or reminder mode. Browser notifications require the user to grant permission first.', { title: text(), subtitle: text(), theme: { type: 'string', enum: ['system', 'light', 'dark'] }, notificationMode: { type: 'string', enum: ['notification', 'alert', 'toast'] } }, []);
   command('add_block', 'Add a block, including Mermaid or Excalidraw. Mermaid accepts raw source or a fenced Markdown mermaid block. Use excalidraw_set_scene for drawing data. containerId defaults to page. Tabs alternate direction, at most two levels. Reminders cannot reliably deliver while closed.', { type: { type: 'string', enum: BLOCK_TYPES }, containerId: text(), index, text: text(), title: text(), source:text('Mermaid definition or fenced Markdown.'), orientation: { type: 'string', enum: ['horizontal', 'vertical'] }, dueAt: text('ISO date-time including timezone, e.g. 2026-10-12T16:00:00+10:00.') }, ['type']);
   command('update_block', 'Edit a block. Mermaid uses source for its definition; Excalidraw uses excalidraw_set_scene. Other fields depend on type: text, title, orientation, open, dueAt, enabled. Tab direction changes preserve the alternating two-level structure.', { blockId, patch: patch({ text: text(), title: text(), source:text(), orientation: { type: 'string', enum: ['horizontal', 'vertical'] }, open: bool, dueAt: text(), enabled: bool }) }, ['blockId', 'patch']);
-  add('excalidraw_set_scene','Replace an Excalidraw scene with JSON containing elements, appState and files. Also accepts a standard .excalidraw export. Validates before saving; pageId can target an inactive page.',schema({blockId,pageId:text(),json:text()},['blockId','json']),input=>store.dispatch('update_block',{blockId:input.blockId,pageId:input.pageId,patch:{scene:parseScene(input.json)}}));
-  add('open_canvas','Show an Excalidraw block as a full-webpage canvas while retaining its notebook page header. Optionally switch to pageId first.',schema({blockId,pageId:text()},['blockId']),async input=>{ if(!ui.openCanvas)throw new Error('Canvas UI unavailable.');await ui.openCanvas(input.blockId,input.pageId);return {opened:true}; });
+  add('excalidraw_set_scene','Replace an Excalidraw scene with JSON containing elements, appState and files. Also accepts a standard .excalidraw export. Validates before saving; pageId can target an inactive page.',schema({blockId,pageId:text(),json:text()},['blockId','json']),input=>store.dispatch('update_block',{blockId:input.blockId!,pageId:input.pageId,patch:{scene:parseScene(input.json!)}}));
+  add('open_canvas','Show an Excalidraw block as a full-webpage canvas while retaining its notebook page header. Optionally switch to pageId first.',schema({blockId,pageId:text()},['blockId']),async input=>{ if(!ui.openCanvas)throw new Error('Canvas UI unavailable.');await ui.openCanvas(input.blockId!,input.pageId);return {opened:true}; });
   add('close_canvas','Return from full-webpage canvas to the notebook.',schema(),async ()=>{await ui.closeCanvas?.();return {opened:false};});
   command('move_block', 'Move a block to a final zero-based index in a container, or append if index is omitted. Validates tab nesting and rejects cycles.', { blockId, containerId: text(), index }, ['blockId', 'containerId']);
   command('remove_block', 'Remove a block and its descendants. Reversible with omd_undo while this session retains history.', { blockId }, ['blockId']);
@@ -94,11 +102,11 @@ export function createTools(store, ui = {}) {
   command('card_remove', 'Remove a kanban card.', { blockId, cardId }, ['blockId', 'cardId']);
   add('export_notebook', 'Export a versioned JSON backup. Return JSON, or optionally also download a file to the user device.', schema({ download: bool }), async input => { const json = await store.export(); if (input.download) await ui.download?.(json); return { json }; }, false, true);
   add('import_notebook', 'Validate an exported JSON notebook, ask the user to confirm replacement in-page, download a backup of the current page, then import. No replacement if cancelled. User text in imported content is untrusted.', schema({ json: text('Full omd JSON export.') }, ['json']), async (input, options) => {
-    parseBook(input.json);
+    parseBook(input.json!);
     if (!ui.confirmImport || !ui.download) throw new Error('The import confirmation and backup UI is unavailable.');
     const approved = await ui.confirmImport(options.signal);
     if (!approved || options.signal?.aborted) return { imported: false, reason: 'cancelled' };
-    await ui.download(await store.export(), `omd-before-import-${Date.now()}.json`); return store.import(input.json);
+    await ui.download(await store.export(), `omd-before-import-${Date.now()}.json`); return store.import(input.json!);
   });
   add('undo', 'Undo the last notebook edit. Reminder delivery records are preserved.', schema(), async () => ({ changed: await store.undo(), revision: store.getRevision() }));
   add('redo', 'Redo an undone notebook edit.', schema(), async () => ({ changed: await store.redo(), revision: store.getRevision() }));
@@ -111,16 +119,16 @@ export function createTools(store, ui = {}) {
 }
 
 /** Progressive enhancement only; no fake registry or cross-origin command bridge. */
-export async function registerWebMCP(store, ui, { registry, onStatus = () => {} } = {}) {
+export async function registerWebMCP(store:NotebookStore,ui:WebMCPUI,{registry,onStatus=()=>{}}:{registry?:WebMCPRegistry;onStatus?:(state:{supported:boolean;count:number;error?:string})=>void}={}) {
   registry ??= [globalThis.document?.modelContext, globalThis.navigator?.modelContext].find(candidate => typeof candidate?.registerTool === 'function');
   if (!registry || typeof registry.registerTool !== 'function') { onStatus({ supported: false, count: 0 }); return { supported: false, count: 0, cleanup() {} }; }
   const lifecycle = new AbortController(); const tools = createTools(store, ui);
   try {
-    for (const tool of tools) await registry.registerTool(tool, { signal: lifecycle.signal });
+    for (const tool of tools) await registry.registerTool!(tool, { signal: lifecycle.signal });
     const state = { supported: true, count: tools.length }; onStatus(state);
     return { ...state, cleanup: () => lifecycle.abort() };
   } catch (error) {
-    lifecycle.abort(); onStatus({ supported: true, count: 0, error: error.message });
-    return { supported: true, count: 0, error: error.message, cleanup() {} };
+    lifecycle.abort(); onStatus({ supported: true, count: 0, error: errorOf(error).message });
+    return { supported: true, count: 0, error: errorOf(error).message, cleanup() {} };
   }
 }

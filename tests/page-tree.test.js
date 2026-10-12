@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createStore} from './store-helper.js';
-import {emptyNotebook,STORAGE_KEY} from '../src/model.js';
-import {wrapPage,validateBook,parseBook,listPages,applyBookAction,MAX_PAGE_LEVELS} from '../src/notebook.js';
-import {createTools} from '../src/webmcp.js';
+import {emptyNotebook,STORAGE_KEY} from '../src/model.ts';
+import {wrapPage,validateBook,parseBook,listPages,applyBookAction,MAX_PAGE_LEVELS} from '../src/notebook.ts';
+import {createTools} from '../src/webmcp.ts';
 const memory=()=>{const map=new Map();return {getItem:k=>map.get(k)??null,setItem:(k,v)=>map.set(k,v)};};
 const setup=async()=>(await createStore(memory(),{initial:emptyNotebook}));
 test('nested pages have sibling ordering, depth, counts and persistent parent links',async () =>{

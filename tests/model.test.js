@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { emptyNotebook, makeBlock, validateNotebook, applyAction, parseImport, allowedTypes, dueReminders } from '../src/model.js';
+import { emptyNotebook, makeBlock, validateNotebook, applyAction, parseImport, allowedTypes, dueReminders } from '../src/model.ts';
 import { createStore, failWrites } from './store-helper.js';
 
 function fixture() {

@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createStore,failWrites} from './store-helper.js';
-import {emptyNotebook,makeBlock,STORAGE_KEY} from '../src/model.js';
-import {wrapPage} from '../src/notebook.js';
+import {emptyNotebook,makeBlock,STORAGE_KEY} from '../src/model.ts';
+import {wrapPage} from '../src/notebook.ts';
 const memory=()=>{const values=new Map();return {getItem:k=>values.get(k)??null,setItem:(k,v)=>values.set(k,v)};};
 function trace(store){const puts=[],reads=[],put=IDBObjectStore.prototype.put,getAll=IDBIndex.prototype.getAll;
   IDBObjectStore.prototype.put=function(value,key){if(this.transaction.db.name===store.databaseName())puts.push({store:this.name,key,value});return put.call(this,value,key);};
@@ -87,5 +87,5 @@ test('drawing edits neither rewrite unchanged image bytes nor duplicate them int
 test('older IndexedDB scene records upgrade atomically to separate image-file maps',async()=>{
   const data=memory(),name=`old-preview-${crypto.randomUUID()}`,page=emptyNotebook(),drawing=makeBlock('excalidraw'),book=wrapPage(page);drawing.scene.files.image={id:'image',dataURL:'data:image/png;base64,AA=='};
   await new Promise((resolve,reject)=>{const opening=indexedDB.open(name,1);opening.onupgradeneeded=()=>{const db=opening.result;db.createObjectStore('meta');db.createObjectStore('records').createIndex('pageId','pageId');db.createObjectStore('reminders').createIndex('due','due');db.createObjectStore('history');db.createObjectStore('delivery');};opening.onerror=()=>reject(opening.error);opening.onsuccess=()=>{const db=opening.result,tx=db.transaction(['meta','records'],'readwrite'),records=tx.objectStore('records');tx.objectStore('meta').put(book,'book');const add=(id,kind,record)=>{const key=JSON.stringify([page.id,id]);records.put({key,kind,pageId:page.id,data:record},key);};const {blocks,...metadata}=page;add('$page','page',metadata);add('$container:page','container',{id:'page',blockIds:[drawing.id]});add(`$block:${drawing.id}`,'block',{id:drawing.id,type:'excalidraw',title:drawing.title});add(`$scene:${drawing.id}`,'scene',drawing.scene);tx.oncomplete=()=>{db.close();resolve();};tx.onabort=()=>reject(tx.error);};});
-  const {createStore:openStore}=await import('../src/store.js'),store=await openStore(data,{name,initial:emptyNotebook});assert.deepEqual(store.getRenderState().blocks[0].scene,drawing.scene);assert.equal(store.residency().recordCount,5);await store.close();
+  const {createStore:openStore}=await import('../src/store.ts'),store=await openStore(data,{name,initial:emptyNotebook});assert.deepEqual(store.getRenderState().blocks[0].scene,drawing.scene);assert.equal(store.residency().recordCount,5);await store.close();
 });
