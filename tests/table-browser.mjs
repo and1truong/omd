@@ -44,6 +44,33 @@ async function verifyInFlightNativeIme() {
       await input.fill(original);await settled();
     } finally {await page.evaluate(()=>releaseNativeTransaction());}
   }
+  for(const mode of ['failure','same-preedit','new-preedit'])for(const kind of ['page','subtitle','title','cell']){
+    const input=kind==='page'?page.locator('#page-title'):kind==='subtitle'?page.locator('#page-subtitle'):kind==='title'?block().getByRole('textbox',{name:'table title',exact:true}):cell(2,1),original=await input.inputValue(),final=`Final ${kind} ${mode}`,suffix=`${final} suffix`,preedit=mode==='same-preedit'?suffix:`New PREEDIT ${kind}`;
+    const saved=()=>page.evaluate(({kind,id})=>{const p=tableApp.getStore().getState(),b=p.blocks.find(b=>b.id===id);return kind==='page'?p.title:kind==='subtitle'?p.subtitle:kind==='title'?b.title:b.rows[1].cells[0];},{kind,id});
+    await hold();
+    try {
+      await page.evaluate(()=>{window.nativeAckStarted=false;window.stopNativeAck=tableApp.getStore().subscribeStatus(status=>{if(status.pending)nativeAckStarted=true;});});
+      await input.evaluate((el,final)=>{el.focus();el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.value=final;el.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));},final);
+      await page.waitForFunction(()=>nativeAckStarted);await input.press('End');await input.pressSequentially(' suffix');assert.equal(await input.inputValue(),suffix);
+      if(mode==='failure')await page.evaluate(final=>{
+        const put=IDBObjectStore.prototype.put,name=tableApp.getStore().databaseName();window.restoreSuffixPut=()=>{IDBObjectStore.prototype.put=put;};
+        IDBObjectStore.prototype.put=function(...args){if(this.transaction.db.name===name&&JSON.stringify(args[0]).includes(final))throw new DOMException('Final suffix quota test','QuotaExceededError');return put.apply(this,args);};
+      },final);
+      else await input.evaluate((el,preedit)=>{el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.value=preedit;el.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));},preedit);
+      await page.evaluate(()=>releaseNativeTransaction());
+      if(mode==='failure'){
+        await page.waitForFunction(()=>document.getElementById('save-status').textContent.startsWith('Not saved'));assert.equal(await saved(),original);assert.equal(await input.inputValue(),suffix);
+        assert.equal(await page.getByRole('region',{name:'Unsaved edits'}).getByRole('textbox').inputValue(),suffix);
+        await page.evaluate(()=>restoreSuffixPut());await page.getByRole('region',{name:'Unsaved edits'}).getByRole('button',{name:'Retry unsaved edit',exact:true}).click();
+      }else{
+        await page.waitForFunction(({kind,id,suffix})=>{const p=tableApp.getStore().getState(),b=p.blocks.find(b=>b.id===id);return (kind==='page'?p.title:kind==='subtitle'?p.subtitle:kind==='title'?b.title:b.rows[1].cells[0])===suffix;},{kind,id,suffix});
+        assert.equal(await input.inputValue(),preedit);assert.match(await page.locator('#save-status').innerText(),/^Saving/);
+        await input.dispatchEvent('compositionend');
+      }
+      await page.waitForFunction(()=>document.getElementById('save-status').textContent==='Saved');assert.equal(await saved(),mode==='failure'?suffix:preedit);
+      await input.fill(original);await settled();
+    }finally{await page.evaluate(()=>{window.restoreSuffixPut?.();window.stopNativeAck?.();});await page.evaluate(()=>releaseNativeTransaction());}
+  }
 }
 async function verifyNativeDrafts(context,current,other) {
   const title=page.locator('#page-title'),description=page.locator('#page-subtitle'),tableTitle=()=>block().getByRole('textbox',{name:'table title',exact:true});
