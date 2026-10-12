@@ -346,7 +346,7 @@ export async function deliverReminder(reminder:Pick<ReminderBlock,'id'|'title'>,
   try {
     const registration = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistration() : null;
     if (registration) await registration.showNotification('omd · a gentle nudge', { body: reminder.title, icon: new URL('icon.svg',appBase).href, tag: `omd-${reminder.id}`, data: { url: appBase.href } });
-    else new Notification('omd · a gentle nudge', { body: reminder.title, icon: './icon.svg', tag: `omd-${reminder.id}` });
+    else new Notification('omd · a gentle nudge', { body: reminder.title, icon: new URL('icon.svg',appBase).href, tag: `omd-${reminder.id}` });
   } catch { notify('System notification unavailable. Your reminder is shown here.', '', true); }
 }
 function startupError(error:Error) {
@@ -389,6 +389,20 @@ async function boot() {
     const el=$<HTMLInputElement|HTMLTextAreaElement>(selector);
     const write = (pageId:string) => {const saved=action('set_page', {pageId,[key]:el.value}, {quiet:true});fit(el);return saved;};
     composition.track(el,write,()=>store.getActivePageId());el.addEventListener('input',()=>{if(!composition.isComposing(el))write(store.getActivePageId());});
+    if(key==='title') {
+      let finishing=false;
+      el.addEventListener('keydown',async event=>{
+        const key=event as KeyboardEvent;
+        if(key.key!=='Enter'||key.isComposing||key.keyCode===229||composition.isComposing(el))return;
+        key.preventDefault();if(key.repeat||finishing)return;
+        finishing=true;const pageId=store.getActivePageId(),title=el.value;
+        try {
+          await store.idle();
+          if(store.getPageMetadata(pageId)?.title!==title&&!await action('set_page',{pageId,title},{quiet:true}))return;
+          if(store.getActivePageId()===pageId&&el.value===title&&!composition.isComposing(el))el.blur();
+        } finally {finishing=false;}
+      });
+    }
   }
   domId('theme').addEventListener('change', e => action('set_page', { theme: (e.target as HTMLSelectElement).value as Page['theme'] })); themeQuery.addEventListener('change', () => applyTheme(store.getRenderState().theme));
   domId('notification-mode').addEventListener('change', e => action('set_page', { notificationMode: (e.target as HTMLSelectElement).value as NotificationMode }));

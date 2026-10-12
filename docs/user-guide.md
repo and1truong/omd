@@ -24,6 +24,8 @@ Pages can contain subpages up to 32 levels, counting root pages as level 1. Use 
 
 Text blocks use Tiptap: type Markdown shortcuts such as `## ` for a heading, `- ` for a list, or `**bold**`, and use the formatting toolbar for bold, italic, strikethrough, inline code, headings, lists, quotes and code blocks. Pasting plain Markdown renders its formatting; pasting into a code block keeps literal code. The toolbar appears on hover or focus on desktop and stays visible on mobile.
 
+Click or tap a link to open it in a new tab without leaving your notebook. To edit linked text, move the cursor into it with the arrow keys or drag to select it; Shift+click extends a selection without opening the link.
+
 **Enter** creates a paragraph inside the current text block. **Shift+Enter** creates an empty text block immediately after the current text or heading block and moves the cursor to its start. The original block keeps all its content, including text after the cursor. This also works inside tabs, expandable blocks and accordion sections. Undo removes the insertion; redo restores it. While editing a text block, Cmd/Ctrl+Z and Cmd/Ctrl+Shift+Z use notebook undo/redo.
 
 Focus the text or heading editor before using **Shift+Enter**; the shortcut does not create blocks from the formatting toolbar or page title. While an input method is composing text (for example, Vietnamese preedit), block creation is suppressed to protect the unfinished text. Finish composition first, such as by committing the word with Space, then press **Shift+Enter**. With some input methods, the first press only commits composition; press again after it finishes.
