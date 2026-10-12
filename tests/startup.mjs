@@ -85,6 +85,7 @@ try{
   await subtitle.fill('Dòng một');await subtitle.press('End');await subtitle.press('Enter');await page.keyboard.insertText('Dòng hai');
   assert.equal(await subtitle.inputValue(),'Dòng một\nDòng hai');
   assert.ok(await subtitle.evaluate(el=>document.activeElement===el));
+  await page.evaluate(()=>window.omdStartupApp.flushPending());
   assert.equal((await snapshot()).page.subtitle,'Dòng một\nDòng hai');
 
   // Both native IME signals and the composition guard leave confirmation Enter untouched.

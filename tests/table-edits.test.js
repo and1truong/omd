@@ -74,3 +74,12 @@ test('flush includes native drafts added while an unrelated queued write is sett
   const flushing=edits.flushAll();await started;edits.stage(target,'Arrived while waiting','Page description');release();await flushing;
   assert.deepEqual(writes,[{pageId:'captured',subtitle:'Arrived while waiting'}]);assert.equal(edits.list().length,0);
 });
+
+test('non-settling flush skips native preedit but strict barriers still wait for final composition',async()=>{
+  const writes=[];let composing=true,finish;
+  const composition={settled:()=>new Promise(resolve=>finish=()=>{composing=false;resolve();}),isComposingTarget:target=>target.kind==='page'&&composing};
+  const edits=createNativeEdits({dispatch:async(name,input)=>writes.push(input),idle:async()=>{}},composition),target={kind:'page',pageId:'captured',field:'title'};
+  edits.stage(target,'Preedit Việt','Page title');await edits.flushAll({settle:false});assert.equal(writes.length,0);assert.equal(edits.list().length,1);
+  let done=false;const strict=edits.flushAll().then(()=>done=true);await Promise.resolve();assert.equal(done,false);
+  edits.stage(target,'Final 日本語','Page title');finish();await strict;assert.deepEqual(writes,[{pageId:'captured',title:'Final 日本語'}]);assert.equal(edits.list().length,0);
+});

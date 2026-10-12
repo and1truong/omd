@@ -9,6 +9,21 @@ async function setup() {
 }
 const call = (tools, name, input = {}) => tools.find(t => t.name === `omd_${name}`).execute(input);
 
+test('WebMCP scalar/read flushes do not settle preedit; structural/export/history barriers stay strict',async()=>{
+  const store=await setup(),table=(await store.dispatch('add_block',{type:'table'})).block,board=(await store.dispatch('add_block',{type:'kanban'})).block;
+  const card=(await store.dispatch('card_add',{blockId:board.id,columnId:board.columns[0].id})).cardId,scopes=[];
+  const tools=createTools(store,{flushPending:async options=>{scopes.push(options.settle);if(options.settle)throw new Error('Unresolved native preedit');}});
+  await call(tools,'get_notebook');await call(tools,'card_update',{blockId:board.id,cardId:card,patch:{description:'Unrelated card'}});
+  await call(tools,'update_block',{blockId:table.id,patch:{title:'Scalar title'}});
+  assert.deepEqual(scopes,[false,false,false]);const before=await store.export();
+  for(const [name,input] of [
+    ['page_select',{pageId:store.getActivePageId()}],['table_row_add',{blockId:table.id}],['table_row_remove',{blockId:table.id,rowId:table.rows[0].id}],
+    ['table_column_add',{blockId:table.id}],['table_column_remove',{blockId:table.id,columnId:table.columns[0].id}],['update_block',{blockId:table.id,patch:{headerRow:false}}],
+    ['remove_block',{blockId:table.id}],['export_notebook',{}],['import_notebook',{json:before}],['undo',{}],['redo',{}]
+  ]){await assert.rejects(()=>call(tools,name,input),/Unresolved native preedit/);assert.equal(scopes.at(-1),true);}
+  assert.equal(await store.export(),before);await store.close();
+});
+
 test('checklist tools expose nested parent selection and reject fifth levels and cycles',async()=>{
   const store=await setup(),tools=createTools(store),blockId=(await call(tools,'add_block',{type:'checklist'})).blockId;
   const root=(await call(tools,'checklist_add',{blockId,text:'Root'})).itemId;

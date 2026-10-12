@@ -334,10 +334,11 @@ try {
   await call('page_select',{pageId:'a'},edgePage);await edgePage.locator('.excalidraw canvas').first().waitFor();await call('excalidraw_set_scene',{blockId:'b:c',json:JSON.stringify(latestScene)},edgePage);await settle(edgePage);
   assert.equal((await call('get_page',{pageId:'a:b'},edgePage)).blocks[0].scene.elements.length,0);assert.equal((await call('get_page',{pageId:'a'},edgePage)).blocks[0].scene.elements[0].id,'edited-during-download');
   await call('open_canvas',{pageId:'quoted-page',blockId:'quote"\\canvas'},edgePage);await edgePage.locator('#canvas-stage .excalidraw canvas').first().waitFor();await call('close_canvas',{},edgePage);assert.ok(await edgePage.locator('#canvas-stage').isHidden());
-  // An agent page switch during header composition still saves the final text to its original page.
+  // Agent navigation waits for final header composition and saves to its original page.
   await edgePage.evaluate(()=>{const input=document.getElementById('page-title');input.focus();input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));input.value='Original-page IME edit';});
   let pageSwitchFinished=false;const pageSwitch=call('page_select',{pageId:'a'},edgePage).then(result=>{pageSwitchFinished=true;return result;});
   await edgePage.waitForTimeout(100);assert.equal(pageSwitchFinished,false);assert.equal(await edgePage.locator('#page-title').inputValue(),'Original-page IME edit');
+  assert.equal(await edgePage.evaluate(async()=>{const app=await import(new URL('./src/app.js',document.baseURI).href);return app.getStore().getActivePageId();}),'quoted-page');
   await edgePage.locator('#page-title').dispatchEvent('compositionend');await pageSwitch;await settle(edgePage);assert.equal((await call('get_page',{pageId:'quoted-page'},edgePage)).title,'Original-page IME edit');assert.equal((await call('get_notebook',{},edgePage)).id,'a');
   await edgeContext.close();
   await verifyPageRoutes({browser,appURL,call,root});
