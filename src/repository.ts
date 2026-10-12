@@ -26,12 +26,13 @@ export async function openRepository(storage:StorageLike,{key=STORAGE_KEY,name='
       const block=record.data;tx.objectStore('reminders').put({pageId:record.pageId,...block,due:block.enabled&&!block.firedAt&&block.dueAt?Date.parse(block.dueAt):Number.MAX_VALUE},key);
     } else tx.objectStore('reminders').delete(key);
   }
-  async function read(expected?:Notebook) {
+  async function read(expected?:Notebook,preferredPageId?:string) {
     const {tx,done}=transaction();const meta=await request<Notebook|undefined>(tx.objectStore('meta').get('book'));
     if(!meta){await done;return null;}
     if(expected&&expected.id===meta.id&&expected.revision===meta.revision){await done;return {meta};}
-    const pages=await request<StoredRecord[]>(tx.objectStore('records').index('pageId').getAll(meta.activePageId));await done;
-    return {meta,records:new Map(pages.map(r=>[r.key!,r]))};
+    const activePageId=meta.pages.some(p=>p.id===preferredPageId)?preferredPageId!:meta.activePageId;
+    const pages=await request<StoredRecord[]>(tx.objectStore('records').index('pageId').getAll(activePageId));await done;
+    return {meta:{...meta,activePageId},records:new Map(pages.map(r=>[r.key!,r]))};
   }
   function put(tx:IDBTransaction,key:string,value:StoredRecord|null){if(value){const record={...value,key};tx.objectStore('records').put(record,key);if(value.kind==='block')reminder(tx,key,value);}else{tx.objectStore('records').delete(key);tx.objectStore('reminders').delete(key);}}
   try {
@@ -63,7 +64,9 @@ export async function openRepository(storage:StorageLike,{key=STORAGE_KEY,name='
           else {const fired=await request<string|undefined>(tx.objectStore('delivery').get(deliveryKey));if(fired)value={...value,data:{...b,firedAt:fired}};}
           change.after=value;
         }put(tx,change.key,value);}
-        tx.objectStore('meta').put(meta,'book');
+        // The schema retains a default page for old clients/exports, not a live tab selection.
+        const activePageId=meta.pages.some(p=>p.id===latest.activePageId)?latest.activePageId:meta.activePageId;
+        tx.objectStore('meta').put({...meta,activePageId},'book');
         for(const id of deleteHistory)tx.objectStore('history').delete(id);
         if(journal)tx.objectStore('history').put(journal,journalId!);
         if(meta.activePageId!==expected.activePageId){const rows=await request<StoredRecord[]>(tx.objectStore('records').index('pageId').getAll(meta.activePageId));resident=new Map(rows.map(r=>[r.key!,r]));}
