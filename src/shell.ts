@@ -14,12 +14,13 @@ export function showMenu(id:'block-actions-dialog'|'page-actions-dialog',title:s
 }
 export function setupShell(store:NotebookStore,{beforeNavigate,openPalette,confirm,onError}:{beforeNavigate:()=>Promise<unknown>;openPalette:()=>unknown;confirm:(title:string,message:string,yes?:string)=>Promise<boolean>;onError:ErrorHandler}) {
   const sidebar=domId('sidebar'),toggle=domId('sidebar-toggle'),pages=domId('sidebar-pages'),media=matchMedia('(max-width: 760px)'),view=createView(localStorage),rows=new Map<string,{node:HTMLDivElement;expand:HTMLButtonElement;select:HTMLButtonElement;label:HTMLSpanElement;more:HTMLButtonElement}>();
-  const menu=domId('page-menu');let drawerOpen=false,lastActivePath:string|null=null,movingPageId:string|null=null,breadcrumbSignature='';
+  const menu=domId('page-menu'),widthToggle=domId('page-width'),widthLabel=widthToggle.querySelector('span')!;let drawerOpen=false,lastActivePath:string|null=null,movingPageId:string|null=null,breadcrumbSignature='';
   async function run<K extends CommandName>(name:K,input:CommandInput<K>){try{await beforeNavigate();return await store.dispatch(name,input);}catch(error){onError(errorOf(error));return null;}}
   function closeMobile(){if(media.matches){drawerOpen=false;if(sidebar.open)sidebar.close();sync();}}
   function sync(){
     const state=view.get(),open=media.matches?drawerOpen:state.sidebarOpen;
-    document.body.classList.toggle('sidebar-open',!media.matches&&open);document.body.dataset.contentWidth=state.contentWidth;domId('wide-page').checked=state.contentWidth==='wide';toggle.setAttribute('aria-expanded',String(open));
+    document.body.classList.toggle('sidebar-open',!media.matches&&open);document.body.dataset.contentWidth=state.contentWidth;toggle.setAttribute('aria-expanded',String(open));
+    const fluid=state.contentWidth==='wide';widthLabel.textContent=fluid?'Fluid':'Fixed';widthToggle.setAttribute('aria-pressed',String(fluid));widthToggle.title=`Page width: ${fluid?'Fluid':'Fixed'}. Switch to ${fluid?'Fixed':'Fluid'}.`;
     if(sidebar.open!==open){if(open){if(media.matches)sidebar.showModal();else{const active=document.activeElement as HTMLElement|null;sidebar.show();active?.focus({preventScroll:true});}}else sidebar.close();}
     window.dispatchEvent(new Event('resize'));
   }
@@ -91,7 +92,7 @@ export function setupShell(store:NotebookStore,{beforeNavigate,openPalette,confi
   domId('page-new-child').addEventListener('click',()=>createPage(store.getActivePageId()));
   domId('page-parent-apply').addEventListener('click',()=>{domId('page-parent-dialog').close();const parentId=domId('page-parent-target').value;if(parentId!==store.listPages().find(p=>p.pageId===movingPageId)?.parentId)run('page_move',{pageId:movingPageId!,parentId});});
   domId('sidebar-search').addEventListener('click',()=>{closeMobile();openPalette();});
-  domId('wide-page').addEventListener('change',event=>safeView({contentWidth:(event.target as HTMLInputElement).checked?'wide':'reading'}));
+  widthToggle.addEventListener('click',()=>safeView({contentWidth:view.get().contentWidth==='wide'?'reading':'wide'}));
   sidebar.addEventListener('close',()=>{if(media.matches&&!sidebar.open){drawerOpen=false;toggle.setAttribute('aria-expanded','false');}});
   sidebar.addEventListener('keydown',event=>{
     if(!media.matches||!sidebar.open||(event as KeyboardEvent).key!=='Tab')return;

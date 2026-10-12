@@ -35,6 +35,8 @@ select { border: 1px solid var(--line); border-radius: 5px; background: var(--pa
 .header-left, .header-right, .history-controls { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .header-left { flex: 1; }
 .header-right { flex-shrink: 0; }
+.page-width { gap: 6px; min-width: 76px; font-size: 11px; }
+.page-width[aria-pressed=true] { background: var(--soft); color: var(--accent); }
 .app-breadcrumb, .breadcrumb-divider { font-size: 12px; color: var(--secondary); }
 .page-switcher { min-width: 0; max-width: 360px; text-align: left; font-size: 13px; border-radius: 5px; padding: 4px 7px; }
 .page-switcher:hover { background: var(--wash); }
