@@ -299,11 +299,12 @@ function applyTheme(theme:Page['theme']) {
   const changed=document.documentElement.dataset.theme!==resolved;
   document.documentElement.dataset.theme = resolved; document.querySelector<HTMLMetaElement>('meta[name=theme-color]')!.content = resolved === 'dark' ? '#191b1a' : '#ffffff';
   if(changed)diagrams?.themeChanged();
+  domId('theme').value=theme;
 }
 let renderPageId:string;
 function render(state:Page, { quiet = false, reminderBlockId, reminderPageId, changedBlockId, changedPageId, reset=false }:ChangeEvent={}) {
   if(composition.hasActive()){deferredRender=true;return;}
-  applyTheme(state.theme); domId('theme').value = state.theme; domId('notification-mode').value = state.notificationMode;
+  applyTheme(shell!.getView().theme); domId('notification-mode').value = state.notificationMode;
   if(renderPageId!==state.id&&domId('picker').open)domId('picker').close();
 
   domId('undo-button').disabled = !store.canUndo(); domId('redo-button').disabled = !store.canRedo();
@@ -376,7 +377,7 @@ async function boot() {
     if(focusId){const next=document.getElementById(focusId) as HTMLInputElement|HTMLTextAreaElement|null;if(next){next.focus({preventScroll:true});if(selection&&next.setSelectionRange)next.setSelectionRange(...selection);}}scrollTo(...scroll);
     textEditors!.restoreFocus(editorFocus);
   });
-  shell=setupShell(store,{beforeNavigate,openPalette,confirm:confirmAction,onError:error=>notify(errorOf(error).message,'error',true)});
+  shell=setupShell(store,{beforeNavigate,openPalette,confirm:confirmAction,onError:error=>notify(errorOf(error).message,'error',true),onThemeChange:applyTheme});
   store.subscribe(render); render(store.getRenderState());
   store.subscribeStatus(({pending,navigating,error})=>{domId('page-title').disabled=navigating&&!composition.isComposing(domId('page-title'));domId('page-subtitle').disabled=navigating&&!composition.isComposing(domId('page-subtitle'));domId('notebook').inert=navigating&&!composition.hasActive();const status=domId('save-status');status.replaceChildren();const dot=element('span','status-dot');status.append(dot,document.createTextNode(pending?'Saving…':error?'Not saved':'Saved'));});
   palette = setupPalette(store, { onError: error => notify(errorOf(error).message, 'error', true), beforeOpen:()=>shell!.closeMobile(), beforeNavigate });
@@ -402,7 +403,7 @@ async function boot() {
       });
     }
   }
-  domId('theme').addEventListener('change', e => action('set_page', { theme: (e.target as HTMLSelectElement).value as Page['theme'] })); themeQuery.addEventListener('change', () => applyTheme(store.getRenderState().theme));
+  domId('theme').addEventListener('change', e => {try{shell!.setView({theme:(e.target as HTMLSelectElement).value as Page['theme']});}catch(error){applyTheme(shell!.getView().theme);notify(errorOf(error).message,'error',true);}}); themeQuery.addEventListener('change', () => applyTheme(shell!.getView().theme));
   domId('notification-mode').addEventListener('change', e => action('set_page', { notificationMode: (e.target as HTMLSelectElement).value as NotificationMode }));
   domId('undo-button').addEventListener('click', async () => { try { await flushPending();await store.undo(); } catch (e) { notify(errorOf(e).message, 'error'); } });
   domId('redo-button').addEventListener('click', async () => { try { await flushPending();await store.redo(); } catch (e) { notify(errorOf(e).message, 'error'); } });
