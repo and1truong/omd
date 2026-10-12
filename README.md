@@ -26,7 +26,7 @@ Pushing a `release/vVERSION` branch whose version matches package.json explicitl
 
 ## Pages
 
-Use **+ Add block** above the first block or between existing blocks to insert at that position. Each block's **…** menu also offers **Insert block before** and **Insert block after**. These controls work inside tabs, expandable blocks and accordion sections; **Add a block** at the bottom still appends. After choosing a block type, focus moves to the new block. Undo removes the insertion.
+Hover above the first block or between existing blocks to reveal **+ Add block** and insert at that position. Keyboard focus also reveals the control; it stays visible on touch devices. Each block's **…** menu also offers **Insert block before** and **Insert block after**. These controls work inside tabs, expandable blocks and accordion sections; **Add a block** at the bottom still appends. After choosing a block type, focus moves to the new block. Undo removes the insertion.
 
 Press Cmd+K on macOS or Ctrl+K elsewhere, or click the page button. Search and switch with arrows/Enter, create a named page, or use the per-page arrows to reorder the notebook. Each page has its own title, content and reminder preferences. All pages and their order/selection export together. Existing single-page storage upgrades automatically, preserving the original bytes in a v1 backup key.
 

@@ -171,7 +171,8 @@ body[data-content-width=wide] .paper { max-width: none; }
 .block-type-divider hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
 .drop-slot { height: 4px; }
 .insert-slot { height: auto; }
-.block-insert-button { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 28px; padding: 2px 0; color: var(--secondary); font-size: 11px; text-align: left; }
+.block-insert-button { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 28px; padding: 2px 0; color: var(--secondary); font-size: 11px; text-align: left; opacity: 0; transition: opacity .12s ease; }
+.insert-slot:hover>.block-insert-button, .insert-slot:focus-within>.block-insert-button { opacity: 1; }
 .block-insert-button .ui-icon { width: 14px; height: 14px; }
 .block-insert-button::after { content: ''; flex: 1; height: 1px; background: var(--line); }
 .block-insert-button:hover, .block-insert-button:focus-visible { color: var(--accent); }
@@ -290,6 +291,9 @@ h3 { font-size: 13px; margin: 0 0 12px; }
   .canvas-stage-header h1 { font-size: 17px; }
   .canvas-stage-actions { flex-direction: column; gap: 5px; }
   .canvas-stage-actions button { font-size: 11px; padding: 5px 8px; }
+}
+@media (hover: none) {
+  .block-insert-button { opacity: 1; }
 }
 @media (pointer: coarse) {
   .sidebar-page-more, .row-controls { opacity: 1; }

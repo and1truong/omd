@@ -34,6 +34,15 @@ try {
   page=await context.newPage();await ready();
   const [first,second,third]=await fixture(),original=[first,second,third];
 
+  // Desktop insertion controls stay quiet until hover or keyboard focus, without layout shifts.
+  const firstGap=page.locator(`[data-before-block="${first}"]`),middleGap=page.locator(`[data-before-block="${second}"]`);
+  const opacity=async(id,value)=>page.waitForFunction(({id,value})=>getComputedStyle(document.querySelector(`[data-before-block="${id}"]`)).opacity===value,{id,value});
+  await page.locator('#page-title').focus();await page.mouse.move(0,0);
+  await opacity(second,'0');const bounds=await middleGap.boundingBox();
+  await middleGap.hover();await opacity(second,'1');assert.deepEqual(await middleGap.boundingBox(),bounds);
+  await opacity(first,'0');await page.mouse.move(0,0);await opacity(second,'0');
+  await firstGap.focus();await opacity(first,'1');
+
   // Keyboard users can insert above the first block, then undo and redo.
   await page.locator(`[data-before-block="${first}"]`).focus();await page.keyboard.press('Enter');await choose('heading');
   const heading=(await order())[0];assert.deepEqual(await order(),[heading,...original]);await focused(heading);
@@ -42,7 +51,7 @@ try {
   await call('undo');await call('undo');assert.deepEqual(await order(),original);
   await call('redo');assert.deepEqual(await order(),[heading,...original]);await call('undo');
 
-  // The visible gap after the first block inserts between its neighbors.
+  // Hovering the gap after the first block reveals insertion between its neighbors.
   await page.locator(`[data-before-block="${second}"]`).click();await choose('checklist');
   const checklist=(await order())[1];assert.deepEqual(await order(),[first,checklist,second,third]);await focused(checklist);
   await mkdir(`${root}/test-results`,{recursive:true});
@@ -101,6 +110,7 @@ try {
   const mobileGap=page.locator(`[data-before-block="${mobileIds[1]}"]`);
   assert.ok((await mobileGap.boundingBox()).height>=44);
   assert.equal(await mobileGap.evaluate(el=>getComputedStyle(el).visibility),'visible');
+  assert.equal(await mobileGap.evaluate(el=>getComputedStyle(el).opacity),'1');
   await mobileGap.tap();await choose('text');const added=(await order())[1];
   assert.deepEqual(await order(),[mobileIds[0],added,mobileIds[1],mobileIds[2]]);await focused(added);
   await page.locator(`[data-block-id="${added}"] textarea`).fill('Right after the first thought');
