@@ -1,8 +1,9 @@
-import type {Page,Block,BlockType,BlockOf,BlockOptions,Orientation,CommandName,InternalInput,ActionResult} from './types.js';
+import type {Page,Block,BlockType,BlockOf,BlockOptions,Orientation,CommandName,InternalInput,ActionResult,ChecklistItem} from './types.js';
 import { emptyScene, validateScene } from './scene.js';
 /** Page document format. UI, imports, and agents share these invariants. */
 export const FORMAT_VERSION = 1;
 export const STORAGE_KEY = 'omd.notebook.v1';
+export const MAX_CHECKLIST_LEVELS = 4;
 export const BLOCK_TYPES = ['text', 'heading', 'checklist', 'tabs', 'toggle', 'accordion', 'reminder', 'kanban', 'divider', 'mermaid', 'excalidraw'];
 const THEMES = ['system', 'light', 'dark'];
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/;
@@ -64,6 +65,14 @@ export function validateNotebook(raw:unknown):Page {
   const ids = new Set([notebook.id]);
   const id = (value:string) => { string(value, 'ID'); assert(value.length > 0 && !ids.has(value), 'IDs must be unique and nonempty.'); ids.add(value); };
   function list(value:unknown) { assert(Array.isArray(value), 'Expected a list.'); }
+  function checklist(items:ChecklistItem[],level=1) {
+    list(items);
+    for(const item of items) {
+      assert(level<=MAX_CHECKLIST_LEVELS,`Checklist items are limited to ${MAX_CHECKLIST_LEVELS} levels, including root items.`);
+      fields(item,['id','text','done','children']);id(item.id);string(item.text,'Checklist item');boolean(item.done,'Checked');
+      if(Object.hasOwn(item,'children'))checklist(item.children!,level+1);
+    }
+  }
   function visit(blocks:Block[],axes:Orientation[] = [],depth=0) {
     list(blocks);
     for (const b of blocks) {
@@ -76,7 +85,7 @@ export function validateNotebook(raw:unknown):Page {
         case 'excalidraw': fields(b, ['id','type','title','scene']); string(b.title,'Canvas title'); validateScene(b.scene); break;
         case 'checklist':
           fields(b, ['id', 'type', 'title', 'items']); string(b.title, 'Checklist title'); list(b.items);
-          for (const item of b.items) { fields(item, ['id', 'text', 'done']); id(item.id); string(item.text, 'Checklist item'); boolean(item.done, 'Checked'); }
+          checklist(b.items);
           break;
         case 'tabs': {
           fields(b, ['id', 'type', 'title', 'orientation', 'tabs', 'activeTabId']); string(b.title, 'Tabs title');
@@ -146,6 +155,22 @@ export function allowedTypes(notebook:Page,containerId:string = 'page') {
 }
 
 function member<T extends {id:string}>(items:T[],id:string|undefined):T { const item = items.find(x => x.id === id); assert(item, 'Item not found.'); return item; }
+export function findChecklistItem(items:ChecklistItem[],itemId:string|undefined) {
+  function visit(siblings:ChecklistItem[],ancestors:ChecklistItem[]):{item:ChecklistItem;siblings:ChecklistItem[];ancestors:ChecklistItem[]}|undefined {
+    for(const item of siblings) {
+      if(item.id===itemId)return {item,siblings,ancestors};
+      const found=item.children&&visit(item.children,[...ancestors,item]);if(found)return found;
+    }
+  }
+  const found=visit(items,[]);assert(found,'Item not found.');return found;
+}
+export function checklistHeight(item:ChecklistItem):number {
+  return 1+(item.children??[]).reduce((height,child)=>Math.max(height,checklistHeight(child)),0);
+}
+function checklistChildren(items:ChecklistItem[],parentId:string|undefined) {
+  if(parentId===undefined||parentId==='')return items;
+  const parent=findChecklistItem(items,parentId).item;return parent.children??(parent.children=[]);
+}
 function remove<T extends {id:string}>(items:T[],id:string|undefined):T { const i = items.findIndex(x => x.id === id); assert(i >= 0, 'Item not found.'); return items.splice(i, 1)[0]; }
 function insert<T>(items:T[],item:T,index=items.length) { integer(index, items.length); items.splice(index, 0, item); }
 function move<T extends {id:string}>(items:T[],id:string|undefined,index:number|undefined) { integer(index, items.length - 1); const item = remove(items, id); insert(items, item, index); }
@@ -185,10 +210,18 @@ export function mutatePage(doc:Page,action:CommandName,input:InternalInput = {},
       // A target inside the moved subtree has disappeared; never silently drop the block.
       assert(findBlock(doc, b.id), 'Cannot move a block inside itself.'); break;
     }
-    case 'checklist_add': fields(input, ['blockId', 'text', 'index']); { const item = { id: uid(), text: input.text ?? '', done: false }; insert(block('checklist').items, item, input.index); result = { itemId: item.id }; } break;
-    case 'checklist_update': fields(input, ['blockId', 'itemId', 'patch']); fields(input.patch, ['text', 'done']); Object.assign(member(block('checklist').items, input.itemId), input.patch); break;
-    case 'checklist_remove': fields(input, ['blockId', 'itemId']); remove(block('checklist').items, input.itemId); break;
-    case 'checklist_move': fields(input, ['blockId', 'itemId', 'index']); move(block('checklist').items, input.itemId, input.index); break;
+    case 'checklist_add': fields(input, ['blockId', 'text', 'parentId', 'index']); { const item = { id: uid(), text: input.text ?? '', done: false }; insert(checklistChildren(block('checklist').items,input.parentId), item, input.index); result = { itemId: item.id }; } break;
+    case 'checklist_update': fields(input, ['blockId', 'itemId', 'patch']); fields(input.patch, ['text', 'done']); Object.assign(findChecklistItem(block('checklist').items, input.itemId).item, input.patch); break;
+    case 'checklist_remove': fields(input, ['blockId', 'itemId']); {const source=findChecklistItem(block('checklist').items,input.itemId);remove(source.siblings,input.itemId);} break;
+    case 'checklist_move': {
+      fields(input,['blockId','itemId','parentId','index']);const items=block('checklist').items,source=findChecklistItem(items,input.itemId);
+      if(input.parentId!==undefined&&input.parentId!=='') {
+        const parent=findChecklistItem(items,input.parentId);
+        assert(parent.item.id!==input.itemId&&!parent.ancestors.some(item=>item.id===input.itemId),'Cannot move a checklist item into itself or its descendants.');
+      }
+      const target=input.parentId===undefined?source.siblings:checklistChildren(items,input.parentId);
+      integer(input.index,target.length-(target===source.siblings?1:0));insert(target,remove(source.siblings,input.itemId),input.index);break;
+    }
     case 'tab_add': fields(input, ['blockId', 'title', 'index']); { const b = block('tabs'); const tab = { id: uid(), title: input.title ?? 'New tab', blocks: [] }; insert(b.tabs, tab, input.index); b.activeTabId = tab.id; result = { tabId: tab.id }; } break;
     case 'tab_update': fields(input, ['blockId', 'tabId', 'title']); member(block('tabs').tabs, input.tabId).title = input.title!; break;
     case 'tab_select': fields(input, ['blockId', 'tabId']); { const b = block('tabs'); member(b.tabs, input.tabId); b.activeTabId = input.tabId!; } break;

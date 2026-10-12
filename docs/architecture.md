@@ -4,7 +4,7 @@
 
 ## Data model
 
-- Notebook exports use `omd-notebook` version 3; individual pages use `omd` version 1. Blocks include text, headings, checklists, tabs, expandable blocks, accordions, reminders, kanban, dividers, Mermaid and Excalidraw.
+- Notebook exports use `omd-notebook` version 3; individual pages use `omd` version 1. Blocks include text, headings, checklists, tabs, expandable blocks, accordions, reminders, kanban, dividers, Mermaid and Excalidraw. Checklist items have optional recursive `children` arrays with at most 4 levels including root items; flat documents retain their existing shape. Item IDs are unique across the page, and checklist moves/removal carry entire subtrees.
 - Horizontal tabs may contain vertical tabs; vertical tabs may contain horizontal tabs. At most two tab groups per ancestor path, including through other containers.
 - No application quotas on numbers of blocks, tabs, list items, columns, cards, text length, or import size. Browser storage and device resources impose their own physical limits.
 - One validated command path for UI and agents. Invalid operations are atomic.

@@ -1,6 +1,10 @@
 import type {NotebookStore,Block,Scene} from '../src/types.js';
 async function commandContracts(store:NotebookStore) {
   const item=await store.dispatch('checklist_add',{blockId:'list',text:'task'});const id:string=item.itemId;
+  await store.dispatch('checklist_add',{blockId:'list',parentId:id,text:'child'});
+  await store.dispatch('checklist_move',{blockId:'list',itemId:id,parentId:'',index:0});
+  // @ts-expect-error Parent IDs are strings.
+  await store.dispatch('checklist_add',{blockId:'list',parentId:3});
   const card=await store.dispatch('card_add',{blockId:'board',columnId:'column'});const cardId:string=card.cardId;
   // @ts-expect-error A checklist item's done flag is boolean.
   await store.dispatch('checklist_update',{blockId:'list',itemId:id,patch:{done:'yes'}});

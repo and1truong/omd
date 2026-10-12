@@ -31,11 +31,14 @@ After installing dependencies and building:
 ```sh
 npx playwright install chromium
 npm run test:browser
+npm run test:checklist
 ```
 
 The browser suite enables Chrome's native WebMCP feature and executes tools through the real registry. It also checks mobile layout, themes, reminders, import confirmation, persistent edits and offline reopening. An unavailable browser binary or unsupported native API is a verification failure. Adapter tests alone do not verify a Gemini integration; that requires a real extension session.
 
 CI runs the native suite at both the origin root and `/omd/`, including lazy library/font URLs and canvas behavior.
+
+The checklist browser suite checks four-level nesting, sibling ordering, Enter/Tab/Shift+Tab, composition, focus, independent checkboxes, undo/redo, persistence and touch controls. CI runs it on Chromium and WebKit at both the origin root and `/omd/`.
 
 ## Static hosting and GitHub Pages
 

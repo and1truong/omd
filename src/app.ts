@@ -1,9 +1,9 @@
 import {errorOf} from './dom.js';
-import type {NotebookStore,Block,BlockType,BlockOf,CommandName,CommandInput,MutationResult,Page,ChangeEvent,PartialView,Notify,NotificationMode,ReminderBlock,BlockOptions} from './types.js';
+import type {NotebookStore,Block,BlockType,BlockOf,CommandName,CommandInput,MutationResult,Page,ChangeEvent,PartialView,Notify,NotificationMode,ReminderBlock,BlockOptions,ChecklistItem} from './types.js';
 import {byId as domId} from './dom.js';
 import { createCompositionGuard } from './composition.js';
 import { createStore } from './store.js';
-import { STORAGE_KEY, allowedTypes, findBlock, findContainer } from './model.js';
+import { STORAGE_KEY, allowedTypes, findBlock, findContainer, MAX_CHECKLIST_LEVELS, checklistHeight } from './model.js';
 import { startReminders } from './reminders.js';
 import { setupPalette } from './palette.js';
 import { createDiagramManager } from './diagrams.js';
@@ -137,14 +137,39 @@ function renderBlock(b:Block,containerId:string,index:number,count:number) {
   return shell;
 }
 function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
-  const head = title(b, '☑'); const progress = element('span', 'checklist-progress'); progress.textContent = `${b.items.filter(i => i.done).length} / ${b.items.length}`; head.append(progress); shell.append(head);
-  b.items.forEach((item, index) => {
-    const row = element('div', `check-row ${item.done ? 'done' : ''}`); const check = element('input'); check.type = 'checkbox'; check.checked = item.done; check.setAttribute('aria-label', `Complete ${item.text || 'item'}`);
-    check.addEventListener('change', () => action('checklist_update', { blockId: b.id, itemId: item.id, patch: { done: check.checked } }));
-    const text = editable(item.text, 'Checklist item', (value,pageId) => action('checklist_update', { pageId, blockId: b.id, itemId: item.id, patch: { text: value } }, { quiet: true }), { placeholder: 'A little thing to do', id: item.id });
-    text.addEventListener('keydown', async event => { if ((event as KeyboardEvent).key === 'Enter') { event.preventDefault(); const result = await action('checklist_add', { blockId: b.id, index: index + 1 }); if (result) requestAnimationFrame(() => domId(result.itemId)?.focus()); } });
-    row.append(check, text, rowsControls(() => action('checklist_move', { blockId: b.id, itemId: item.id, index: index - 1 }), () => action('checklist_move', { blockId: b.id, itemId: item.id, index: index + 1 }), () => action('checklist_remove', { blockId: b.id, itemId: item.id }), index === 0, index === b.items.length - 1, 'checklist item')); shell.append(row);
-  });
+  let total=0,done=0;
+  async function addItem(parentId?:string,index?:number) {const result=await action('checklist_add',{blockId:b.id,parentId,index});if(result)requestAnimationFrame(()=>domId(result.itemId)?.focus());}
+  function renderItems(items:ChecklistItem[],ancestors:ChecklistItem[]=[]):HTMLElement {
+    const list=element('div','checklist-items');list.setAttribute('role','list');
+    items.forEach((item,index)=>{
+      total++;if(item.done)done++;
+      const parent=ancestors.at(-1),level=ancestors.length+1;
+      const entry=element('div','checklist-item');entry.setAttribute('role','listitem');entry.dataset.itemId=item.id;entry.dataset.level=String(level);
+      const row=element('div',`check-row ${item.done?'done':''}`),check=element('input');check.type='checkbox';check.checked=item.done;check.setAttribute('aria-label',`Complete ${item.text||'item'}`);
+      check.addEventListener('change',()=>action('checklist_update',{blockId:b.id,itemId:item.id,patch:{done:check.checked}}));
+      const text=editable(item.text,'Checklist item',(value,pageId)=>action('checklist_update',{pageId,blockId:b.id,itemId:item.id,patch:{text:value}},{quiet:true}),{placeholder:'A little thing to do',id:item.id});
+      text.setAttribute('aria-keyshortcuts','Enter Tab Shift+Tab');
+      const canIndent=index>0&&level+checklistHeight(item)<=MAX_CHECKLIST_LEVELS;
+      const indent=()=>action('checklist_move',{blockId:b.id,itemId:item.id,parentId:items[index-1].id,index:items[index-1].children?.length??0},{focus:item.id});
+      const outdent=()=>{
+        const grandparent=ancestors.at(-2),siblings=grandparent?.children??b.items;
+        return action('checklist_move',{blockId:b.id,itemId:item.id,parentId:grandparent?.id??'',index:siblings.findIndex(sibling=>sibling.id===parent!.id)+1},{focus:item.id});
+      };
+      text.addEventListener('keydown',event=>{
+        const key=event as KeyboardEvent;if(key.isComposing||composition.isComposing(text)||key.ctrlKey||key.metaKey||key.altKey)return;
+        if(key.key==='Enter'){key.preventDefault();void addItem(parent?.id,index+1);}
+        if(key.key==='Tab'&&((key.shiftKey&&parent)||(!key.shiftKey&&canIndent))){key.preventDefault();void (key.shiftKey?outdent():indent());}
+      });
+      const controls=rowsControls(()=>action('checklist_move',{blockId:b.id,itemId:item.id,index:index-1},{focus:item.id}),()=>action('checklist_move',{blockId:b.id,itemId:item.id,index:index+1},{focus:item.id}),()=>action('checklist_remove',{blockId:b.id,itemId:item.id}),index===0,index===items.length-1,'checklist item');
+      const more=button('…','Checklist item actions',()=>showMenu('block-actions-dialog','Checklist item actions',[
+        {label:'Add child checklist item',icon:'plus',disabled:level>=MAX_CHECKLIST_LEVELS,run:()=>addItem(item.id)},
+        {label:'Indent checklist item',icon:'right',disabled:!canIndent,run:indent},
+        {label:'Outdent checklist item',icon:'left',disabled:!parent,run:outdent}
+      ],more));more.id=`${item.id}-menu`;controls.prepend(more);
+      row.append(check,text,controls);entry.append(row);if(item.children?.length)entry.append(renderItems(item.children,[...ancestors,item]));list.append(entry);
+    });return list;
+  }
+  const head=title(b,'☑'),progress=element('span','checklist-progress'),items=renderItems(b.items);progress.textContent=`${done} / ${total}`;head.append(progress);shell.append(head,items);
   shell.append(button('+ Add an item', 'Add checklist item', async () => { const r = await action('checklist_add', { blockId: b.id }); if (r) requestAnimationFrame(() => domId(r.itemId)?.focus()); }, 'add-inline'));
 }
 function renderTabs(shell:HTMLElement,b:BlockOf<'tabs'>) {

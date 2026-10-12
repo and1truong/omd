@@ -7,7 +7,7 @@ Interprets “PWD friendly” as PWA friendly. No application quotas on content 
 | PWA / single page / paper notebook | Relative static app, standalone manifest, cache-fingerprinted service worker, editable notebook canvas |
 | All features exposed to WebMCP | 48 feature-detected tools, same action/store path as UI, runtime schemas and validation |
 | Dark/light awareness | OS-following system mode, explicit light/dark choices, persisted preference |
-| Checklist | Add, edit, check, remove and reorder items; Enter adds next item |
+| Checklist | Add, edit, check, remove and reorder nested items (max 4 levels including root); Enter adds next sibling; Tab/Shift+Tab indent/outdent |
 | Horizontal and vertical tabs | Create, rename, select, remove and reorder; keyboard arrows, Home, End |
 | Horizontal contains vertical, or vertical contains horizontal | Two tab groups per ancestor path; opposite orientations, also checked through toggles and accordions |
 | No tab in tab in tab | Third tab group rejected atomically by actions and import validation |
