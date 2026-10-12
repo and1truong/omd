@@ -15,7 +15,7 @@ const consoleErrors=[];
 const engineRequests=[];
 try {
   await new Promise((resolve,reject) => { server.stdout.once('data', resolve); server.once('error', reject); server.once('exit', code => reject(new Error(`Server exited: ${code}`))); });
-  browser = await chromium.launch({ headless: true, args: ['--enable-features=WebMCP,WebMCPTesting', '--enable-experimental-web-platform-features'] });
+  browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--enable-features=WebMCP,WebMCPTesting', '--enable-experimental-web-platform-features'] });
   const context = await browser.newContext({ viewport: { width: 1440, height: 1100 }, colorScheme: 'light' });
   page = await context.newPage(); page.on('pageerror', error => errors.push(error.message));page.on('console',msg=>{if(msg.type()==='error')consoleErrors.push(msg.text());});
   page.on('request',request=>{if(/\/(?:excalidraw|mermaid)-engine\.(?:js|css)/.test(request.url()))engineRequests.push(request.url());});
