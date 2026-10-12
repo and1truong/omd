@@ -249,7 +249,7 @@ try {
   // A failed localStorage preference write must restore the already-changed checkbox.
   await page.locator('#page-menu > summary').click();await settle();
   await page.evaluate(async()=>{const {VIEW_KEY}=await import('/src/view.js');window.omdOriginalSet=Storage.prototype.setItem;Storage.prototype.setItem=function(key,value){if(key===VIEW_KEY)throw new DOMException('quota','QuotaExceededError');return window.omdOriginalSet.call(this,key,value);};});
-  await page.locator('#wide-page').check();await settle();assert.equal(await page.locator('#wide-page').isChecked(),false);assert.equal(await page.locator('body').getAttribute('data-content-width'),'reading');
+  await page.locator('#wide-page').click();await settle();assert.equal(await page.locator('#wide-page').isChecked(),false);assert.equal(await page.locator('body').getAttribute('data-content-width'),'reading');
   await page.evaluate(()=>{Storage.prototype.setItem=window.omdOriginalSet;delete window.omdOriginalSet;});await page.locator('#page-menu > summary').click();await settle();
   const menuBlock=(await call('add_block',{type:'text',text:'Context menu fixture'})).block;
   const menuShell=page.locator(`[data-block-id="${menuBlock.id}"]`);
