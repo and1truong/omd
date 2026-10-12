@@ -15,7 +15,7 @@ export async function migrationChecks({sourceRoot,extension='ts',startupVersion}
   const evidence=[];
   async function snapshot(name,existing){
     const db=existing??await req(indexedDB.open(name)),names=[...db.objectStoreNames],tx=db.transaction(names),completed=done(tx),stores={};
-    await Promise.all(names.map(async name=>{const store=tx.objectStore(name);const [keys,values]=await Promise.all([req(store.getAllKeys()),req(store.getAll())]);stores[name]={keyPath:store.keyPath,indexes:[...store.indexNames].map(n=>({name:n,keyPath:store.index(n).keyPath})),keys,values};}));
+    await Promise.all(names.map(async name=>{const store=tx.objectStore(name);const [keys,values]=await Promise.all([req(store.getAllKeys()),req(store.getAll())]);stores[name]={keyPath:store.keyPath,autoIncrement:store.autoIncrement,indexes:[...store.indexNames].map(n=>({name:n,keyPath:store.index(n).keyPath,unique:store.index(n).unique,multiEntry:store.index(n).multiEntry})),keys,values};}));
     await completed;const result={version:db.version,stores};if(!existing)db.close();return result;
   }
   function fixture(){
@@ -34,7 +34,7 @@ export async function migrationChecks({sourceRoot,extension='ts',startupVersion}
   }
   async function seed(name,version,{book,drawing,reminder}={},mutate){
     const opening=indexedDB.open(name,version);opening.onupgradeneeded=()=>{
-      const db=opening.result;db.createObjectStore('meta');db.createObjectStore('records').createIndex('pageId','pageId');db.createObjectStore('reminders').createIndex('due','due');const history=db.createObjectStore('history');if(version>=3)history.createIndex('owner','owner');db.createObjectStore('delivery');
+      const db=opening.result;db.createObjectStore('meta');db.createObjectStore('records',version===4?{keyPath:['pageId','kind','id']}:undefined).createIndex('pageId','pageId');db.createObjectStore('reminders',version===4?{keyPath:['pageId','id']}:undefined).createIndex('due','due');const history=db.createObjectStore('history');if(version>=3)history.createIndex('owner','owner');db.createObjectStore('delivery');
     };
     const db=await req(opening);if(!book){db.close();return;}
     const tx=db.transaction([...db.objectStoreNames],'readwrite'),completed=done(tx),records=tx.objectStore('records');
@@ -42,13 +42,13 @@ export async function migrationChecks({sourceRoot,extension='ts',startupVersion}
     for(const value of bookRecords(book).values()){
       if(version<3&&value.kind==='files')continue;
       const id=value.kind==='page'?'$page':`$${value.kind}:${value.id}`,key=JSON.stringify([value.pageId,id]);
-      const row={key,kind:value.kind,pageId:value.pageId,data:version<3&&value.kind==='scene'?drawing.scene:value.data};records.put(row,key);
-      if(value.kind==='block'&&value.data.type==='reminder')tx.objectStore('reminders').put({pageId:value.pageId,...value.data,due:Date.parse(value.data.dueAt)},key);
+      const row={key,kind:value.kind,pageId:value.pageId,data:version<3&&value.kind==='scene'?drawing.scene:value.data};if(version===4)records.put(value);else records.put(row,key);
+      if(value.kind==='block'&&value.data.type==='reminder'){const reminder={pageId:value.pageId,...value.data,due:Date.parse(value.data.dueAt)};if(version===4)tx.objectStore('reminders').put(reminder);else tx.objectStore('reminders').put(reminder,key);}
     }
-    tx.objectStore('history').put({owner:'legacy-owner',before:book,after:book,changes:[{key:JSON.stringify([book.pages[0].id,`$block:${reminder.id}`]),forward:[],inverse:[]}]},'legacy-undo');
-    const firedAt='2020-01-02T00:00:00Z';tx.objectStore('delivery').put(firedAt,JSON.stringify([book.pages[0].id,`${reminder.id}:${reminder.dueAt}`]));
+    tx.objectStore('history').put({owner:'legacy-owner',before:version===4?metadataBook(book):book,after:version===4?metadataBook(book):book,changes:[{key:version===4?[book.pages[0].id,'block',reminder.id]:JSON.stringify([book.pages[0].id,`$block:${reminder.id}`]),forward:[],inverse:[]}]},'legacy-undo');
+    const firedAt='2020-01-02T00:00:00Z';tx.objectStore('delivery').put(firedAt,version===4?[book.pages[0].id,reminder.id,reminder.dueAt]:JSON.stringify([book.pages[0].id,`${reminder.id}:${reminder.dueAt}`]));
     // Deleted reminders still have ledger entries, and their cursor can outlast records.
-    for(let i=0;i<80;i++)tx.objectStore('delivery').put(firedAt,JSON.stringify([book.pages[0].id,`deleted:${i}:${reminder.dueAt}`]));
+    for(let i=0;i<80;i++)tx.objectStore('delivery').put(firedAt,version===4?[book.pages[0].id,`deleted:${i}`,reminder.dueAt]:JSON.stringify([book.pages[0].id,`deleted:${i}:${reminder.dueAt}`]));
     mutate?.(tx,{book,drawing,reminder});await completed;db.close();
   }
   async function rejects(fn,pattern){let error;try{await fn();}catch(e){error=e;}check(error&&pattern.test(error.message),`Expected recovery error ${pattern}, got ${error?.message??'success'}`);}
@@ -57,6 +57,49 @@ export async function migrationChecks({sourceRoot,extension='ts',startupVersion}
     bad.parents=Object.fromEntries(bad.pages.map((page,i)=>[page.id,i?bad.pages[0].id:'']));return bad;
   }
   const invalidIds=['',null,42,{},[]];
+  async function repair(dbName,before,healthy){
+    const db=await req(indexedDB.open(dbName,4)),tx=db.transaction([...db.objectStoreNames],'readwrite'),completed=done(tx);
+    for(const [name,saved]of Object.entries(healthy.stores)){
+      const store=tx.objectStore(name),keys=new Set(saved.keys.map(key=>JSON.stringify(key)));
+      for(const key of before.stores[name].keys)if(!keys.has(JSON.stringify(key)))store.delete(key);
+      saved.values.forEach((value,i)=>saved.keyPath===null?store.put(value,saved.keys[i]):store.put(value));
+    }
+    await completed;db.close();
+  }
+  const nativeFixture=fixture(),healthyName=name();await seed(healthyName,4,nativeFixture);const healthy=await snapshot(healthyName);
+  for(const index of [0,1])for(const id of invalidIds){
+    const dbName=name(),data=storage(),bad={...nativeFixture,book:invalidPage(nativeFixture.book,index,id)};bad.book.activePageId=nativeFixture.book.pages[1-index].id;
+    data.setItem(STORAGE_KEY,JSON.stringify(nativeFixture.book));for(const v of [1,2,3])data.setItem(`${STORAGE_KEY}.v${v}-backup`,`untouched v${v} backup`);const sources=data.entries();
+    // Empty IDs were accepted by shipped validators; native keys can represent them coherently.
+    await seed(dbName,4,id===''?bad:nativeFixture,id===''?undefined:tx=>tx.objectStore('meta').put(metadataBook(bad.book),'book'));
+    const before=await snapshot(dbName),getAll=IDBIndex.prototype.getAll;let reads=0,leases=0;
+    IDBIndex.prototype.getAll=function(...args){if(this.objectStore.transaction.db.name===dbName&&this.objectStore.name==='records')reads++;return getAll.apply(this,args);};
+    try{
+      const locks={request(){leases++;throw new Error('History lease requested before metadata validation.');}};
+      await rejects(()=>createStore(data,{name:dbName,initial:emptyNotebook,locks,activePageId:bad.book.activePageId}),/metadata is invalid.*intact.*Recover.*reload.*Notebook ID/);
+      check(reads===0&&leases===0,'Malformed v4 metadata reached hydration or history leases');
+    }finally{IDBIndex.prototype.getAll=getAll;}
+    equal(await snapshot(dbName),before,'Rejected v4 startup changed schema/index/key/value/history/ledger');equal(data.entries(),sources,'Rejected v4 startup changed recovery bytes');
+    await repair(dbName,before,healthy);equal(await snapshot(dbName),healthy,'User v4 repair changed valid data or schema');
+    const retry=await createStore(data,{name:dbName,initial:emptyNotebook});equal(await retry.getNotebook(),nativeFixture.book,'Same-DB v4 recovery retry failed');check(retry.listPages().length===2,'Recovered v4 hierarchy did not list');await retry.close();equal(data.entries(),sources,'V4 retry rewrote recovery sources');
+  }
+  evidence.push({case:'native v4 inactive root/child invalid IDs / reject before hydration and locks / exact schema+data+history+ledger+backup preservation / same-DB repair and retry',cases:2*invalidIds.length,passed:true});
+  const malformedMetadata=[null,{...metadataBook(nativeFixture.book),id:''},(()=>{const book=metadataBook(nativeFixture.book);book.pages[1].id=book.pages[0].id;return book;})(),{...metadataBook(nativeFixture.book),activePageId:'missing'},(()=>{const book=metadataBook(nativeFixture.book);book.parents[book.pages[0].id]=book.pages[1].id;return book;})()];
+  for(const metadata of malformedMetadata){
+    const dbName=name(),data=storage();await seed(dbName,4,nativeFixture,tx=>tx.objectStore('meta').put(metadata,'book'));const before=await snapshot(dbName);
+    await rejects(()=>openRepository(data,{name:dbName,initial:emptyNotebook}),/metadata is invalid.*intact.*Recover.*reload/);equal(await snapshot(dbName),before,'Malformed native metadata was initialized, repaired or changed');
+  }
+  evidence.push({case:'native v4 null/empty notebook ID/duplicate page ID/missing active page/cyclic hierarchy reject without writes',cases:malformedMetadata.length,passed:true});
+  for(const id of ['__proto__','constructor',' ']){
+    const f=fixture(),dbName=name();f.book.pages[0].id=id;f.book.parents=Object.fromEntries([[id,''],[f.book.pages[1].id,id]]);await seed(dbName,4,f);
+    const valid=await createStore(storage(),{name:dbName,initial:emptyNotebook,activePageId:id});check(valid.getActivePageId()===id&&valid.residency().pageCount===2,'Valid special v4 ID changed selection/residency');equal(valid.listPages().map(row=>[row.pageId,row.depth]),[[id,0],[f.book.pages[1].id,1]],'Valid special v4 ID failed listing');equal((await valid.getNotebook()).pages,f.book.pages,'Special v4 ID changed payloads');await valid.close();
+  }
+  evidence.push({case:'native v4 valid special IDs / preferred tab-local selection / lazy residency / export and listing',passed:true});
+  if(startupVersion===4){
+    const f=fixture();f.book.activePageId=f.book.pages[0].id;const healthyName=name();await seed(healthyName,4,f);const healthy=await snapshot(healthyName),bad={...f,book:invalidPage(f.book,1,'')};
+    await seed('omd.notebook.records.v1',4,bad);localStorage.setItem(STORAGE_KEY,JSON.stringify(f.book));for(const v of [1,2,3])localStorage.setItem(`${STORAGE_KEY}.v${v}-backup`,`untouched v${v} backup`);
+    return {evidence,startup:f.book,v4:{before:await snapshot('omd.notebook.records.v1'),healthy,sources:Object.entries(localStorage)}};
+  }
   for(const version of [1,2,3]){
     const f=fixture(),healthyName=name();await seed(healthyName,version,f);const healthy=await snapshot(healthyName);
     for(const index of [0,1])for(const id of invalidIds){
@@ -99,7 +142,7 @@ export async function migrationChecks({sourceRoot,extension='ts',startupVersion}
     const f=fixture(),dbName=name(),data=storage();data.setItem(STORAGE_KEY,'unchanged recovery source');data.setItem(`${STORAGE_KEY}.v1-backup`,'unchanged recovery backup');
     await seed(dbName,version,f);const before=await snapshot(dbName),bytes=data.entries();
     const store=await createStore(data,{name:dbName,initial:emptyNotebook});equal(await store.getNotebook(),f.book,`v${version} full export changed`);equal(data.entries(),bytes,'Recovery bytes changed');
-    const after=await snapshot(dbName);check(after.version===4,'Expected schema v4');equal(after.stores.records.keyPath,['pageId','kind','id'],'Not a native compound keyPath');equal(after.stores.records.indexes,[{name:'pageId',keyPath:'pageId'}],'Page index changed');
+    const after=await snapshot(dbName);check(after.version===4,'Expected schema v4');equal(after.stores.records.keyPath,['pageId','kind','id'],'Not a native compound keyPath');equal(after.stores.records.indexes,[{name:'pageId',keyPath:'pageId',unique:false,multiEntry:false}],'Page index changed');
     for(let i=0;i<after.stores.records.values.length;i++){const row=after.stores.records.values[i];equal(Object.keys(row).sort(),['data','id','kind','pageId'],'Record has serialized key or unknown fields');equal(after.stores.records.keys[i],[row.pageId,row.kind,row.id],'Native primary key mismatch');}
     equal(after.stores.meta,before.stores.meta,'Metadata changed');check(after.stores.history.values.length===0,'Legacy patch paths survived upgrade');check(after.stores.delivery.values.length===before.stores.delivery.values.length,'Delivery ledger lost entries');equal(after.stores.delivery.values,before.stores.delivery.values,'Delivery payload changed');
     equal(after.stores.reminders.values,before.stores.reminders.values,'Reminder values changed');equal(after.stores.reminders.keys,[[f.book.pages[0].id,f.reminder.id]],'Reminder keys were not migrated');
