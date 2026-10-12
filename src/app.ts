@@ -390,8 +390,9 @@ async function boot() {
     if(key==='title') {
       let finishing=false;
       el.addEventListener('keydown',async event=>{
-        if(event.key!=='Enter'||event.isComposing||event.keyCode===229||composition.isComposing(el))return;
-        event.preventDefault();if(event.repeat||finishing)return;
+        const key=event as KeyboardEvent;
+        if(key.key!=='Enter'||key.isComposing||key.keyCode===229||composition.isComposing(el))return;
+        key.preventDefault();if(key.repeat||finishing)return;
         finishing=true;const pageId=store.getActivePageId(),title=el.value;
         try {
           await store.idle();
