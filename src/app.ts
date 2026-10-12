@@ -288,16 +288,18 @@ function renderTabs(shell:HTMLElement,b:BlockOf<'tabs'>) {
   b.tabs.forEach((t, i) => {
     const header=element('div','tab-header');
     let selecting:Promise<unknown>|undefined;
-    const tab = button(t.title || 'Untitled', `Open ${t.title || 'tab'}`, event => {if(suppressTabClick){event.preventDefault();return;}return selecting=action('tab_select', { pageId, blockId: b.id, tabId: t.id });}, 'tab-button'); tab.setAttribute('role', 'tab'); tab.setAttribute('aria-selected', String(t.id === b.activeTabId)); tab.id = `${t.id}-button`; tab.setAttribute('aria-controls', `${t.id}-panel`); tab.tabIndex = t.id === b.activeTabId ? 0 : -1;
+    const tab = button(t.title || 'Untitled', `Open ${t.title || 'tab'}`, event => {if(suppressTabClick){event.preventDefault();return;}if(event.detail===2){void beginEdit();return;}return selecting=action('tab_select', { pageId, blockId: b.id, tabId: t.id });}, 'tab-button'); tab.setAttribute('role', 'tab'); tab.setAttribute('aria-selected', String(t.id === b.activeTabId)); tab.id = `${t.id}-button`; tab.setAttribute('aria-controls', `${t.id}-panel`); tab.tabIndex = t.id === b.activeTabId ? 0 : -1;
     draggable(tab,{kind:'tab',pageId,blockId:b.id,tabId:t.id});headers.push(header);tab.title+=' (drag to reorder; double-click or F2 to rename)';
     const rename=button('✎',`Rename ${t.title||'Untitled'} tab`,()=>void beginEdit(),'tab-rename icon-button');
     async function beginEdit() {
       if(suppressTabClick)return;
       await selecting;
-      try{await tabTitleEdit?.flush();}catch{return;}
       if(store.getActivePageId()!==pageId)return;
       if(!header.isConnected){const live=document.getElementById(`${t.id}-button`);if(live?.closest('[data-block-id]')?.getAttribute('data-block-id')===b.id)live.dispatchEvent(new KeyboardEvent('keydown',{key:'F2',bubbles:true}));return;}
       if(header.querySelector('input'))return;
+      try{await tabTitleEdit?.flush();}catch{return;}
+      if(!header.isConnected){void beginEdit();return;}
+      if(header.querySelector('input')||store.getActivePageId()!==pageId)return;
       let value:string;try{value=findBlock(store.getRenderState(),b.id,'tabs').block.tabs.find(tab=>tab.id===t.id)!.title;}catch{return;}
       const input=element('input','tab-title-input');input.type='text';input.value=value;input.id=`${t.id}-label`;input.setAttribute('aria-label','Rename tab');input.size=Math.max(5,input.value.length);
       const original=input.value;let finished=false,requested=false,failed=false,pending:Promise<void>|undefined;
