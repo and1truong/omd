@@ -20,6 +20,11 @@ let store:NotebookStore,palette:ReturnType<typeof setupPalette>|undefined,diagra
 let textEditors:ReturnType<typeof createTextEditors>|undefined;
 const collapsedChecklistItems=new Set<string>();
 const checklistViewKey=(pageId:string,blockId:string,itemId:string)=>JSON.stringify([pageId,blockId,itemId]);
+function syncChecklistFolds(scope:ParentNode) {
+  const button=scope.querySelector<HTMLButtonElement>('.checklist-fold-all');if(!button)return;
+  const folds=[...scope.querySelectorAll<HTMLButtonElement>('.checklist-fold')],collapse=folds.some(fold=>fold.getAttribute('aria-expanded')==='true');
+  button.hidden=folds.length===0;button.textContent=collapse?'Collapse branches':'Expand branches';button.setAttribute('aria-label',collapse?'Collapse checklist branches':'Expand checklist branches');
+}
 function focusChecklistItem(id:string) {
   const target=document.getElementById(id);if(!target)return;
   let list=target.closest<HTMLElement>('.checklist-items');
@@ -30,7 +35,7 @@ function focusChecklistItem(id:string) {
     if(fold){list.hidden=false;fold.setAttribute('aria-expanded','true');fold.title='Collapse checklist branch';fold.setAttribute('aria-label',fold.title);collapsedChecklistItems.delete(fold.dataset.viewKey!);}
     list=parent.parentElement?.closest<HTMLElement>('.checklist-items')??null;
   }
-  target.focus();
+  const block=target.closest('.block');if(block)syncChecklistFolds(block);target.focus();
 }
 let tableEdits:ReturnType<typeof createTableEdits>|undefined;
 interface InsertionAnchor {blockId:string;side:'before'|'after'}
@@ -196,14 +201,8 @@ function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
         fold.title=collapsed?'Expand checklist branch':'Collapse checklist branch';fold.setAttribute('aria-label',fold.title);
         if(collapsed)collapsedChecklistItems.add(fold.dataset.viewKey!);else collapsedChecklistItems.delete(fold.dataset.viewKey!);
       }
-      syncFoldAll();
+      syncChecklistFolds(folds[0]?.closest('.block')??shell);
     }catch(error){notify(errorOf(error).message,'error',true);}
-  }
-  function syncFoldAll() {
-    const scope=foldAll.closest('.block')??shell,folds=[...scope.querySelectorAll<HTMLButtonElement>('.checklist-fold')];
-    const collapse=folds.some(fold=>fold.getAttribute('aria-expanded')==='true');
-    foldAll.hidden=folds.length===0;foldAll.textContent=collapse?'Collapse branches':'Expand branches';
-    foldAll.setAttribute('aria-label',collapse?'Collapse checklist branches':'Expand checklist branches');
   }
   function renderItems(items:ChecklistItem[],ancestors:ChecklistItem[]=[]):HTMLElement {
     const list=element('div','checklist-items');list.setAttribute('role','list');
@@ -242,7 +241,8 @@ function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
         const children=renderItems(item.children,[...ancestors,item]),viewKey=checklistViewKey(pageId,b.id,item.id),collapsed=collapsedChecklistItems.has(viewKey);
         children.id=`${item.id}-children`;children.hidden=collapsed;
         const fold=button('▾',collapsed?'Expand checklist branch':'Collapse checklist branch',()=>setCollapsed([fold],fold.getAttribute('aria-expanded')==='true'),'icon-button checklist-fold');
-        fold.setAttribute('aria-expanded',String(!collapsed));fold.setAttribute('aria-controls',children.id);fold.dataset.viewKey=viewKey;
+        fold.id=`${item.id}-fold`;
+        fold.setAttribute('aria-expanded',String(!collapsed));fold.setAttribute('aria-controls',children.id);fold.setAttribute('aria-describedby',item.id);fold.dataset.viewKey=viewKey;
         row.append(fold,check,text,controls);entry.append(row,children);
       }else {const marker=element('span','checklist-leaf');marker.setAttribute('aria-hidden','true');row.append(marker,check,text,controls);entry.append(row);}
       list.append(entry);
@@ -251,7 +251,7 @@ function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
   const head=title(b,'☑'),progress=element('span','checklist-progress'),items=renderItems(b.items),meter=element('progress','checklist-meter');progress.textContent=`${done} / ${total}`;
   meter.max=Math.max(1,total);meter.value=done;meter.setAttribute('aria-label','Checklist progress');head.append(progress,meter);shell.append(head,items);
   const foot=element('div','checklist-footer'),foldAll=button('Collapse branches','Collapse checklist branches',()=>{const scope=foldAll.closest('.block')!;return setCollapsed([...scope.querySelectorAll<HTMLButtonElement>('.checklist-fold')],scope.querySelector('.checklist-fold[aria-expanded=true]')!==null);},'checklist-fold-all');
-  foot.append(button('+ Add an item','Add checklist item',()=>addItem(),'add-inline'),foldAll);shell.append(foot);syncFoldAll();
+  foot.append(button('+ Add an item','Add checklist item',()=>addItem(),'add-inline'),foldAll);shell.append(foot);syncChecklistFolds(shell);
 }
 function renderTable(shell:HTMLElement,b:BlockOf<'table'>) {
   const pageId=store.getActivePageId(),cellKey=(rowId:string,columnId:string)=>`table-cell-${encodeURIComponent(JSON.stringify([b.id,rowId,columnId]))}`,cellId=(r:number,c:number)=>cellKey(b.rows[r].id,b.columns[c].id);

@@ -48,6 +48,69 @@ async function fixture() {
   const second=(await items())[1].id;await focused(second);await input(second).fill('Build');return [first,second];
 }
 
+async function styleCases() {
+  const pageId=(await call('page_add',{title:'Chuẩn bị phát hành'})).pageId;
+  await call('set_page',{subtitle:'Chia việc lớn thành từng bước nhỏ. Giữ mọi thứ trong cùng một danh sách.'});
+  blockId=(await call('add_block',{type:'checklist',title:'Việc cần hoàn thành'})).blockId;
+  const ids={},add=async(key,text,parent,done=false)=>{const id=(await call('checklist_add',{blockId,text,parentId:ids[parent]})).itemId;ids[key]=id;if(done)await call('checklist_update',{blockId,itemId:id,patch:{done:true}});return id;};
+  await add('experience','Trải nghiệm checklist');
+  await add('markdown','**Markdown và cấu trúc**\n\nNội dung rõ ở mọi cấp, không cần toolbar.','experience');
+  await add('mobile','Đọc lại trên màn hình nhỏ','markdown');
+  await add('long','Kiểm tra dòng dài, [đường dẫn](https://example.com) và `inline code` ở cấp 4.','mobile');
+  await add('toolbar','Không hiển thị toolbar khi gõ','mobile',true);
+  await add('source','Giữ nguyên `Markdown source` khi tải lại','markdown',true);
+  await add('keyboard','Phím `Enter` và `Tab` hoạt động tự nhiên','experience',true);
+  await add('testing','Kiểm thử trước khi phát hành');
+  await add('paths','Kiểm tra cả `root` và `/omd`','testing');
+  await add('engines','Đối chiếu trên Chromium và WebKit','testing',true);
+  await add('themes','Xem *light/dark* và bố cục mobile','testing');
+  await add('publish','Viết ghi chú phát hành ngắn gọn');
+  const block=page.locator(`[data-block-id="${blockId}"]`),fold=()=>row(ids.experience).locator('.checklist-fold'),branch=()=>page.locator(`[id="${ids.experience}-children"]`);
+  const exportNotebook=()=>page.evaluate(async()=>{const app=await import(new URL('./src/app.js',document.baseURI).href);await app.flushPending();return app.getStore().export();});
+  const snapshot=await exportNotebook(),original=await items();
+  assert.equal(await block.locator('.checklist-progress').innerText(),'4 / 12');
+  assert.equal(await row(ids.experience).locator('.checklist-branch-progress').innerText(),'3/7');
+  assert.equal(await block.locator('.checklist-meter').getAttribute('max'),'12');
+  await input(ids.long).evaluate(el=>{window.omdFoldEditor=el;window.omdFoldInstance=el.editor;});
+  await fold().press('Space');await branch().waitFor({state:'hidden'});
+  assert.equal(await fold().getAttribute('aria-expanded'),'false');assert.equal(await exportNotebook(),snapshot,'Folding must not change notebook data/history.');
+  await fold().press('Enter');await input(ids.long).waitFor({state:'visible'});
+  assert.equal(await input(ids.long).evaluate(el=>el===window.omdFoldEditor&&el.editor===window.omdFoldInstance),true);
+  await fold().click();await branch().waitFor({state:'hidden'});
+  await call('checklist_update',{blockId,itemId:ids.long,patch:{done:true}});
+  assert.equal(await fold().getAttribute('aria-expanded'),'false');assert.equal(await row(ids.experience).locator('.checklist-branch-progress').innerText(),'4/7');
+  assert.equal(await block.locator('.checklist-progress').innerText(),'5 / 12');assert.equal(await row(ids.experience).getByRole('checkbox').isChecked(),false);
+  const another=(await call('page_add',{title:'Independent view'})).pageId;await call('page_select',{pageId});assert.equal(await fold().getAttribute('aria-expanded'),'false');
+  const secondTab=await page.context().newPage();await secondTab.goto(page.url());await secondTab.evaluate(async()=>await (await import(new URL('./src/app.js',document.baseURI).href)).ready);
+  assert.equal(await secondTab.locator(`[id="${ids.experience}-fold"]`).getAttribute('aria-expanded'),'true');await secondTab.close();
+  await fold().click();await branch().waitFor({state:'visible'});
+  await call('checklist_update',{blockId,itemId:ids.long,patch:{done:false}});
+  await block.getByRole('button',{name:'Collapse checklist branches',exact:true}).click();await branch().waitFor({state:'hidden'});
+  assert.equal(await block.locator('.check-row:visible').count(),3);
+  await (await menu(ids.experience)).getByRole('button',{name:'Add child checklist item',exact:true}).click();
+  const added=(await children(ids.experience)).at(-1).id;await focused(added);assert.equal(await fold().getAttribute('aria-expanded'),'true');
+  assert.equal(await block.getByRole('button',{name:'Collapse checklist branches',exact:true}).count(),1);
+  await call('checklist_remove',{blockId,itemId:added});
+  // All-branch toggles are also view-only, and print must expose folded rows.
+  await block.getByRole('button',{name:'Collapse checklist branches',exact:true}).click();await branch().waitFor({state:'hidden'});
+  assert.equal(await block.locator('.check-row:visible').count(),3);
+  await page.emulateMedia({media:'print'});assert.equal(await block.locator('.check-row:visible').count(),12);await page.emulateMedia({media:'screen'});
+  await block.getByRole('button',{name:'Expand checklist branches',exact:true}).click();await input(ids.long).waitFor({state:'visible'});
+  await page.evaluate(async()=>{const app=await import(new URL('./src/app.js',document.baseURI).href);await app.setView({theme:'light',sidebarOpen:false});});
+  await page.setViewportSize({width:1280,height:1100});await input(ids.long).blur();await page.mouse.move(0,0);
+  await page.screenshot({path:`${root}/test-results/checklist-style-${engine}-light.png`,fullPage:true});
+  await page.evaluate(async()=>await (await import(new URL('./src/app.js',document.baseURI).href)).setView({theme:'dark'}));
+  await page.screenshot({path:`${root}/test-results/checklist-style-${engine}-dark.png`,fullPage:true});
+  await page.setViewportSize({width:375,height:1000});
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await page.screenshot({path:`${root}/test-results/checklist-style-${engine}-mobile.png`,fullPage:true});
+  await page.setViewportSize({width:320,height:844});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await fold().click();await branch().waitFor({state:'hidden'});await page.reload();await page.evaluate(async()=>await (await import(new URL('./src/app.js',document.baseURI).href)).ready);
+  assert.equal(await fold().getAttribute('aria-expanded'),'true');assert.equal(await row(ids.experience).locator('.checklist-branch-progress').innerText(),'3/7');
+  assert.deepEqual(await items(),original,'View changes, reload, and add/remove must preserve original Markdown sources.');
+  await call('page_remove',{pageId:another});
+}
+
 async function markdownCases() {
   const pageId=(await call('page_add',{title:'Markdown at every checklist level'})).pageId;
   const toggle=(await call('add_block',{type:'toggle',title:'Markdown tasks'})).block;
@@ -196,7 +259,7 @@ try {
   await (await menu(second)).getByRole('button',{name:'Delete checklist item',exact:true}).click();await input(second).waitFor({state:'detached'});assert.equal((await items()).length,1);
   await call('undo');assert.deepEqual(await items(),before);await call('redo');assert.equal((await items()).length,1);await call('undo');
   await page.reload();await page.evaluate(async()=>await (await import(new URL('./src/app.js',document.baseURI).href)).ready);assert.deepEqual(await items(),before);
-  await markdownCases();await context.close();
+  await markdownCases();await styleCases();await context.close();
 
   // Touch controls and four levels fit even the smallest supported viewport.
   const mobile=await browser.newContext({viewport:{width:320,height:844},isMobile:true,hasTouch:true});mobile.setDefaultTimeout(10000);
