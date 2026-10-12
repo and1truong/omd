@@ -1,46 +1,57 @@
 import {Editor,StarterKit,Markdown} from './text-editor-engine.js';
-import type {NotebookStore,TextBlock,Notify} from './types.js';
+import type {NotebookStore,TextBlock,ChecklistItem,Notify} from './types.js';
 import type {createCompositionGuard} from './composition.js';
 import {errorOf} from './dom.js';
 
-/** Visible text blocks own a Tiptap instance; persisted content stays Markdown. */
+/** Visible Markdown controls own a Tiptap instance; persisted content stays Markdown. */
 export function createTextEditors(store:NotebookStore,{composition,notify,createNext}:{composition:ReturnType<typeof createCompositionGuard>;notify:Notify;createNext:(blockId:string,pageId:string)=>Promise<unknown>}) {
-  interface Entry {host:HTMLDivElement;editor:Editor;pageId:string;blockId:string;source:string;serialized:string;pending:string|null;saving?:Promise<unknown>;creating:boolean}
-  const entries=new Map<string,Entry>(),key=(pageId:string,blockId:string)=>JSON.stringify([pageId,blockId]);
+  type ItemKeyDown=(event:KeyboardEvent)=>boolean;
+  interface Entry {host:HTMLDivElement;editor:Editor;pageId:string;blockId:string;itemId?:string;onKeyDown?:ItemKeyDown;source:string;serialized:string;pending:string|null;saving?:Promise<unknown>;creating:boolean}
+  const entries=new Map<string,Entry>(),key=(pageId:string,blockId:string,itemId?:string)=>JSON.stringify([pageId,blockId,itemId]);
+  function write(entry:Entry,text:string) {
+    return entry.itemId
+      ?store.dispatch('checklist_update',{pageId:entry.pageId,blockId:entry.blockId,itemId:entry.itemId,patch:{text}},{quiet:true})
+      :store.dispatch('update_block',{pageId:entry.pageId,blockId:entry.blockId,patch:{text}},{quiet:true});
+  }
   async function flush(entry:Entry):Promise<void> {
     if(composition.isComposing(entry.editor.view.dom)||entry.pending===null)return;
     if(entry.saving){await entry.saving;return flush(entry);}
     const text=entry.pending;
     try {
-      entry.saving=store.dispatch('update_block',{pageId:entry.pageId,blockId:entry.blockId,patch:{text}},{quiet:true});await entry.saving;
+      entry.saving=write(entry,text);await entry.saving;
       entry.source=text;if(entry.pending===text)entry.pending=null;
     } finally {entry.saving=undefined;}
     if(entry.pending!==null)await flush(entry);
   }
-  function changed(entry:Entry) {
-    if(composition.isComposing(entry.editor.view.dom)||entry.editor.view.composing)return;
+  function capture(entry:Entry) {
     const text=entry.editor.getMarkdown();if(text===entry.serialized)return;
     entry.serialized=text;entry.pending=text;
+  }
+  function changed(entry:Entry) {
+    if(composition.isComposing(entry.editor.view.dom)||entry.editor.view.composing)return;
+    capture(entry);
     void flush(entry).catch(error=>notify(errorOf(error).message,'error',true));
   }
   async function history(redo:boolean) {
     try {await manager.flushAll();if(redo)await store.redo();else await store.undo();}
     catch(error){notify(errorOf(error).message,'error',true);}
   }
-  function mount(block:TextBlock,pageId:string) {
-    const id=key(pageId,block.id);let entry=entries.get(id);
+  function mount(block:TextBlock,pageId:string,item?:ChecklistItem,onKeyDown?:ItemKeyDown) {
+    const source=item?.text??block.text,id=key(pageId,block.id,item?.id);let entry=entries.get(id);
     if(entry) {
-      if(entry.source!==block.text&&entry.pending===null&&!entry.saving&&!composition.isComposing(entry.editor.view.dom)) {
-        entry.editor.commands.setContent(block.text,{contentType:'markdown',emitUpdate:false});
-        entry.source=block.text;entry.serialized=entry.editor.getMarkdown();
+      entry.onKeyDown=onKeyDown;
+      if(entry.source!==source&&entry.pending===null&&!entry.saving&&!composition.isComposing(entry.editor.view.dom)) {
+        entry.editor.commands.setContent(source,{contentType:'markdown',emitUpdate:false});
+        entry.source=source;entry.serialized=entry.editor.getMarkdown();
       }
       return entry.host;
     }
-    const host=document.createElement('div');host.className='text-editor';host.dataset.textEditor=block.id;
+    const host=document.createElement('div');host.className=item?'text-editor checklist-text-editor':'text-editor';
+    if(item)host.dataset.checklistEditor=item.id;else host.dataset.textEditor=block.id;
     const toolbar=document.createElement('div');toolbar.className='markdown-toolbar';toolbar.setAttribute('role','toolbar');toolbar.setAttribute('aria-label','Text formatting');
-    const surface=document.createElement('div');surface.className='markdown-surface';host.append(toolbar,surface);
-    const editor=new Editor({element:surface,injectCSS:false,extensions:[StarterKit.configure({undoRedo:false,underline:false,trailingNode:false,link:{openOnClick:false}}),Markdown],content:block.text,contentType:'markdown',
-      editorProps:{attributes:{id:`${block.id}-text`,class:'markdown-editor',role:'textbox','aria-label':'text content','aria-multiline':'true','aria-keyshortcuts':'Shift+Enter','data-placeholder':'Write something…'},
+    const surface=document.createElement('div');surface.className='markdown-surface';if(!item)host.append(toolbar);host.append(surface);
+    const editor=new Editor({element:surface,injectCSS:false,extensions:[StarterKit.configure({undoRedo:false,underline:false,trailingNode:false,link:{openOnClick:false}}),Markdown],content:source,contentType:'markdown',
+      editorProps:{attributes:{id:item?.id??`${block.id}-text`,class:'markdown-editor',role:'textbox','aria-label':item?'Checklist item':'text content','aria-multiline':'true','aria-keyshortcuts':item?'Enter Shift+Enter Tab Shift+Tab':'Shift+Enter','data-placeholder':item?'A little thing to do':'Write something…'},
         handleClick:(view,_pos,event)=>{
           if(event.button!==0||event.shiftKey||event.altKey||view.composing||composition.isComposing(view.dom))return false;
           const link=event.target instanceof Element?event.target.closest<HTMLAnchorElement>('a[href]'):null;
@@ -54,8 +65,11 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
           editor.commands.insertContent(text,{contentType:'markdown'});return true;
         },
         handleKeyDown:(_view,event)=>{
-          if(event.isComposing||editor.view.composing||composition.isComposing(editor.view.dom))return false;
-          if(event.key==='Enter'&&event.shiftKey&&!event.ctrlKey&&!event.metaKey&&!event.altKey) {
+          if(event.isComposing||event.keyCode===229||editor.view.composing)return false;
+          if(composition.isComposing(editor.view.dom))return event.key==='Enter'||event.key==='Tab';
+          if(entry?.onKeyDown?.(event))return true;
+          if(item&&event.key==='Tab')return false;
+          if(!item&&event.key==='Enter'&&event.shiftKey&&!event.ctrlKey&&!event.metaKey&&!event.altKey) {
             if(!entry!.creating&&!event.repeat) {
               entry!.creating=true;
               void createNext(block.id,pageId).catch(error=>notify(errorOf(error).message,'error',true)).finally(()=>{entry!.creating=false;});
@@ -69,16 +83,19 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
         }
       },onUpdate:()=>{if(entry)changed(entry);}
     });
-    entry={host,editor,pageId,blockId:block.id,source:block.text,serialized:editor.getMarkdown(),pending:null,creating:false};entries.set(id,entry);
+    entry={host,editor,pageId,blockId:block.id,itemId:item?.id,onKeyDown,source,serialized:editor.getMarkdown(),pending:null,creating:false};entries.set(id,entry);
     composition.track(editor.view.dom,async()=>{
       try {
         // Let ProseMirror consume the final DOM mutation before saving composed text.
         await new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()));
-        const text=editor.getMarkdown();if(text!==entry!.serialized){entry!.serialized=text;entry!.pending=text;}
         // The guard remains active until this write resolves, so flush directly here.
         if(entry!.saving)await entry!.saving;
-        if(entry!.pending!==null){const text=entry!.pending;await store.dispatch('update_block',{pageId,blockId:block.id,patch:{text}},{quiet:true});entry!.source=text;if(entry!.pending===text)entry!.pending=null;}
-      } catch(error){notify(errorOf(error).message,'error',true);}
+        for(;;) {
+          capture(entry!);if(entry!.pending===null)break;
+          const text=entry!.pending;entry!.saving=write(entry!,text);
+          try{await entry!.saving;entry!.source=text;if(entry!.pending===text)entry!.pending=null;}finally{entry!.saving=undefined;}
+        }
+      } catch(error){capture(entry!);notify(errorOf(error).message,'error',true);}
     },()=>pageId);
     const controls:[string,string,(editor:Editor)=>void,()=>boolean][]=[
       ['B','Bold',e=>{e.chain().focus().toggleBold().run();},()=>editor.isActive('bold')],
@@ -91,7 +108,7 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
       ['❝','Quote',e=>{e.chain().focus().toggleBlockquote().run();},()=>editor.isActive('blockquote')],
       ['```','Code block',e=>{e.chain().focus().toggleCodeBlock().run();},()=>editor.isActive('codeBlock')]
     ];
-    const buttons=controls.map(([label,name,run])=>{
+    const buttons=(item?[]:controls).map(([label,name,run])=>{
       const button=document.createElement('button');button.type='button';button.className='markdown-tool';button.textContent=label;button.title=name;button.setAttribute('aria-label',name);
       let selection:{from:number;to:number}|null=null;
       const captureSelection=()=>{
@@ -113,8 +130,9 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
     editor.on('transaction',sync);sync();return host;
   }
   const manager={mount,
+    mountChecklist(blockId:string,item:ChecklistItem,pageId:string,onKeyDown:ItemKeyDown){return mount({id:blockId,type:'text',text:item.text},pageId,item,onKeyDown);},
     end(){for(const [id,entry] of entries)if(entry.pageId!==store.getActivePageId()||!entry.host.isConnected){entry.editor.destroy();entries.delete(id);}},
-    captureFocus(){const entry=[...entries.values()].find(e=>e.editor.view.dom===document.activeElement);return entry?key(entry.pageId,entry.blockId):null;},
+    captureFocus(){const entry=[...entries.values()].find(e=>e.editor.view.dom===document.activeElement);return entry?key(entry.pageId,entry.blockId,entry.itemId):null;},
     restoreFocus(id:string|null){const entry=id&&entries.get(id);if(entry&&entry.host.isConnected)entry.editor.view.focus();},
     focus(blockId:string){
       const entry=entries.get(key(store.getActivePageId(),blockId));if(!entry?.host.isConnected)return;
