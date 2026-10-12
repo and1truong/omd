@@ -61,14 +61,20 @@ function migrate(db:IDBDatabase,tx:IDBTransaction,fail:(error:unknown)=>void) {
           const full=validateBook({...book,pages:book.pages.map(p=>makeMaterializer()(mapped,p.id))});
           const normalized=bookRecords(structuredClone(full));
           if(!equalValue(metadataBook(full),book)||normalized.size!==mapped.size||[...mapped].some(([key,row])=>!equalValue(row,normalized.get(key))))throw new Error('Legacy records contain orphaned or inconsistent data.');
-        }else if(mapped.size)throw new Error('Legacy notebook metadata is missing.');
-        const pending=reminders.getAll();pending.onsuccess=()=>guard(()=>{
+        }
+        if(book===undefined){
+          let remaining=5;
+          for(const name of ['meta','records','reminders','history','delivery']){
+            const count=tx.objectStore(name).count();count.onerror=()=>fail(count.error);count.onsuccess=()=>guard(()=>{if(count.result)throw new Error(`Legacy notebook metadata is missing but ${name} is not empty.`);if(!--remaining)replace();});
+          }
+        }else replace();
+        function replace(){const pending=reminders.getAll();pending.onsuccess=()=>guard(()=>{
           const expected=[...mapped.values()].filter(r=>r.kind==='block'&&r.data.type==='reminder');
           if(expected.length!==pending.result.length||pending.result.some(value=>{const record=mapped.get(recordKey(value.pageId,'block',value.id));if(record?.kind!=='block'||record.data.type!=='reminder')return true;const {pageId,due,...block}=value;return !equalValue(block,record.data)||due!==reminderDue(record.data);}))throw new Error('Legacy reminder index does not match its records.');
           // Open tabs cannot reuse old patch paths. As in previous upgrades, only transient undo is invalidated.
           const history=tx.objectStore('history');history.clear();if(!history.indexNames.contains('owner'))history.createIndex('owner','owner');
           for(const [name,store]of [['records',records],['reminders',reminders],['delivery',delivery]] as const){db.deleteObjectStore(name);store.name=name;}
-        });
+        });}
       });
     };
   }

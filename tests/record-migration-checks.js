@@ -98,6 +98,13 @@ export async function migrationChecks({sourceRoot,extension='ts',startupVersion}
     evidence.push({case:`localStorage v${version} failed import / retry`,passed:true});
   }
   for(const version of [1,2,3]){const dbName=name();await seed(dbName,version);const empty=await createStore(storage(),{name:dbName,initial:emptyNotebook});check((await empty.getNotebook()).pages.length===1,'Empty legacy database failed');check((await snapshot(dbName)).version===4,'Empty legacy database did not upgrade');await empty.close();evidence.push({case:`empty v${version} → initialized v4`,passed:true});}
+  for(const version of [1,2,3])for(const orphan of ['meta','records','reminders','history','delivery']){
+    const dbName=name(),f=fixture(),data=storage();data.setItem(STORAGE_KEY,'unchanged recovery source');data.setItem(`${STORAGE_KEY}.v1-backup`,'unchanged recovery backup');
+    await seed(dbName,version,f,tx=>{
+      const reading=tx.objectStore(orphan).openCursor();reading.onsuccess=()=>{const row=reading.result;if(orphan==='meta'&&row.primaryKey==='book'){row.continue();return;}const key=row.primaryKey,value=row.value;for(const store of ['meta','records','reminders','history','delivery'])tx.objectStore(store).clear();tx.objectStore(orphan).put(value,key);};
+    });
+    const before=await snapshot(dbName),sources=data.entries();await rejects(()=>openRepository(data,{name:dbName,initial:emptyNotebook}),/upgrade failed.*intact.*metadata is missing/);equal(await snapshot(dbName),before,`Orphan ${orphan} v${version} changed schema/data`);equal(data.entries(),sources,'Orphan migration overwrote localStorage');evidence.push({case:`v${version} missing meta.book / ${orphan}-only orphan / exact rollback`,passed:true});
+  }
   const data=storage(),fresh=await createStore(data,{name:name(),initial:emptyNotebook});check((await fresh.getNotebook()).pages.length===1,'New install failed');await fresh.close();
   for(const version of [1,2,3]){
     const dbName=name(),f=fixture(),data=storage();await seed(dbName,version,f);data.setItem(STORAGE_KEY,JSON.stringify(f.book));const sources=data.entries(),legacy=await req(indexedDB.open(dbName,version)),before=await snapshot(dbName,legacy);let opening;
