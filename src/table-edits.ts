@@ -4,7 +4,7 @@ import {errorOf} from './dom.js';
 
 export type NativeTarget = {pageId:string;kind:'page';field:'title'|'subtitle'} | {pageId:string;kind:'title';blockId:string} | {pageId:string;kind:'cell';blockId:string;rowId:string;columnId:string};
 interface Draft {target:NativeTarget;label:string;value:string;error?:Error;saving?:Promise<void>}
-export function createNativeEdits(store:NotebookStore,composition:Pick<ReturnType<typeof createCompositionGuard>,'settled'>,onChange:()=>void=()=>{}) {
+export function createNativeEdits(store:NotebookStore,composition:Pick<ReturnType<typeof createCompositionGuard>,'settled'> & {isComposingTarget?:(target:NativeTarget)=>boolean},onChange:()=>void=()=>{}) {
   const drafts=new Map<string,Draft>();
   const key=(target:NativeTarget)=>JSON.stringify(target.kind==='page'?[target.pageId,target.kind,target.field]:target.kind==='title'?[target.pageId,target.kind,target.blockId]:[target.pageId,target.kind,target.blockId,target.rowId,target.columnId]);
   function stage(target:NativeTarget,value:string,label:string) {
@@ -35,7 +35,7 @@ export function createNativeEdits(store:NotebookStore,composition:Pick<ReturnTyp
     list:()=>[...drafts].map(([id,draft])=>({id,target:{...draft.target},label:draft.label,value:draft.value,error:draft.error,saving:!!draft.saving})),
     async retry(id:string){const draft=drafts.get(id);if(draft)await flush(id,draft);},
     discard(id:string){const draft=drafts.get(id);if(draft?.saving)throw new Error('Wait for this edit to finish saving.');drafts.delete(id);onChange();},
-    async flushAll(){do{await composition.settled();await Promise.all([...drafts].map(([id,draft])=>flush(id,draft)));await store.idle();}while(drafts.size);}
+    async flushAll({settle=true}:{settle?:boolean}={}){do{if(settle)await composition.settled();await Promise.all([...drafts].filter(([,draft])=>!composition.isComposingTarget?.(draft.target)).map(([id,draft])=>flush(id,draft)));await store.idle();}while(settle&&drafts.size);}
   };
 }
 export function createTableEdits(store:NotebookStore,composition:Pick<ReturnType<typeof createCompositionGuard>,'settled'>) {

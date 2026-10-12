@@ -30,7 +30,7 @@ let tabTitleEdit:{flush:()=>Promise<unknown>}|undefined;
 export const openPalette = () => {shell?.closeMobile();palette?.open();};
 export const getView = () => shell!.getView();
 export const setView = async (patch:PartialView) => {if(patch.sidebarOpen)await beforeNavigate();return shell!.setView(patch);};
-export async function flushPending(){await tabTitleEdit?.flush();await nativeEdits?.flushAll();await textEditors?.flushAll();await diagrams?.flushAll();await nativeEdits?.flushAll();}
+export async function flushPending(options:{settle?:boolean}={}){await tabTitleEdit?.flush();await nativeEdits?.flushAll(options);await textEditors?.flushAll();await diagrams?.flushAll();await nativeEdits?.flushAll(options);}
 export const flushDiagrams=flushPending;
 async function beforeNavigate(){await tabTitleEdit?.flush();await nativeEdits?.flushAll();await textEditors?.flushAll();await diagrams?.beforeNavigate();await nativeEdits?.flushAll();}
 export async function openCanvas(blockId:string,pageId?:string) {
@@ -534,7 +534,10 @@ async function boot() {
   for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', e => { if (e.target === dialog) { const rect = dialog.getBoundingClientRect(); if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) dialog.close(); } });
   diagrams=createDiagramManager(store,{notify});
   textEditors=createTextEditors(store,{composition,notify,createNext:createTextAfter});
-  nativeEdits=createNativeEdits(store,{settled:()=>composition.settled(input=>input instanceof Element&&(input.hasAttribute('data-native-draft')||input.id==='page-title'||input.id==='page-subtitle'))},updateSaveStatus);
+  nativeEdits=createNativeEdits(store,{
+    settled:()=>composition.settled(input=>input instanceof Element&&(input.hasAttribute('data-native-draft')||input.id==='page-title'||input.id==='page-subtitle')),
+    isComposingTarget:target=>{const input=document.querySelector(`[data-native-draft="${CSS.escape(nativeEdits!.id(target))}"]`);return !!input&&composition.isComposing(input);}
+  },updateSaveStatus);
   const dirtyContainers=new Set<string>();
   renderer=createRenderCache({makeBlock:renderBlock,makeList:makeBlockList,
     observeBlock:(id,fn)=>store.subscribeBlock(id,fn),observeList:(id,fn)=>store.subscribeContainer(id,fn),
