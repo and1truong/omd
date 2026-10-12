@@ -23,10 +23,13 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
     } finally {entry.saving=undefined;}
     if(entry.pending!==null)await flush(entry);
   }
-  function changed(entry:Entry) {
-    if(composition.isComposing(entry.editor.view.dom)||entry.editor.view.composing)return;
+  function capture(entry:Entry) {
     const text=entry.editor.getMarkdown();if(text===entry.serialized)return;
     entry.serialized=text;entry.pending=text;
+  }
+  function changed(entry:Entry) {
+    if(composition.isComposing(entry.editor.view.dom)||entry.editor.view.composing)return;
+    capture(entry);
     void flush(entry).catch(error=>notify(errorOf(error).message,'error',true));
   }
   async function history(redo:boolean) {
@@ -62,7 +65,8 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
           editor.commands.insertContent(text,{contentType:'markdown'});return true;
         },
         handleKeyDown:(_view,event)=>{
-          if(event.isComposing||event.keyCode===229||editor.view.composing||composition.isComposing(editor.view.dom))return false;
+          if(event.isComposing||event.keyCode===229||editor.view.composing)return false;
+          if(composition.isComposing(editor.view.dom))return event.key==='Enter'||event.key==='Tab';
           if(entry?.onKeyDown?.(event))return true;
           if(item&&event.key==='Tab')return false;
           if(!item&&event.key==='Enter'&&event.shiftKey&&!event.ctrlKey&&!event.metaKey&&!event.altKey) {
@@ -84,11 +88,14 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
       try {
         // Let ProseMirror consume the final DOM mutation before saving composed text.
         await new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()));
-        const text=editor.getMarkdown();if(text!==entry!.serialized){entry!.serialized=text;entry!.pending=text;}
         // The guard remains active until this write resolves, so flush directly here.
         if(entry!.saving)await entry!.saving;
-        if(entry!.pending!==null){const text=entry!.pending;entry!.saving=write(entry!,text);try{await entry!.saving;entry!.source=text;if(entry!.pending===text)entry!.pending=null;}finally{entry!.saving=undefined;}}
-      } catch(error){notify(errorOf(error).message,'error',true);}
+        for(;;) {
+          capture(entry!);if(entry!.pending===null)break;
+          const text=entry!.pending;entry!.saving=write(entry!,text);
+          try{await entry!.saving;entry!.source=text;if(entry!.pending===text)entry!.pending=null;}finally{entry!.saving=undefined;}
+        }
+      } catch(error){capture(entry!);notify(errorOf(error).message,'error',true);}
     },()=>pageId);
     const controls:[string,string,(editor:Editor)=>void,()=>boolean][]=[
       ['B','Bold',e=>{e.chain().focus().toggleBold().run();},()=>editor.isActive('bold')],

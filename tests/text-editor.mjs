@@ -149,8 +149,23 @@ try {
   });
   await call('update_block',{blockId:next,patch:{text:'External edit during composition'}});
   assert.equal(await box(next).innerText(),'Đang gõ tiếng Việt');assert.equal((await order('page')).length,count);
-  await box(next).evaluate(el=>el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));await saved(next,'Đang gõ tiếng Việt');
+  await page.evaluate(async()=>{
+    const store=(await import(new URL('./src/app.js',document.baseURI).href)).getStore(),dispatch=store.dispatch;
+    store.dispatch=async(name,input,options)=>{
+      if(name==='update_block'&&input.patch?.text==='Đang gõ tiếng Việt'){window.omdTextCompositionSaving=true;await new Promise(resolve=>{window.omdFinishTextComposition=resolve;});}
+      return dispatch(name,input,options);
+    };
+    window.omdRestoreTextDispatch=()=>{store.dispatch=dispatch;};
+  });
+  await box(next).evaluate(el=>el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));
+  await page.waitForFunction(()=>window.omdTextCompositionSaving);
+  await box(next).evaluate(el=>{
+    el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',shiftKey:true,bubbles:true,cancelable:true}));
+    el.editor.chain().setTextSelection(el.editor.state.doc.content.size-1).insertContent(' tiếp').run();
+  });
+  await page.evaluate(()=>{window.omdRestoreTextDispatch();window.omdFinishTextComposition();});await saved(next,'Đang gõ tiếng Việt tiếp');
   assert.equal((await order('page')).length,count);
+  await call('update_block',{blockId:next,patch:{text:'Đang gõ tiếng Việt'}});
 
   // Once composition settles, the next shortcut creates a focused sibling without losing composed text.
   await page.waitForFunction(id=>!document.getElementById(`${id}-text`).editor.view.composing,next);

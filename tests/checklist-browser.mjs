@@ -121,9 +121,10 @@ async function markdownCases() {
   await page.waitForFunction(()=>window.omdCompositionSaving);
   await input(leaf).evaluate(el=>{el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',shiftKey:true,bubbles:true,cancelable:true}));el.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',shiftKey:true,bubbles:true,cancelable:true}));});
   assert.equal(await input(leaf).evaluate(el=>el===window.omdComposedChecklist&&el.isConnected),true);
+  await input(leaf).evaluate(el=>el.editor.chain().setTextSelection(el.editor.state.doc.content.size-1).insertContent(' tiếp').run());
   await page.evaluate(()=>{window.omdRestoreChecklistDispatch();window.omdFinishComposition();});await items();
   await page.waitForFunction(id=>!document.getElementById(id).editor.view.composing,leaf);
-  assert.equal(visit(await items(),leaf).text,'Đang gõ tiếng Việt');assert.equal((await children(ids[2])).length,1);
+  assert.equal(visit(await items(),leaf).text,'Đang gõ tiếng Việt tiếp');assert.equal((await children(ids[2])).length,1);
 
   // An actual database write error retains the draft/instance and blocks destructive actions until retry.
   await input(leaf).focus();await page.evaluate(blockId=>{
@@ -206,6 +207,7 @@ try {
   actions=await menu(last);await actions.getByRole('button',{name:'Indent checklist item',exact:true}).tap();await placed(last,deep,0);await focused(last);assert.equal((await children(deep))[0].id,last);
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Nested checklist controls must fit mobile.');
   assert.ok((await input(last).boundingBox()).width>0,'Deep item text must remain editable.');
+  assert.deepEqual(await input(deep).evaluate(el=>{const placeholder=getComputedStyle(el.querySelector('p'),'::before');return [placeholder.whiteSpace,placeholder.textOverflow,placeholder.overflowX];}),['nowrap','ellipsis','hidden']);
   await call('checklist_update',{blockId,itemId:last,patch:{text:'**Deep** *mobile* [Docs](https://example.com/mobile)'}});
   assert.equal(await input(last).locator('strong').innerText(),'Deep');await input(last).tap();assert.equal(await host(last).locator('[role=toolbar],.markdown-tool').count(),0);
   await input(last).press('Control+End');await page.keyboard.type('!');assert.match(await input(last).innerText(),/!$/);assert.match((await children(deep))[0].text,/\[Docs!\]/);
