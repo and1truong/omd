@@ -14,22 +14,23 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
       ?store.dispatch('checklist_update',{pageId:entry.pageId,blockId:entry.blockId,itemId:entry.itemId,patch:{text}},{quiet:true})
       :store.dispatch('update_block',{pageId:entry.pageId,blockId:entry.blockId,patch:{text}},{quiet:true});
   }
-  async function flush(entry:Entry):Promise<void> {
-    if(composition.isComposing(entry.editor.view.dom)||entry.pending===null)return;
-    if(entry.saving){await entry.saving;return flush(entry);}
-    const text=entry.pending;
-    try {
-      entry.saving=write(entry,text);await entry.saving;
-      entry.source=text;if(entry.pending===text)entry.pending=null;
-    } finally {entry.saving=undefined;manager.end();}
-    if(entry.pending!==null)await flush(entry);
+  async function flush(entry:Entry,finishing=false):Promise<void> {
+    if(entry.saving){await entry.saving;return flush(entry,finishing);}
+    if((!finishing&&composition.isComposing(entry.editor.view.dom))||entry.pending===null)return;
+    entry.saving=Promise.resolve().then(async()=>{
+      while(entry.pending!==null) {
+        const text=entry.pending;await write(entry,text);
+        entry.source=text;if(entry.pending===text)entry.pending=null;
+      }
+    });
+    try {await entry.saving;} finally {entry.saving=undefined;manager.end();}
   }
   function capture(entry:Entry) {
     const text=entry.editor.getMarkdown();if(text===entry.serialized)return;
     entry.serialized=text;entry.pending=text;onDraftsChange();
   }
   function changed(entry:Entry) {
-    if(composition.isComposing(entry.editor.view.dom)||entry.editor.view.composing)return;
+    if(composition.isPreediting(entry.editor.view.dom)||entry.editor.view.composing)return;
     capture(entry);
     void flush(entry).catch(error=>notify(errorOf(error).message,'error',true));
   }
@@ -85,18 +86,18 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
       },onUpdate:()=>{if(entry)changed(entry);}
     });
     entry={host,editor,pageId,blockId:block.id,itemId:item?.id,onKeyDown,source,serialized:editor.getMarkdown(),pending:null,creating:false};entries.set(id,entry);
-    composition.track(editor.view.dom,async()=>{
+    // ProseMirror flushes the previous DOM mutation before starting a new composition.
+    editor.view.dom.addEventListener('compositionstart',()=>{if(!composition.isPreediting(editor.view.dom))capture(entry!);});
+    composition.track(editor.view.dom,async(_pageId,{isCurrent})=>{
       try {
         // Let ProseMirror consume the final DOM mutation before saving composed text.
         await new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()));
         // The guard remains active until this write resolves, so flush directly here.
-        if(entry!.saving)await entry!.saving;
         for(;;) {
-          capture(entry!);if(entry!.pending===null)break;
-          const text=entry!.pending;entry!.saving=write(entry!,text);
-          try{await entry!.saving;entry!.source=text;if(entry!.pending===text)entry!.pending=null;}finally{entry!.saving=undefined;}
+          if(isCurrent())capture(entry!);if(entry!.pending===null&&!entry!.saving)break;
+          await flush(entry!,true);
         }
-      } catch(error){capture(entry!);notify(errorOf(error).message,'error',true);}
+      } catch(error){if(isCurrent())capture(entry!);notify(errorOf(error).message,'error',true);}
       finally{manager.end();}
     },()=>pageId);
     const controls:[string,string,(editor:Editor)=>void,()=>boolean][]=[
@@ -160,7 +161,7 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
       const owns=(input:EventTarget)=>[...entries.values()].some(entry=>entry.editor.view.dom===input);
       do {
         if(settle)await composition.settled(owns);
-        await Promise.all([...entries.values()].map(flush));await store.idle();
+        await Promise.all([...entries.values()].map(entry=>flush(entry)));await store.idle();
       } while(settle&&manager.hasPending());
       manager.end();
     },

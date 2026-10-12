@@ -151,6 +151,67 @@ async function compositionBarrier(type) {
   await context.close();
 }
 
+async function holdFinalTransaction(page,f,first) {
+  await page.evaluate(({f,first})=>{
+    const put=IDBObjectStore.prototype.put;window.restoreFinalPut=()=>{IDBObjectStore.prototype.put=put;};
+    IDBObjectStore.prototype.put=function(value,...args){
+      const request=put.call(this,value,...args);
+      if(this.name==='records'&&value?.data?.id===f.blockId&&JSON.stringify(value.data).includes(first)&&!window.finalHeld) {
+        window.finalHeld=true;window.keepFinalAlive=true;const transaction=this.transaction,meta=transaction.objectStore('meta');
+        window.releaseFinal=abort=>{window.keepFinalAlive=false;if(abort)transaction.abort();};
+        const keepAlive=()=>{if(window.keepFinalAlive){const read=meta.get('book');read.onsuccess=keepAlive;}};
+        request.addEventListener('success',keepAlive);
+      }
+      return request;
+    };
+  },{f,first});
+}
+async function overlappingCompositions(type,mode='preedit') {
+  const {context,page}=await fresh(),f=await fixture(page,{type}),input=f.itemId?editor(page,f.itemId):textEditor(page,f.blockId),first='Final first',second='Confirmed second';
+  await holdFinalTransaction(page,f,first);await composed(page,input,first);
+  await input.evaluate(el=>el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));await page.waitForFunction(()=>window.finalHeld);
+  await composed(page,input,mode==='same'?first:'候補 second preedit');
+  if(mode==='finishing') {
+    await input.evaluate((el,second)=>{el.editor.commands.setContent(second);el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));},second);
+    await page.evaluate(()=>{window.finalFlushDone=false;window.finalFlush=lifecycleApp.flushPending().then(()=>{window.finalFlushDone=true;});});
+    await page.waitForTimeout(100);assert.equal(await page.evaluate(()=>window.finalFlushDone),false);
+  }
+  await page.evaluate(mode=>{restoreFinalPut();releaseFinal(mode==='failure');},mode);
+  if(mode==='finishing') {
+    await page.evaluate(()=>window.finalFlush);assert.equal(await text(page,f),second);
+  } else {
+    if(mode==='failure')await page.waitForFunction(()=>document.getElementById('save-status').textContent.startsWith('Not saved'));
+    else await page.waitForFunction(async({f,first})=>{
+      const {block}=lifecycleModel.findBlock(await lifecycleStore.getPage(f.pageId),f.blockId);
+      return (f.itemId?lifecycleModel.findChecklistItem(block.items,f.itemId).item.text:block.text)===first;
+    },{f,first});
+    await page.evaluate(()=>lifecycleStore.idle());await page.waitForTimeout(80);
+    const durable=await page.evaluate(async f=>{
+      const book=JSON.parse(await lifecycleStore.export()),{block}=lifecycleModel.findBlock(book.pages.find(p=>p.id===f.pageId),f.blockId);
+      return f.itemId?lifecycleModel.findChecklistItem(block.items,f.itemId).item.text:block.text;
+    },f);
+    assert.equal(durable,mode==='failure'?(type==='text'?'Saved note':'Saved task'):first);
+    assert.equal(await input.evaluate(el=>el.editor.view.composing),true);
+    assert.equal(await input.innerText(),mode==='same'?first:'候補 second preedit');
+    assert.match(await page.locator('#save-status').innerText(),/^Not saved/);
+    await input.evaluate((el,second)=>{el.editor.commands.setContent(second);el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));},second);
+    await flush(page);assert.equal(await text(page,f),second);
+  }
+  assert.equal(await page.locator('#save-status').innerText(),'Saved');await context.close();
+}
+async function immediateCompositionRestart(type) {
+  const {context,page}=await fresh(),f=await fixture(page,{type}),input=f.itemId?editor(page,f.itemId):textEditor(page,f.blockId);
+  await composed(page,input,'Final before next frame');
+  await input.evaluate(el=>{
+    el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));
+    el.replaceChildren(Object.assign(document.createElement('p'),{textContent:'次 preedit before finalizer frame'}));el.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));
+  });
+  await page.waitForTimeout(120);assert.equal(await text(page,f),'Final before next frame');
+  assert.equal(await input.evaluate(el=>el.editor.view.composing),true);
+  await input.evaluate(el=>el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));await flush(page);
+  assert.equal(await text(page,f),'次 preedit before finalizer frame');await context.close();
+}
+
 async function importedFocus() {
   const {context,page}=await fresh(),f=await fixture(page);
   await page.evaluate(async f=>{
@@ -198,6 +259,8 @@ try {
   await new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.once('error',reject);server.once('exit',code=>reject(new Error(`Server exited: ${code}`)));});
   await mkdir(`${root}/test-results`,{recursive:true});browser=await ({chromium,webkit}[engine]).launch({headless:true});
   await historyBarrier();await retainedDrafts('checklist');await retainedDrafts('text');await deletedDrafts();await deletedDrafts(true);
-  await compositionBarrier('checklist');await compositionBarrier('text');await importedFocus();await scopedSettlement();await composingDeletion();assert.deepEqual(errors,[]);
+  await compositionBarrier('checklist');await compositionBarrier('text');
+  for(const type of ['checklist','text']){for(const mode of ['preedit','same','finishing','failure'])await overlappingCompositions(type,mode);await immediateCompositionRestart(type);}
+  await importedFocus();await scopedSettlement();await composingDeletion();assert.deepEqual(errors,[]);
   console.log(`${engine} ${basePath||'/'}: history/draft recovery, strict scoped composition/export, original-page navigation and imported focus identity passed.`);
 } finally {await browser?.close();server.kill();}
