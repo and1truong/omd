@@ -213,11 +213,14 @@ function applyTheme(theme) {
   document.documentElement.dataset.theme = resolved; document.querySelector('meta[name=theme-color]').content = resolved === 'dark' ? '#171c1a' : '#f5f4ef';
   if(changed)diagrams?.themeChanged();
 }
-function render(state, { quiet = false } = {}) {
+function render(state, { quiet = false, reminderBlockId, reminderPageId } = {}) {
   applyTheme(state.theme); $('#theme').value = state.theme; $('#notification-mode').value = state.notificationMode;
   $('#save-status').replaceChildren(); const dot = element('span', 'status-dot'); $('#save-status').append(dot, document.createTextNode('Saved here'));
   $('#undo-button').disabled = !store.canUndo(); $('#redo-button').disabled = !store.canRedo();
-  diagrams?.syncHeader(); if (quiet) return;
+  diagrams?.syncHeader(); if (quiet) {
+    if(reminderBlockId && reminderPageId===state.id) { const badge=document.querySelector(`[data-block-id="${CSS.escape(reminderBlockId)}"] .reminder-status`);if(badge)badge.textContent='Delivered'; }
+    return;
+  }
   // Preserve cursor and scroll when a command updates the rest of the page.
   const focused = document.activeElement; const focusId = focused?.id; const selection = focused?.selectionStart == null ? null : [focused.selectionStart, focused.selectionEnd];
   const scroll = [scrollX, scrollY];

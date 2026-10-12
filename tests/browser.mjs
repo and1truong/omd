@@ -117,6 +117,7 @@ try {
   const r = (await call('add_block', { type: 'reminder', title: 'Browser test nudge', dueAt: '2020-01-01T00:00:00Z' })).block;
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
   await page.getByText('Reminder: Browser test nudge', { exact: true }).waitFor();
+  await page.locator(`[data-block-id="${r.id}"] .reminder-status`).filter({hasText:'Delivered'}).waitFor();
   assert.ok((await call('get_notebook')).blocks.find(b => b.id === r.id).firedAt);
   await page.evaluate(() => navigator.serviceWorker.ready);
   await page.waitForFunction(() => !!navigator.serviceWorker.controller);

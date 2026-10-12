@@ -12,7 +12,7 @@ export function startReminders(store, { deliver, onError, locks = globalThis.nav
       // A different tab may have delivered a reminder while this tab was suspended.
       store.reload();
       for (const page of store.getNotebook().pages) for (const reminder of dueReminders(page, now())) {
-        store.dispatch('reminder_fired', { pageId: page.id, blockId: reminder.id, firedAt: new Date(now()).toISOString() }, { quiet: true });
+        store.dispatch('reminder_fired', { pageId: page.id, blockId: reminder.id, firedAt: new Date(now()).toISOString() }, { quiet: true, reminderBlockId:reminder.id, reminderPageId:page.id });
         await deliver({ ...reminder, pageId: page.id }, page.notificationMode);
       }
     };
