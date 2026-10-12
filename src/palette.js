@@ -4,7 +4,7 @@ export function setupPalette(store, { onError, beforeOpen = () => {}, beforeNavi
   let selected = 0, matches = [];
   const run = async (action, args) => { try { await beforeNavigate?.(); return await store.dispatch(action, args); } catch (error) { onError?.(error); return null; } };
   const select = async pageId => { if(await run('page_select', { pageId }))dialog.close(); };
-  function render() {
+  function render(reveal = false) {
     const pages = store.listPages(), query = search.value.toLocaleLowerCase().trim();
     const byId=new Map(pages.map(p=>[p.pageId,p])),chosen=parentSelect.value;
     parentSelect.replaceChildren();const root=document.createElement('option');root.value='';root.textContent='Notebook root';parentSelect.append(root);
@@ -25,6 +25,7 @@ export function setupPalette(store, { onError, beforeOpen = () => {}, beforeNavi
     });
     if (!matches.length) { const empty = document.createElement('p'); empty.className = 'muted'; empty.textContent = 'No matching pages. Start a new one below.'; list.append(empty); }
     if (matches[selected]) search.setAttribute('aria-activedescendant',`palette-${matches[selected].pageId}`); else search.removeAttribute('aria-activedescendant');
+    if(reveal&&matches[selected])document.getElementById(`palette-${matches[selected].pageId}`)?.scrollIntoView({block:'nearest'});
     create.textContent = search.value.trim() ? `+ Create “${search.value.trim()}”` : '+ Create a new page';
   }
   function open() { beforeOpen();search.value = '';parentSelect.value=''; selected = 0; render(); if (!dialog.open) dialog.showModal(); search.focus(); }
@@ -32,7 +33,7 @@ export function setupPalette(store, { onError, beforeOpen = () => {}, beforeNavi
   search.addEventListener('input', () => { selected = 0; render(); });
   search.addEventListener('keydown', e => {
     if (e.isComposing) return;
-    if (['ArrowUp','ArrowDown'].includes(e.key)) { e.preventDefault(); selected = matches.length ? (selected + (e.key === 'ArrowDown' ? 1 : -1) + matches.length) % matches.length : 0; render(); }
+    if (['ArrowUp','ArrowDown'].includes(e.key)) { e.preventDefault(); selected = matches.length ? (selected + (e.key === 'ArrowDown' ? 1 : -1) + matches.length) % matches.length : 0; render(true); }
     if (e.key === 'Enter') { e.preventDefault(); if (matches[selected]) select(matches[selected].pageId); else create.click(); }
   });
   document.addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); e.stopPropagation(); if (dialog.open) dialog.close(); else open(); } }, true);

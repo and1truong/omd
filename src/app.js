@@ -1,3 +1,4 @@
+import { createCompositionGuard } from './composition.js';
 import { createStore } from './store.js';
 import { STORAGE_KEY, allowedTypes, findBlock, findContainer } from './model.js';
 import { startReminders } from './reminders.js';
@@ -21,6 +22,8 @@ export async function openCanvas(blockId,pageId) {
   diagrams.openFocus(blockId);
 }
 export const closeCanvas = async () => {await diagrams?.flushAll();diagrams?.closeFocus();};
+let deferredRender=false;
+const composition=createCompositionGuard({onSettled:()=>{if(deferredRender){deferredRender=false;render(store.getRenderState(),{reset:true});}}});
 const themeQuery = matchMedia('(prefers-color-scheme: dark)');
 export function notify(message, kind = '', persistent = false) {
   const el = element('div', `notice ${kind}`); const text = element('span'); text.textContent = message;
@@ -39,17 +42,16 @@ function editable(value, aria, fn, { multiline = false, className = '', placehol
   const input = element(multiline ? 'textarea' : 'input', className); if (!multiline) input.type = 'text';
   else input.rows = 1;
   input.value = value; input.placeholder = placeholder; input.setAttribute('aria-label', aria); if (id) input.id = id;
-  let composing = false;
-  function write() { fn(input.value); if (multiline) fit(input); }
-  input.addEventListener('compositionstart', () => { composing = true; });
-  input.addEventListener('compositionend', () => { composing = false; write(); });
-  input.addEventListener('input', () => { if (!composing) write(); });
+  const pageId=store.getActivePageId();
+  function write() { const result=fn(input.value,pageId); if(multiline)fit(input);return result; }
+  composition.track(input,write,()=>pageId);
+  input.addEventListener('input',()=>{if(!composition.isComposing(input))write();});
   if (multiline) input.dataset.autofit = 'true'; return input;
 }
 function fit(el) { el.style.height = 'auto'; el.style.height = `${el.scrollHeight}px`; }
 function title(b, glyph) {
   const head = element('div', 'block-heading'); const glyphIcon=icon(b.type);glyphIcon.classList.add('type-glyph');
-  head.append(glyphIcon, editable(b.title, `${b.type} title`, value => action('update_block', { blockId: b.id, patch: { title: value } }, { quiet: true }), { className: 'block-title', placeholder: 'Untitled' })); return head;
+  head.append(glyphIcon, editable(b.title, `${b.type} title`, (value,pageId) => action('update_block', { pageId, blockId: b.id, patch: { title: value } }, { quiet: true }), { className: 'block-title', placeholder: 'Untitled' })); return head;
 }
 function rowsControls(onUp, onDown, onRemove, upDisabled, downDisabled, label) {
   const tools = element('div', 'row-controls');
@@ -104,7 +106,7 @@ function renderBlock(b, containerId, index, count) {
   });more.id=`${b.id}-menu`;controls.append(handle,more);
   shell.append(controls);
   switch (b.type) {
-    case 'text': case 'heading': shell.append(editable(b.text, `${b.type} content`, value => action('update_block', { blockId: b.id, patch: { text: value } }, { quiet: true }), { multiline: true, placeholder: b.type === 'text' ? 'Write something…' : 'A new section', id: `${b.id}-text` })); break;
+    case 'text': case 'heading': shell.append(editable(b.text, `${b.type} content`, (value,pageId) => action('update_block', { pageId, blockId: b.id, patch: { text: value } }, { quiet: true }), { multiline: true, placeholder: b.type === 'text' ? 'Write something…' : 'A new section', id: `${b.id}-text` })); break;
     case 'divider': shell.append(element('hr')); break;
     case 'checklist': renderChecklist(shell, b); break;
     case 'tabs': renderTabs(shell, b); break;
@@ -113,7 +115,7 @@ function renderBlock(b, containerId, index, count) {
     case 'reminder': renderReminder(shell, b); break;
     case 'kanban': renderKanban(shell, b); break;
     case 'mermaid': {
-      shell.append(title(b,'◇'),editable(b.source,'Mermaid Markdown source',async value=>{if(await action('update_block',{blockId:b.id,patch:{source:value}},{quiet:true}))diagrams.updateSource(b.id,value);},{multiline:true,className:'mermaid-source',id:`${b.id}-source`,placeholder:'flowchart LR\n  A --> B'}),diagrams.mount(b,renderPageId)); break;
+      shell.append(title(b,'◇'),editable(b.source,'Mermaid Markdown source',async (value,pageId)=>{if(await action('update_block',{pageId,blockId:b.id,patch:{source:value}},{quiet:true}))diagrams.updateSource(b.id,value);},{multiline:true,className:'mermaid-source',id:`${b.id}-source`,placeholder:'flowchart LR\n  A --> B'}),diagrams.mount(b,renderPageId)); break;
     }
     case 'excalidraw': {
       const head=title(b,'✎');head.append(button('↗ Full page','Open canvas full page',()=>openCanvas(b.id), 'add-inline'));
@@ -127,7 +129,7 @@ function renderChecklist(shell, b) {
   b.items.forEach((item, index) => {
     const row = element('div', `check-row ${item.done ? 'done' : ''}`); const check = element('input'); check.type = 'checkbox'; check.checked = item.done; check.setAttribute('aria-label', `Complete ${item.text || 'item'}`);
     check.addEventListener('change', () => action('checklist_update', { blockId: b.id, itemId: item.id, patch: { done: check.checked } }));
-    const text = editable(item.text, 'Checklist item', value => action('checklist_update', { blockId: b.id, itemId: item.id, patch: { text: value } }, { quiet: true }), { placeholder: 'A little thing to do', id: item.id });
+    const text = editable(item.text, 'Checklist item', (value,pageId) => action('checklist_update', { pageId, blockId: b.id, itemId: item.id, patch: { text: value } }, { quiet: true }), { placeholder: 'A little thing to do', id: item.id });
     text.addEventListener('keydown', async event => { if (event.key === 'Enter') { event.preventDefault(); const result = await action('checklist_add', { blockId: b.id, index: index + 1 }); if (result) requestAnimationFrame(() => document.getElementById(result.itemId)?.focus()); } });
     row.append(check, text, rowsControls(() => action('checklist_move', { blockId: b.id, itemId: item.id, index: index - 1 }), () => action('checklist_move', { blockId: b.id, itemId: item.id, index: index + 1 }), () => action('checklist_remove', { blockId: b.id, itemId: item.id }), index === 0, index === b.items.length - 1, 'checklist item')); shell.append(row);
   });
@@ -146,29 +148,29 @@ function renderTabs(shell, b) {
   tablist.append(button('+', 'Add tab', () => action('tab_add', { blockId: b.id }), 'tab-button tab-plus'));
   const t = b.tabs.find(t => t.id === b.activeTabId); const panel = element('div', 'tab-panel'); panel.id = `${t.id}-panel`; panel.setAttribute('role', 'tabpanel'); panel.setAttribute('aria-labelledby', `${t.id}-button`);
   const edit = element('div', 'tab-editbar'); const i = b.tabs.indexOf(t);
-  edit.append(editable(t.title, 'Rename active tab', value => {
-    action('tab_update', { blockId: b.id, tabId: t.id, title: value }, { quiet: true }); document.getElementById(`${t.id}-button`).textContent = value || 'Untitled';
+  edit.append(editable(t.title, 'Rename active tab', (value,pageId) => {
+    const saved=action('tab_update', { pageId,blockId: b.id, tabId: t.id, title: value }, { quiet: true }); document.getElementById(`${t.id}-button`).textContent = value || 'Untitled';return saved;
   }, { className: 'tab-label-edit', placeholder: 'Tab name' }), rowsControls(() => action('tab_move', { blockId: b.id, tabId: t.id, index: i - 1 }), () => action('tab_move', { blockId: b.id, tabId: t.id, index: i + 1 }), async () => { if (b.tabs.length > 1 && await confirmAction('Remove this tab?', 'Everything inside this tab will be removed. You can undo it.', 'Remove tab')) action('tab_remove', { blockId: b.id, tabId: t.id }); }, i === 0, i === b.tabs.length - 1, 'tab'));
   edit.querySelector('.row-controls').style.opacity = '1'; if (b.tabs.length === 1) edit.querySelector('.delete').disabled = true;
   panel.append(edit, renderer.childList(t.id)); layout.append(tablist, panel); group.append(layout); shell.append(group);
 }
 function renderToggle(shell, b) {
   const head = element('div', 'toggle-head'); const arrow = button(b.open ? '▾' : '▸', `${b.open ? 'Collapse' : 'Expand'} ${b.title}`, () => action('update_block', { blockId: b.id, patch: { open: !b.open } }), 'toggle-arrow'); arrow.setAttribute('aria-expanded', String(b.open)); arrow.setAttribute('aria-controls', `${b.id}-content`);
-  head.append(arrow, editable(b.title, 'Expandable block title', value => action('update_block', { blockId: b.id, patch: { title: value } }, { quiet: true }), { className: 'block-title' })); shell.append(head);
+  head.append(arrow, editable(b.title, 'Expandable block title', (value,pageId) => action('update_block', { pageId, blockId: b.id, patch: { title: value } }, { quiet: true }), { className: 'block-title' })); shell.append(head);
   if (b.open) { const content = element('div', 'toggle-content'); content.id = `${b.id}-content`; content.append(renderer.childList(b.id)); shell.append(content); }
 }
 function renderAccordion(shell, b) {
   shell.append(title(b, '≡')); const group = element('div', 'accordion');
   b.items.forEach((item, i) => {
     const part = element('div', 'accordion-item'); const head = element('div', 'accordion-head'); const arrow = button(item.open ? '▾' : '▸', `${item.open ? 'Collapse' : 'Expand'} ${item.title}`, () => action('accordion_update', { blockId: b.id, itemId: item.id, patch: { open: !item.open } }), 'toggle-arrow'); arrow.setAttribute('aria-expanded', String(item.open)); arrow.setAttribute('aria-controls', `${item.id}-content`);
-    head.append(arrow, editable(item.title, 'Accordion item title', value => action('accordion_update', { blockId: b.id, itemId: item.id, patch: { title: value } }, { quiet: true }), { className: 'block-title' }), rowsControls(() => action('accordion_move', { blockId: b.id, itemId: item.id, index: i - 1 }), () => action('accordion_move', { blockId: b.id, itemId: item.id, index: i + 1 }), async () => { if (await confirmAction('Remove this section?', 'Its contents will be removed too. You can undo it.', 'Remove')) action('accordion_remove', { blockId: b.id, itemId: item.id }); }, i === 0, i === b.items.length - 1, 'accordion section'));
+    head.append(arrow, editable(item.title, 'Accordion item title', (value,pageId) => action('accordion_update', { pageId, blockId: b.id, itemId: item.id, patch: { title: value } }, { quiet: true }), { className: 'block-title' }), rowsControls(() => action('accordion_move', { blockId: b.id, itemId: item.id, index: i - 1 }), () => action('accordion_move', { blockId: b.id, itemId: item.id, index: i + 1 }), async () => { if (await confirmAction('Remove this section?', 'Its contents will be removed too. You can undo it.', 'Remove')) action('accordion_remove', { blockId: b.id, itemId: item.id }); }, i === 0, i === b.items.length - 1, 'accordion section'));
     part.append(head); if (item.open) { const content = element('div', 'accordion-content'); content.id = `${item.id}-content`; content.append(renderer.childList(item.id)); part.append(content); } group.append(part);
   }); shell.append(group, button('+ Add a section', 'Add accordion section', () => action('accordion_add', { blockId: b.id }), 'add-inline'));
 }
 function toLocalDateTime(iso) { if (!iso) return ''; const d = new Date(iso); const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000); return local.toISOString().slice(0, 16); }
 function renderReminder(shell, b) {
   const box = element('div', 'reminder-box'); const reminderIcon=icon('reminder');reminderIcon.classList.add('reminder-icon');
-  const body = element('div', 'reminder-body'); body.append(editable(b.title, 'Reminder text', value => action('update_block', { blockId: b.id, patch: { title: value } }, { quiet: true }), { className: 'block-title' }));
+  const body = element('div', 'reminder-body'); body.append(editable(b.title, 'Reminder text', (value,pageId) => action('update_block', { pageId, blockId: b.id, patch: { title: value } }, { quiet: true }), { className: 'block-title' }));
   const dateRow = element('div', 'reminder-date'); const input = element('input'); input.type = 'datetime-local'; input.value = toLocalDateTime(b.dueAt); input.setAttribute('aria-label', 'Reminder date and time');
   input.addEventListener('change', () => { const dueAt = input.value ? new Date(input.value).toISOString() : ''; action('update_block', { blockId: b.id, patch: { dueAt, enabled: !!dueAt } }); });
   const status = element('span', 'reminder-status'); status.textContent = b.firedAt ? 'Delivered' : !b.enabled ? 'Off' : Date.parse(b.dueAt) <= Date.now() ? 'Due' : 'Scheduled'; dateRow.append(input, status); body.append(dateRow);
@@ -183,12 +185,12 @@ function renderKanban(shell, b) {
     const header = element('div', 'column-header'); const dot = element('span', 'column-dot'); dot.setAttribute('aria-hidden', 'true');
     const handle = button('⠿', 'Drag column', () => {}, 'icon-button block-drag'); handle.style.fontSize = '12px'; handle.style.minWidth = '17px'; draggable(handle, { kind: 'column', blockId: b.id, columnId: col.id });
     const count = element('span', 'card-count'); count.textContent = col.cards.length;
-    header.append(dot, editable(col.title, 'Column title', value => action('column_update', { blockId: b.id, columnId: col.id, title: value }, { quiet: true }), { className: 'column-title' }), count, handle,
+    header.append(dot, editable(col.title, 'Column title', (value,pageId) => action('column_update', { pageId, blockId: b.id, columnId: col.id, title: value }, { quiet: true }), { className: 'column-title' }), count, handle,
       rowsControls(() => action('column_move', { blockId: b.id, columnId: col.id, index: ci - 1 }), () => action('column_move', { blockId: b.id, columnId: col.id, index: ci + 1 }), async () => { if (await confirmAction('Remove this column?', `${col.cards.length} card(s) in this column will also be removed. You can undo it.`, 'Remove column')) action('column_remove', { blockId: b.id, columnId: col.id }); }, ci === 0, ci === b.columns.length - 1, 'column'));
     column.append(header); const cards = element('div', 'cards');
     col.cards.forEach((card, i) => {
       const el = element('div', 'kanban-card'); el.dataset.cardId = card.id;
-      el.append(editable(card.title, 'Card title', value => action('card_update', { blockId: b.id, cardId: card.id, patch: { title: value } }, { quiet: true }), { multiline: true, className: 'card-title', placeholder: 'A small next step', id: card.id }), editable(card.description, 'Card description', value => action('card_update', { blockId: b.id, cardId: card.id, patch: { description: value } }, { quiet: true }), { multiline: true, className: 'card-description', placeholder: 'Add a note…' }));
+      el.append(editable(card.title, 'Card title', (value,pageId) => action('card_update', { pageId, blockId: b.id, cardId: card.id, patch: { title: value } }, { quiet: true }), { multiline: true, className: 'card-title', placeholder: 'A small next step', id: card.id }), editable(card.description, 'Card description', (value,pageId) => action('card_update', { pageId, blockId: b.id, cardId: card.id, patch: { description: value } }, { quiet: true }), { multiline: true, className: 'card-description', placeholder: 'Add a note…' }));
       const tools = element('div', 'card-tools'); const handle = button('⠿', 'Drag card', () => {}, 'icon-button block-drag'); handle.style.fontSize = '12px'; draggable(handle, { kind: 'card', blockId: b.id, cardId: card.id, columnId: col.id });
       const select = element('select', 'card-move'); select.setAttribute('aria-label', 'Move card to column');
       b.columns.forEach(c => { const o = element('option'); o.value = c.id; o.textContent = `→ ${c.title || 'Untitled'}`; select.append(o); }); select.value = col.id;
@@ -230,6 +232,7 @@ function applyTheme(theme) {
 }
 let renderPageId;
 function render(state, { quiet = false, reminderBlockId, reminderPageId, changedBlockId, changedPageId, reset = false } = {}) {
+  if(composition.hasActive()){deferredRender=true;return;}
   applyTheme(state.theme); $('#theme').value = state.theme; $('#notification-mode').value = state.notificationMode;
 
   $('#undo-button').disabled = !store.canUndo(); $('#redo-button').disabled = !store.canRedo();
@@ -286,7 +289,7 @@ async function boot() {
   renderer=createRenderCache({makeBlock:renderBlock,makeList:makeBlockList,
     observeBlock:(id,fn)=>store.subscribeBlock(id,fn),observeList:(id,fn)=>store.subscribeContainer(id,fn),
     onChange:({blockId,containerId})=>{
-      const state=store.getRenderState(),options=store.getLastEvent();if(options.quiet||options.reset||state.id!==renderPageId)return;
+      const state=store.getRenderState(),options=store.getLastEvent();if(composition.hasActive()){deferredRender=true;return;}if(options.quiet||options.reset||state.id!==renderPageId)return;
       const id=containerId??renderer.containerFor(blockId);if(id)dirtyContainers.add(id);
     }
   });
@@ -299,15 +302,15 @@ async function boot() {
   });
   shell=setupShell(store,{beforeNavigate:()=>diagrams.beforeNavigate(),openPalette,confirm:confirmAction,onError:error=>notify(error.message,'error',true)});
   store.subscribe(render); render(store.getRenderState());
-  store.subscribeStatus(({pending,navigating,error})=>{$('#page-title').disabled=navigating;$('#page-subtitle').disabled=navigating;$('#notebook').inert=navigating;const status=$('#save-status');status.replaceChildren();const dot=element('span','status-dot');status.append(dot,document.createTextNode(pending?'Saving…':error?'Not saved':'Saved'));});
+  store.subscribeStatus(({pending,navigating,error})=>{$('#page-title').disabled=navigating&&!composition.isComposing($('#page-title'));$('#page-subtitle').disabled=navigating&&!composition.isComposing($('#page-subtitle'));$('#notebook').inert=navigating&&!composition.hasActive();const status=$('#save-status');status.replaceChildren();const dot=element('span','status-dot');status.append(dot,document.createTextNode(pending?'Saving…':error?'Not saved':'Saved'));});
   palette = setupPalette(store, { onError: error => notify(error.message, 'error', true), beforeOpen:()=>shell.closeMobile(), beforeNavigate:()=>diagrams.beforeNavigate() });
   let fitFrame;window.addEventListener('resize',()=>{cancelAnimationFrame(fitFrame);fitFrame=requestAnimationFrame(()=>{for(const el of document.querySelectorAll('[data-autofit],.auto-height'))fit(el);});});
   $('#canvas-stage-close').addEventListener('click',closeCanvas);$('#canvas-stage-pages').addEventListener('click',openPalette);
   window.addEventListener('pagehide',event=>{flushDiagrams().then(()=>{if(!event.persisted)return store.close();}).catch(error=>notify(error.message,'error',true));});window.addEventListener('beforeunload',flushDiagrams);
   for (const [selector, key] of [['#page-title', 'title'], ['#page-subtitle', 'subtitle']]) {
-    const el = $(selector); let composing = false;
-    const write = () => { action('set_page', { [key]: el.value }, { quiet: true }); fit(el); };
-    el.addEventListener('compositionstart', () => { composing = true; }); el.addEventListener('compositionend', () => { composing = false; write(); }); el.addEventListener('input', () => { if (!composing) write(); });
+    const el = $(selector);
+    const write = pageId => {const saved=action('set_page', {pageId,[key]:el.value}, {quiet:true});fit(el);return saved;};
+    composition.track(el,write,()=>store.getActivePageId());el.addEventListener('input',()=>{if(!composition.isComposing(el))write(store.getActivePageId());});
   }
   $('#theme').addEventListener('change', e => action('set_page', { theme: e.target.value })); themeQuery.addEventListener('change', () => applyTheme(store.getRenderState().theme));
   $('#notification-mode').addEventListener('change', e => action('set_page', { notificationMode: e.target.value }));

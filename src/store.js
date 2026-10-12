@@ -45,6 +45,7 @@ export async function createStore(storage, options = {}) {
   let channel=typeof window!=='undefined'&&typeof BroadcastChannel!=='undefined'?new BroadcastChannel(`${repository.name}.changes`):null;
   const api={
     databaseName:()=>repository.name,
+    getRevision:()=>state.getState().meta.revision,
     getActivePageId:()=>state.getState().meta.activePageId,
     getState:()=>structuredClone(state.getState().page),
     getRenderState:()=>state.getState().page,

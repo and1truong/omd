@@ -4,6 +4,7 @@ export const FORMAT_VERSION = 1;
 export const STORAGE_KEY = 'omd.notebook.v1';
 export const BLOCK_TYPES = ['text', 'heading', 'checklist', 'tabs', 'toggle', 'accordion', 'reminder', 'kanban', 'divider', 'mermaid', 'excalidraw'];
 const THEMES = ['system', 'light', 'dark'];
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/;
 const MODES = ['notification', 'alert', 'toast'];
 export const uid = () => globalThis.crypto.randomUUID();
 const copy = value => structuredClone(value);
@@ -14,7 +15,7 @@ function string(value, label) {
 }
 function integer(value, max) { assert(Number.isInteger(value) && value >= 0 && value <= max, 'Invalid position.'); }
 function boolean(value, label) { assert(typeof value === 'boolean', `${label} must be true or false.`); }
-function date(value, label) { assert(typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value)), `${label} must be an ISO date-time with a timezone.`); }
+function date(value, label) { assert(typeof value === 'string' && ISO_DATE.test(value) && Number.isFinite(Date.parse(value)), `${label} must be an ISO date-time with a timezone.`); }
 function fields(value, allowed) {
   assert(object(value), 'Expected an object.');
   for (const key of Object.keys(value)) assert(allowed.includes(key), `Unknown field: ${key}.`);
@@ -80,13 +81,13 @@ export function validateNotebook(notebook) {
           assert(axes.length < 2, 'Tabs are limited to two levels.');
           assert(axes.at(-1) !== b.orientation, 'Nested tabs must use the opposite orientation.');
           list(b.tabs); assert(b.tabs.length > 0, 'Keep at least one tab.');
-          for (const tab of b.tabs) { fields(tab, ['id', 'title', 'blocks']); id(tab.id); string(tab.title, 'Tab title', 200); visit(tab.blocks, [...axes, b.orientation], depth + 1); }
+          for (const tab of b.tabs) { assert(tab.id!=='page','The page container ID is reserved.'); fields(tab, ['id', 'title', 'blocks']); id(tab.id); string(tab.title, 'Tab title', 200); visit(tab.blocks, [...axes, b.orientation], depth + 1); }
           assert(b.tabs.some(t => t.id === b.activeTabId), 'Active tab does not exist.'); break;
         }
-        case 'toggle': fields(b, ['id', 'type', 'title', 'open', 'blocks']); string(b.title, 'Toggle title', 200); boolean(b.open, 'Open'); visit(b.blocks, axes, depth + 1); break;
+        case 'toggle': assert(b.id!=='page','The page container ID is reserved.'); fields(b, ['id', 'type', 'title', 'open', 'blocks']); string(b.title, 'Toggle title', 200); boolean(b.open, 'Open'); visit(b.blocks, axes, depth + 1); break;
         case 'accordion':
           fields(b, ['id', 'type', 'title', 'items']); string(b.title, 'Accordion title', 200); list(b.items);
-          for (const item of b.items) { fields(item, ['id', 'title', 'open', 'blocks']); id(item.id); string(item.title, 'Accordion item', 200); boolean(item.open, 'Open'); visit(item.blocks, axes, depth + 1); } break;
+          for (const item of b.items) { assert(item.id!=='page','The page container ID is reserved.'); fields(item, ['id', 'title', 'open', 'blocks']); id(item.id); string(item.title, 'Accordion item', 200); boolean(item.open, 'Open'); visit(item.blocks, axes, depth + 1); } break;
         case 'reminder':
           fields(b, ['id', 'type', 'title', 'dueAt', 'enabled', 'firedAt']); string(b.title, 'Reminder title', 200); boolean(b.enabled, 'Enabled');
           if (b.dueAt !== '') date(b.dueAt, 'Reminder date');
@@ -217,7 +218,7 @@ export function mutatePage(doc, action, input = {}, validate = true) {
 export function parseImport(raw) {
   assert(typeof raw === 'string', 'Import must be JSON text.');
   let value; try { value = JSON.parse(raw); } catch { throw new Error('This file is not valid JSON.'); }
-  return validateNotebook(value);
+  return validateNotebook(upgradePageDates(value));
 }
 
 export function dueReminders(notebook, now = Date.now()) {
@@ -239,4 +240,13 @@ export function demoNotebook() {
   const toggle = makeBlock('toggle', { title: 'Notes for another day' }); toggle.open = false;
   toggle.blocks = [makeBlock('text', { text: 'Nothing gets lost here. Your notebook is saved in this browser as you go.' })];
   doc.blocks = [intro, tasks, tabs, toggle, board]; return validateNotebook(doc);
+}
+
+/** v1 previously allowed any Date.parse-compatible string. Normalize only import/migration data. */
+export function upgradePageDates(page) {
+  if(!page||page.version!==1)return page;
+  const normalize=value=>typeof value==='string'&&!ISO_DATE.test(value)&&Number.isFinite(Date.parse(value))?new Date(Date.parse(value)).toISOString():value;
+  page.updatedAt=normalize(page.updatedAt);const stack=Array.isArray(page.blocks)?[...page.blocks]:[];
+  while(stack.length){const b=stack.pop();if(!b||typeof b!=='object')continue;if(b.type==='reminder'){b.dueAt=normalize(b.dueAt);b.firedAt=normalize(b.firedAt);}const children=b.type==='toggle'?[b]:b.type==='tabs'?b.tabs:b.type==='accordion'?b.items:[];if(Array.isArray(children))for(const child of children)if(Array.isArray(child?.blocks))for(const nested of child.blocks)stack.push(nested);}
+  return page;
 }

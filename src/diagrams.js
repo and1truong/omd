@@ -1,10 +1,11 @@
 import { findBlock } from './model.js';
 import { mermaidSource } from './scene.js';
 const stateKeys=['viewBackgroundColor','scrollX','scrollY','zoom','currentItemStrokeColor','currentItemBackgroundColor','currentItemFillStyle','currentItemStrokeWidth','currentItemStrokeStyle','currentItemRoughness','currentItemOpacity','currentItemFontFamily','currentItemFontSize','currentItemTextAlign','currentItemStartArrowhead','currentItemEndArrowhead','gridSize','gridStep','gridModeEnabled'];
+export const diagramKey=(pageId,blockId)=>JSON.stringify([pageId,blockId]);
 export function createDiagramManager(store,{notify}) {
   const entries=new Map(); let used=new Set(),focused=null;
   const theme=()=>document.documentElement.dataset.theme === 'dark'?'dark':'light';
-  const key=(pageId,blockId)=>`${pageId}:${blockId}`;
+  const key=diagramKey;
   function get(pageId,blockId) { return findBlock(store.getRenderState(),blockId).block; }
   async function flush(entry) {
     if (!entry.pending) return;
@@ -25,7 +26,7 @@ export function createDiagramManager(store,{notify}) {
     entry.source=source; const token=++entry.token; clearTimeout(entry.timer);
     entry.timer=setTimeout(async()=>{
       try {
-        const definition=mermaidSource(entry.source); if(!definition) { entry.preview.textContent='Write a Mermaid diagram to see it here.'; return; }
+        const definition=mermaidSource(entry.source); if(!definition) { entry.error.textContent='';entry.preview.textContent='Write a Mermaid diagram to see it here.'; return; }
         const engine=await import('./mermaid-engine.js');
         if(entry.disposed || token!==entry.token)return;
         const result=await engine.renderDiagram(`diagram-${crypto.randomUUID()}`,definition,theme()==='dark');
