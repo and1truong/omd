@@ -59,6 +59,12 @@ export function setupShell(store,{beforeNavigate,openPalette,onError}) {
   document.getElementById('sidebar-search').addEventListener('click',()=>{closeMobile();openPalette();});
   document.getElementById('wide-page').addEventListener('change',event=>safeView({contentWidth:event.target.checked?'wide':'reading'}));
   sidebar.addEventListener('close',()=>{if(media.matches&&!sidebar.open){drawerOpen=false;toggle.setAttribute('aria-expanded','false');}});
+  sidebar.addEventListener('keydown',event=>{
+    if(!media.matches||!sidebar.open||event.key!=='Tab')return;
+    const buttons=[...sidebar.querySelectorAll('button:not(:disabled)')],first=buttons[0],last=buttons.at(-1);
+    if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus();}
+    else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}
+  });
   media.addEventListener('change',()=>{drawerOpen=false;if(sidebar.open)sidebar.close();sync();});
   document.addEventListener('click',event=>{if(!menu.contains(event.target))menu.open=false;});
   document.addEventListener('keydown',event=>{if(event.key==='Escape')menu.open=false;});

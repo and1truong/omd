@@ -194,11 +194,13 @@ try {
   await page.evaluate(()=>scrollTo(0,0));await page.screenshot({ path: `${root}/test-results/desktop.png` });
   await call('set_page',{theme:'dark'});await page.screenshot({path:`${root}/test-results/desktop-dark.png`});await call('set_page',{theme:'system'});
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator('#sidebar').waitFor({state:'hidden'});
   assert.deepEqual(await call('get_view'),{sidebarOpen:false,contentWidth:'reading'});
   await page.locator('#sidebar-toggle').click();assert.ok(await page.locator('#sidebar').isVisible());
   assert.ok(await page.evaluate(()=>document.getElementById('sidebar').contains(document.activeElement)),'Drawer opening must move keyboard focus inside.');
   await page.screenshot({path:`${root}/test-results/mobile-drawer.png`});
   await page.keyboard.press('Shift+Tab');assert.ok(await page.evaluate(()=>document.getElementById('sidebar').contains(document.activeElement)),'Native modal must trap focus.');
+  await page.keyboard.press('Tab');assert.ok(await page.evaluate(()=>document.activeElement===document.getElementById('sidebar-close')),'Drawer focus must wrap in both directions.');
   await page.getByRole('button',{name:'Switch to A second page',exact:true}).click();assert.ok(await page.locator('#sidebar').isHidden());
   assert.equal(await page.locator('#page-title').inputValue(),'A second page');await call('page_select',{pageId:firstPage});
   await call('set_view',{sidebarOpen:true});await page.keyboard.press('Escape');assert.ok(await page.locator('#sidebar').isHidden());
@@ -208,6 +210,7 @@ try {
   await menuShell.getByRole('button',{name:'Block actions',exact:true}).click();await page.locator('#block-actions-dialog').getByRole('button',{name:'Move block up',exact:true}).click();
   const order=(await call('get_notebook')).blocks;assert.equal(order.at(-2).id,menuBlock.id);
   await menuShell.getByRole('button',{name:'Block actions',exact:true}).click();await page.locator('#block-actions-dialog').getByRole('button',{name:'Delete block',exact:true}).click();await page.locator('#confirm-dialog').getByRole('button',{name:'Remove',exact:true}).click();
+  await menuShell.waitFor({state:'detached'});
   assert.equal(await menuShell.count(),0);
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Page must not overflow on mobile.');
   await page.evaluate(()=>scrollTo(0,0));await page.screenshot({ path: `${root}/test-results/mobile.png` });
