@@ -335,7 +335,7 @@ function renderTabs(shell:HTMLElement,b:BlockOf<'tabs'>) {
           recovery?.querySelectorAll('button').forEach(button=>button.disabled=true);
           if(value!==original)await store.dispatch('tab_update',{pageId,blockId:b.id,tabId:t.id,title:value},{quiet:true});
           editTab.textContent=value||'Untitled';editTab.setAttribute('aria-label',`Open ${value||'tab'}`);editRename.setAttribute('aria-label',`Rename ${value||'Untitled'} tab`);close(focus);
-        }).catch(error=>{input.disabled=false;recovery?.querySelectorAll('button').forEach(button=>button.disabled=false);failed=true;recover();notify(errorOf(error).message,'error',true);throw error;}).finally(()=>{pending=undefined;});return pending;
+        }).catch(error=>{requested=false;input.disabled=false;recovery?.querySelectorAll('button').forEach(button=>button.disabled=false);failed=true;recover();notify(errorOf(error).message,'error',true);throw error;}).finally(()=>{pending=undefined;});return pending;
       }
       const observer=new MutationObserver(()=>{if(failed&&!finished)recover();else if(!input.isConnected)void finish().catch(()=>{});});observer.observe(document.body,{childList:true,subtree:true});
       composition.track(input,()=>requested?finish(false,true).catch(()=>{}):undefined,()=>pageId);

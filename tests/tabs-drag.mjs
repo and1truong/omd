@@ -146,9 +146,11 @@ async function failedRenameRecovery(orientation,nested=false) {
   const restore=()=>page.evaluate(()=>{IDBObjectStore.prototype.put=window.savedPut;});
   const start=async value=>{await header(id).press('F2');await titleInput().evaluate((el,value)=>{window.failedIME=el;el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.value=value;},value);};
   const end=async()=>{await fail();await page.evaluate(()=>window.failedIME.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));await page.getByRole('button',{name:'Retry tab rename',exact:true}).waitFor();await page.waitForFunction(()=>window.failedIME.isConnected&&!window.failedIME.disabled);await page.evaluate(()=>window.tabsApp.getStore().idle());};
-  const draft='Tiếng Việt 世界 — retry';await start(draft);await reorder(tabs.id,tabs.ids[2],tabs.ids[3],true,orientation);
+  let draft='Tiếng Việt 世界 — retry';await start(draft);await reorder(tabs.id,tabs.ids[2],tabs.ids[3],true,orientation);
   const before=await revision(),history=await page.evaluate(()=>window.tabsApp.getStore().residency().undoEntries);await end();
   assert.equal(await titleInput().inputValue(),draft);assert.equal(await titleInput().isVisible(),true);assert.equal(await revision(),before);
+  await restore();draft+=' — second composition';await titleInput().evaluate((input,value)=>{input.focus();input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));input.value=value;input.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));},draft);
+  await page.evaluate(async()=>{await new Promise(requestAnimationFrame);await window.tabsApp.getStore().idle();});assert.equal(await revision(),before,'new composition after a failed save requires a new save request');assert.equal(await titleInput().inputValue(),draft);
   await screenshot(`${orientation}-${nested?'nested':'root'}-recovery`);
   await call('page_select',{pageId:destination});assert.equal(await titleInput().isVisible(),true);assert.equal(await titleInput().inputValue(),draft);assert.equal(await page.locator('#notices .tab-title-input').count(),1);
   await page.evaluate(()=>{window.savedCopy=navigator.clipboard.writeText; navigator.clipboard.writeText=value=>{window.copiedTabDraft=value;return Promise.resolve();};});
