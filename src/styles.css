@@ -65,6 +65,17 @@ dialog.sidebar[open] { display: flex; flex-direction: column; }
 #page-count { font-size: 10px; }
 .sidebar-pages { min-height: 0; overflow-y: auto; flex: 1; padding: 0 9px 15px; scrollbar-width: thin; }
 .sidebar-page { display: flex; align-items: center; gap: 0; border-radius: 5px; }
+.sidebar-page { padding-left: calc(var(--page-depth,0) * 12px); }
+.page-tree-toggle { min-width: 19px; width: 19px; min-height: 26px; padding: 2px; }
+.page-tree-toggle .ui-icon { width: 12px; height: 12px; }
+.page-ancestors { display: flex; align-items: center; max-width: 45%; overflow-x: auto; scrollbar-width: none; flex-shrink: 1; }
+.ancestor-segment { display: flex; align-items: center; gap: 8px; flex-shrink: 0; font-size: 12px; color: var(--secondary); }
+.ancestor-segment button { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 4px; border-radius: 4px; }
+.ancestor-segment button:hover { background: var(--wash); }
+.palette-page-path { display: block; font-size: 10px; color: var(--secondary); margin-top: 2px; }
+.palette-parent { display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--secondary); border-top: 1px solid var(--line); padding: 12px 0 0; }
+.palette-parent select { flex: 1; min-width: 0; }
+#page-parent-target { min-width: 0; max-width: 100%; }
 .sidebar-page:has([aria-current=page]) { background: var(--soft); }
 .sidebar-page:hover { background: var(--line); }
 .sidebar-page-select { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; text-align: left; padding: 7px 9px; font-size: 12px; border-radius: 5px; }
@@ -231,6 +242,7 @@ h3 { font-size: 13px; margin: 0 0 12px; }
   .sidebar-page-select, .sidebar-shortcut { min-height: 42px; font-size: 13px; }
   .app-header { padding: 0 10px; gap: 6px; }
   .app-breadcrumb, .breadcrumb-divider, .save-status { display: none; }
+  .ancestor-segment:not(:last-child) { display: none; }
   .header-left, .header-right { gap: 3px; }
   .page-switcher { font-size: 12px; padding: 4px; }
   .paper { padding: 28px 22px 70px; }

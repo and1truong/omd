@@ -10,7 +10,7 @@ test('v1 migration preserves page IDs, content, settings and original bytes', ()
   const raw=JSON.stringify(legacy); data.setItem(STORAGE_KEY,raw);
   const store=createStore(data); assert.equal(store.getState().id,legacy.id); assert.equal(store.getState().title,'Existing work'); assert.equal(store.getState().theme,'dark');
   assert.equal(data.getItem(`${STORAGE_KEY}.v1-backup`),raw);
-  assert.equal(JSON.parse(data.getItem(STORAGE_KEY)).version,2);
+  assert.equal(JSON.parse(data.getItem(STORAGE_KEY)).version,3);
   assert.equal(createStore(data).getNotebook().id,store.getNotebook().id);
 });
 test('failed migration never replaces the original saved page', () => {

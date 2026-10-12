@@ -20,6 +20,14 @@ Node 22 or newer. Run `npm start` (builds first) and open localhost port 3000. R
 
 Press Cmd+K on macOS or Ctrl+K elsewhere, or click the page button. Search and switch with arrows/Enter, create a named page, or use the per-page arrows to reorder the notebook. Each page has its own title, content and reminder preferences. All pages and their order/selection export together. Existing single-page storage upgrades automatically, preserving the original bytes in a v1 backup key.
 
+Pages can contain subpages up to 32 levels, counting root pages as level 1. Use a sidebar page menu's **Add subpage**, the current page menu's **New subpage**, or choose **Create under** in Cmd/Ctrl+K. Sidebar branches expand/collapse; breadcrumbs navigate to ancestors. Collapsed branches discard their navigation DOM, while command-palette search still finds every page. Selecting a hidden page reveals its ancestors. Collapse preferences persist separately on this device.
+
+**Move to…** chooses a new parent, **Move to notebook** promotes a page to the root, and up/down actions reorder siblings. Moving a parent carries its entire subtree. The destination picker excludes the moving page and its descendants; the model independently rejects cycles. Deleting a page deletes its subtree after UI confirmation, preserves at least one page, selects a surviving parent when needed, and supports undo.
+
+Notebook exports use version 3 with a flat page collection and persistent parent links. Version 1 single-page and version 2 flat notebooks import/migrate as root pages. Automatic upgrades retain the original bytes under `.v1-backup` or `.v2-backup`; failed writes preserve the original notebook. Page hierarchy traversal and cycle checks are iterative, with a maximum of 32 levels. Each page's block schema stays unchanged.
+
+WebMCP `page_add` accepts optional `parentId`; `page_move` accepts optional `parentId` and sibling `index`. Empty parent ID means notebook root, omission preserves the parent when moving. `list_pages` returns tree order, parent IDs, depth, sibling positions and child/descendant counts. `page_remove` deletes the whole subtree. `set_view` can set `collapsedPageIds`.
+
 ## Diagram blocks
 
 Add **Mermaid** for editable raw diagram definitions or fenced Mermaid Markdown, with live preview, syntax errors kept beside the source, and theme-aware rendering. Source remains editable/saved even if a diagram has syntax errors. Rendering uses Mermaid 12.1.0 in strict mode, disabling interactive links and protecting security configuration from source directives.
@@ -69,7 +77,7 @@ Run `npm test` (no installation required) and `npm run build`. Tests cover atomi
 
 For native browser integration, install the development dependency with `npm install`, install Chromium with `npx playwright install chromium`, build, then run `npm run test:browser`. The browser test enables Chrome's native WebMCP feature, discovers and executes tools through the real registry (no polyfill), checks visible UI results and invalid inputs, then verifies mobile layout, themes, reminders, import confirmation, persistent edits and offline reopening. CI runs both sets of checks and uploads the static app and screenshots. An unavailable browser binary or unsupported native API is a verification failure, not a mocked success.
 
-Local verification: 40 model, multi-page migration, scene, reminder, asset and WebMCP adapter tests pass; JavaScript syntax checks pass. Diagram bundling and native browser verification run in CI. Browser/extension compatibility requires the native browser check and a real extension session; adapter tests alone do not verify a Gemini integration.
+Local verification: 48 model, multi-page migration, scene, reminder, asset and WebMCP adapter tests pass; JavaScript syntax checks pass. Diagram bundling and native browser verification run in CI. Browser/extension compatibility requires the native browser check and a real extension session; adapter tests alone do not verify a Gemini integration.
 
 ## PR stack
 
@@ -80,6 +88,8 @@ Local verification: 40 model, multi-page migration, scene, reminder, asset and W
 - #6: `codex/omd-05-diagrams` → `codex/omd-04-pages`: Mermaid and Excalidraw, including full-page canvas.
 - App shell: `codex/omd-07-app-shell` → `codex/omd-06-lazy-render`: full-window workspace, page sidebar and contextual actions.
 - Rendering follow-up: `codex/omd-06-lazy-render` → `codex/omd-05-diagrams`: lazy visible content and block-scoped DOM reconciliation.
+
+- Page tree: `codex/omd-08-page-tree` → `codex/omd-07-app-shell`: nested pages, tree navigation and subtree moves.
 
 The final branch contains the complete app. Review the incremental diffs; merge bottom to top and retarget each remaining PR after its predecessor merges.
 

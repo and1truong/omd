@@ -1,5 +1,5 @@
 import { STORAGE_KEY, walkBlocks } from './model.js';
-import { initialNotebook, wrapPage, validateBook, parseBook, getPage, applyBookAction } from './notebook.js';
+import { initialNotebook, wrapPage, validateBook, parseBook, getPage, listPages, applyBookAction } from './notebook.js';
 
 /** Versioned multi-page notebook; getState preserves the existing active-page API. */
 export function createStore(storage, { key = STORAGE_KEY, initial = initialNotebook } = {}) {
@@ -13,9 +13,11 @@ export function createStore(storage, { key = STORAGE_KEY, initial = initialNoteb
   let original; try { original = storage.getItem(key); } catch { throw new Error('Browser storage is unavailable. Enable storage to use omd.'); }
   book = read();
   if (!book) { const value = initial(); book = value.format === 'omd' ? wrapPage(value) : value; validateBook(book); }
-  if (!original || JSON.parse(original).format === 'omd') {
+  const legacy=original?JSON.parse(original):null;
+  if (!original || legacy.format === 'omd' || legacy.version===2) {
     try {
-      if (original && storage.getItem(`${key}.v1-backup`) === null) storage.setItem(`${key}.v1-backup`, original);
+      const backupKey=`${key}.v${legacy?.format==='omd'?1:2}-backup`;
+      if (original && storage.getItem(backupKey) === null) storage.setItem(backupKey, original);
       storage.setItem(key, JSON.stringify(book));
     } catch { throw new Error('Could not save or migrate browser storage. Your original saved data is intact; free space, then reload.'); }
   }
@@ -40,10 +42,10 @@ export function createStore(storage, { key = STORAGE_KEY, initial = initialNoteb
     getState: () => structuredClone(getPage(book)),
     getPage: pageId => structuredClone(getPage(book, pageId)),
     getNotebook: () => structuredClone(book),
-    listPages: () => book.pages.map((page, index) => ({ pageId: page.id, title: page.title, subtitle: page.subtitle, index, active: page.id === book.activePageId })),
+    listPages: () => listPages(book),
     dispatch(action, input = {}, options = {}) {
       const { state: next, result } = applyBookAction(book, action, input);
-      commit(next, { changedBlockId: input.blockId, changedPageId: input.pageId ?? next.activePageId, ...options, history: options.history ?? !['reminder_fired','page_select'].includes(action) });
+      commit(next, { actionName:action, changedBlockId: input.blockId, changedPageId: input.pageId ?? next.activePageId, ...options, history: options.history ?? !['reminder_fired','page_select'].includes(action) });
       return { ...result, revision: book.revision };
     },
     subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
