@@ -10,7 +10,7 @@ export interface SceneFile extends JsonObject {id:ID;dataURL:string}
 export interface Scene {elements:SceneElement[];appState:JsonObject;files:Record<ID,SceneFile>}
 export interface TextBlock {id:ID;type:'text' | 'heading';text:string}
 export interface DividerBlock {id:ID;type:'divider'}
-export interface ChecklistItem {id:ID;text:string;done:boolean}
+export interface ChecklistItem {id:ID;text:string;done:boolean;children?:ChecklistItem[]}
 export interface ChecklistBlock {id:ID;type:'checklist';title:string;items:ChecklistItem[]}
 export interface Tab {id:ID;title:string;blocks:Block[]}
 export interface TabsBlock {id:ID;type:'tabs';title:string;orientation:Orientation;activeTabId:ID;tabs:Tab[]}
@@ -40,7 +40,7 @@ export interface CommandInputs {
   add_block:BlockOptions & {type:BlockType;containerId?:ID;index?:number};
   update_block:{blockId:ID;patch:BlockPatch};
   remove_block:{blockId:ID};move_block:{blockId:ID;containerId:ID;index?:number};
-  checklist_add:{blockId:ID;text?:string;index?:number};checklist_update:{blockId:ID;itemId:ID;patch:Partial<Pick<ChecklistItem,'text'|'done'>>};checklist_remove:{blockId:ID;itemId:ID};checklist_move:{blockId:ID;itemId:ID;index:number};
+  checklist_add:{blockId:ID;text?:string;parentId?:ID;index?:number};checklist_update:{blockId:ID;itemId:ID;patch:Partial<Pick<ChecklistItem,'text'|'done'>>};checklist_remove:{blockId:ID;itemId:ID};checklist_move:{blockId:ID;itemId:ID;parentId?:ID;index:number};
   tab_add:{blockId:ID;title?:string;index?:number};tab_update:{blockId:ID;tabId:ID;title:string};tab_select:{blockId:ID;tabId:ID};tab_move:{blockId:ID;tabId:ID;index:number};tab_remove:{blockId:ID;tabId:ID};
   accordion_add:{blockId:ID;title?:string;index?:number};accordion_update:{blockId:ID;itemId:ID;patch:Partial<Pick<AccordionItem,'title'|'open'>>};accordion_remove:{blockId:ID;itemId:ID};accordion_move:{blockId:ID;itemId:ID;index:number};
   column_add:{blockId:ID;title?:string;index?:number};column_update:{blockId:ID;columnId:ID;title:string};column_remove:{blockId:ID;columnId:ID};column_move:{blockId:ID;columnId:ID;index:number};

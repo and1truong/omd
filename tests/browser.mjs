@@ -91,6 +91,12 @@ try {
   await call('checklist_add', { blockId: checklist.id, text: 'An agent-created task' });
   await page.getByRole('checkbox', { name: 'Complete An agent-created task', exact: true }).check();await settle();
   notebook = await call('get_notebook'); assert.ok(notebook.blocks[0].items[0].done);
+  const nestedTask=(await call('checklist_add',{blockId:checklist.id,parentId:notebook.blocks[0].items[0].id,text:'A nested agent task'})).itemId;
+  await call('checklist_update',{blockId:checklist.id,itemId:nestedTask,patch:{done:true}});
+  assert.ok((await call('get_notebook')).blocks[0].items[0].children[0].done);
+  await call('checklist_move',{blockId:checklist.id,itemId:nestedTask,parentId:'',index:1});
+  assert.equal((await call('get_notebook')).blocks[0].items[1].id,nestedTask);
+  await call('checklist_remove',{blockId:checklist.id,itemId:nestedTask});
   await page.locator('#page-title').fill('Written by a person');
   await call('set_view',{sidebarOpen:false,contentWidth:'wide',collapsedPageIds:[]});
   await page.reload(); await page.waitForFunction(() => document.getElementById('agent-status').textContent.includes('50 tools'));

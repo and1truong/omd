@@ -9,6 +9,23 @@ async function setup() {
 }
 const call = (tools, name, input = {}) => tools.find(t => t.name === `omd_${name}`).execute(input);
 
+test('checklist tools expose nested parent selection and reject fifth levels and cycles',async()=>{
+  const store=await setup(),tools=createTools(store),blockId=(await call(tools,'add_block',{type:'checklist'})).blockId;
+  const root=(await call(tools,'checklist_add',{blockId,text:'Root'})).itemId;
+  let parentId=root;
+  for(let level=2;level<=4;level++)parentId=(await call(tools,'checklist_add',{blockId,parentId,text:`Level ${level}`})).itemId;
+  const before=await store.export();
+  await assert.rejects(()=>call(tools,'checklist_add',{blockId,parentId}),/4 levels/);
+  await assert.rejects(()=>call(tools,'checklist_add',{blockId,parentId:42}),/text/);
+  await assert.rejects(()=>call(tools,'checklist_move',{blockId,itemId:root,parentId,index:0}),/descendants/);
+  assert.equal(await store.export(),before);
+  await call(tools,'checklist_update',{blockId,itemId:parentId,patch:{done:true}});
+  await call(tools,'checklist_move',{blockId,itemId:parentId,parentId:'',index:1});
+  const page=await call(tools,'get_notebook');assert.equal(page.blocks[0].items[1].done,true);
+  await call(tools,'checklist_remove',{blockId,itemId:root});
+  assert.equal((await call(tools,'get_notebook')).blocks[0].items.length,1);await store.close();
+});
+
 test('registered tools execute shared actions and read back their persistent results', async () => {
   const store = (await setup()); const registry = new Map();
   const registered = await registerWebMCP(store, {}, { registry: { registerTool(tool, { signal }) { registry.set(tool.name, tool); signal.addEventListener('abort', () => registry.delete(tool.name)); } } });

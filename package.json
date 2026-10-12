@@ -11,6 +11,7 @@
     "test:browser": "node tests/browser.mjs",
     "test:startup": "node tests/startup.mjs",
     "test:insertion": "node tests/block-insertion.mjs",
+    "test:checklist": "node tests/checklist-browser.mjs",
     "typecheck": "tsc --noEmit && tsc --project tsconfig.worker.json --noEmit",
     "check:static": "node tests/static-output.mjs",
     "package:release": "node scripts/package-release.mjs",

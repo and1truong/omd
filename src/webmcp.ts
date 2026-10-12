@@ -79,10 +79,11 @@ export function createTools(store:NotebookStore,ui:WebMCPUI = {}):WebMCPTool[] {
   add('close_canvas','Return from full-webpage canvas to the notebook.',schema(),async ()=>{await ui.closeCanvas?.();return {opened:false};});
   command('move_block', 'Move a block to a final zero-based index in a container, or append if index is omitted. Validates tab nesting and rejects cycles.', { blockId, containerId: text(), index }, ['blockId', 'containerId']);
   command('remove_block', 'Remove a block and its descendants. Reversible with omd_undo while this session retains history.', { blockId }, ['blockId']);
-  command('checklist_add', 'Add a checklist item, unchecked by default.', { blockId, text: text(), index }, ['blockId']);
-  command('checklist_update', 'Edit item text or checked state.', { blockId, itemId, patch: patch({ text: text(), done: bool }) }, ['blockId', 'itemId', 'patch']);
-  command('checklist_remove', 'Remove a checklist item.', { blockId, itemId }, ['blockId', 'itemId']);
-  command('checklist_move', 'Reorder a checklist item to a final zero-based index.', { blockId, itemId, index }, ['blockId', 'itemId', 'index']);
+  const checklistParentId=text('Parent checklist item ID in the same block. Empty string means checklist root.');
+  command('checklist_add', 'Add an unchecked checklist item. parentId selects a parent item; omit or use an empty string for root. index is a sibling position. At most 4 levels including root items.', { blockId, text: text(), parentId:checklistParentId, index }, ['blockId']);
+  command('checklist_update', 'Edit item text or checked state at any checklist depth. Checked states are independent of parents and children.', { blockId, itemId, patch: patch({ text: text(), done: bool }) }, ['blockId', 'itemId', 'patch']);
+  command('checklist_remove', 'Remove a checklist item and all its children. Reversible with undo.', { blockId, itemId }, ['blockId', 'itemId']);
+  command('checklist_move', 'Move a checklist item with its children to a final zero-based sibling index. Omit parentId to keep its parent, or use an empty string for root. Rejects cycles and moves that put any descendant beyond 4 levels.', { blockId, itemId, parentId:checklistParentId, index }, ['blockId', 'itemId', 'index']);
   command('tab_add', 'Add a tab and select it. Its returned tabId is a container for child blocks.', { blockId, title: text(), index }, ['blockId']);
   command('tab_update', 'Rename a tab.', { blockId, tabId, title: text() }, ['blockId', 'tabId', 'title']);
   command('tab_select', 'Select a tab and display its contents.', { blockId, tabId }, ['blockId', 'tabId']);

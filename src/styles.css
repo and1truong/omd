@@ -108,6 +108,8 @@ body[data-content-width=wide] .paper { max-width: none; }
 .block-heading .block-title { flex: 1; }
 .type-glyph { color: var(--secondary); width: 16px; height: 16px; }
 .check-row { display: flex; align-items: center; gap: 10px; min-height: 35px; }
+.checklist-item>.checklist-items { margin-left: 24px; }
+.check-row .row-controls { flex-shrink: 0; }
 .check-row input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; cursor: pointer; flex-shrink: 0; }
 .check-row input[type=text] { font-size: 13px; padding: 5px 0; }
 .check-row.done input[type=text] { text-decoration: line-through; color: var(--secondary); }

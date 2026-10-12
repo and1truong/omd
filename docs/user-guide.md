@@ -18,6 +18,14 @@ Pages can contain subpages up to 32 levels, counting root pages as level 1. Use 
 
 **Move to…** chooses a new parent, **Move to notebook** promotes a page to the root, and up/down actions reorder siblings. Moving a parent carries its entire subtree. The destination picker excludes the moving page and its descendants; the model independently rejects cycles. Deleting a page deletes its subtree after UI confirmation, preserves at least one page, selects a surviving parent when needed, and supports undo.
 
+## Checklists
+
+Checklist items can contain children up to 4 levels, counting root items as level 1. Open an item's **…** menu to **Add child checklist item**, **Indent checklist item** under its previous sibling, or **Outdent checklist item** after its parent. While editing item text, Tab indents and Shift+Tab outdents when available; Enter adds the next sibling and focuses it. These shortcuts wait until text composition finishes.
+
+Up/down arrows reorder siblings. Moving or deleting an item carries its children; undo restores the whole branch. Nesting actions are disabled when any descendant would exceed level 4. Each checkbox is independent, and progress counts all items, including children. Existing flat checklists remain compatible; nested items persist offline and in JSON backups.
+
+WebMCP `checklist_add` accepts optional `parentId` and sibling `index`. `checklist_move` accepts optional `parentId`: omit it to keep the current parent, or use an empty string to move to the checklist root. Updates and removal find items at any depth. The shared validator rejects cycles and branches deeper than 4 levels.
+
 ## Diagrams
 
 Add **Mermaid** for editable raw diagram definitions or fenced Mermaid Markdown, with live preview, syntax errors kept beside the source, and theme-aware rendering. Source remains editable/saved even if a diagram has syntax errors.
