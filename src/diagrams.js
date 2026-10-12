@@ -25,6 +25,7 @@ export function createDiagramManager(store,{notify}) {
       try {
         const definition=mermaidSource(entry.source); if(!definition) { entry.preview.textContent='Write a Mermaid diagram to see it here.'; return; }
         const engine=await import('./mermaid-engine.js');
+        if(entry.disposed || token!==entry.token)return;
         const result=await engine.renderDiagram(`diagram-${crypto.randomUUID()}`,definition,theme()==='dark');
         if(entry.disposed || token!==entry.token) return;
         const svg=new DOMParser().parseFromString(result.svg,'image/svg+xml').documentElement;
@@ -56,7 +57,6 @@ export function createDiagramManager(store,{notify}) {
       entry.saved=JSON.stringify(block.scene);entry.api.updateScene({...entry.renderer.restore(block.scene),appState:{...block.scene.appState,theme:theme()},captureUpdate:'NEVER'});
       if(Object.keys(block.scene.files).length) entry.api.addFiles(Object.values(block.scene.files));
     }
-    if(block.type==='excalidraw'&&entry.renderer)entry.renderer.draw(block.scene,theme());
     return entry.host;
   }
   function closeFocus() {
@@ -72,12 +72,24 @@ export function createDiagramManager(store,{notify}) {
     document.getElementById('canvas-stage').hidden=false;document.getElementById('canvas-stage-host').replaceChildren(host);document.body.classList.add('canvas-focused');
     requestAnimationFrame(()=>window.dispatchEvent(new Event('resize')));
   }
-  function cleanup(entry) { flush(entry);entry.disposed=true;clearTimeout(entry.timer);clearTimeout(entry.saveTimer);entry.renderer?.unmount();entries.delete(key(entry.pageId,entry.blockId)); }
+  function cleanup(entry) { flush(entry);entry.disposed=true;clearTimeout(entry.timer);clearTimeout(entry.saveTimer);entry.renderer?.unmount();entry.api=null;entry.renderer=null;entry.pending=null;entry.host.replaceChildren();entries.delete(key(entry.pageId,entry.blockId)); }
   return {
     mount,openFocus,closeFocus,
     updateSource(blockId,source) { const entry=entries.get(key(store.getState().id,blockId));if(entry)scheduleMermaid(entry,source); },
     begin() { used=new Set(); if(focused) { const entry=entries.get(focused);try{const block=get(entry.pageId,entry.blockId);if(entry.pageId!==store.getState().id||block.type!=='excalidraw')closeFocus();}catch{closeFocus();} } },
-    end() { if(focused)used.add(focused);for(const [id,entry] of entries)if(!used.has(id))cleanup(entry); if(focused){const entry=entries.get(focused);document.getElementById('canvas-stage-host').replaceChildren(entry.host);} },
+    end() {
+      // Cached blocks do not call mount again. Derive lifetime from the connected
+      // visible notebook, rather than from how many blocks were rebuilt.
+      const pageId=store.getActivePageId();
+      used=new Set([...document.querySelectorAll('#notebook [data-diagram-block]')].map(host=>key(pageId,host.dataset.diagramBlock)));
+      if(focused) {
+        const entry=entries.get(focused);
+        if(!document.querySelector(`#notebook [data-canvas-placeholder="${CSS.escape(entry.blockId)}"]`))closeFocus();
+        else used.add(focused);
+      }
+      for(const [id,entry] of entries)if(!used.has(id))cleanup(entry);
+      if(focused){const entry=entries.get(focused);const stage=document.getElementById('canvas-stage-host');if(entry.host.parentNode!==stage)stage.replaceChildren(entry.host);}
+    },
     themeChanged() { for(const entry of entries.values()) { if(entry.type==='mermaid')scheduleMermaid(entry,entry.source);else if(entry.renderer)entry.renderer.draw(get(entry.pageId,entry.blockId).scene,theme()); } },
     flushAll() {for(const entry of entries.values())flush(entry);},
     beforeNavigate() {closeFocus();for(const entry of entries.values())flush(entry);},

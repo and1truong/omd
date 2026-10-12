@@ -36,13 +36,14 @@ export function createStore(storage, { key = STORAGE_KEY, initial = initialNoteb
     preserveDelivery(book, next); validateBook(next); persist(next); return next;
   }
   return {
+    getActivePageId: () => book.activePageId,
     getState: () => structuredClone(getPage(book)),
     getPage: pageId => structuredClone(getPage(book, pageId)),
     getNotebook: () => structuredClone(book),
     listPages: () => book.pages.map((page, index) => ({ pageId: page.id, title: page.title, subtitle: page.subtitle, index, active: page.id === book.activePageId })),
     dispatch(action, input = {}, options = {}) {
       const { state: next, result } = applyBookAction(book, action, input);
-      commit(next, { ...options, history: options.history ?? !['reminder_fired','page_select'].includes(action) });
+      commit(next, { changedBlockId: input.blockId, changedPageId: input.pageId ?? next.activePageId, ...options, history: options.history ?? !['reminder_fired','page_select'].includes(action) });
       return { ...result, revision: book.revision };
     },
     subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },

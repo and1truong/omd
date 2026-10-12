@@ -3,12 +3,18 @@ import { STORAGE_KEY, allowedTypes, findBlock } from './model.js';
 import { startReminders } from './reminders.js';
 import { setupPalette } from './palette.js';
 import { createDiagramManager } from './diagrams.js';
+import { createRenderCache, reconcile, revealActions } from './render-cache.js';
 
 const $ = selector => document.querySelector(selector);
-let store, palette, diagrams, dragData, pickerTarget = 'page';
+let store, palette, diagrams, renderer, dragData, pickerTarget = 'page';
 export const openPalette = () => palette?.open();
 export const flushDiagrams = () => diagrams?.flushAll();
-export function openCanvas(blockId,pageId) { findBlock(store.getPage(pageId),blockId,'excalidraw');diagrams?.flushAll(); if(pageId && pageId!==store.getState().id)store.dispatch('page_select',{pageId}); diagrams.openFocus(blockId); }
+export function openCanvas(blockId,pageId) {
+  const page=store.getPage(pageId);findBlock(page,blockId,'excalidraw');diagrams?.flushAll();
+  if(page.id!==store.getActivePageId())store.dispatch('page_select',{pageId:page.id});
+  for(const [name,input] of revealActions(page.blocks,blockId))store.dispatch(name,input);
+  diagrams.openFocus(blockId);
+}
 export const closeCanvas = () => diagrams?.closeFocus();
 const themeQuery = matchMedia('(prefers-color-scheme: dark)');
 export function notify(message, kind = '', persistent = false) {
@@ -36,7 +42,6 @@ function editable(value, aria, fn, { multiline = false, className = '', placehol
   if (multiline) input.dataset.autofit = 'true'; return input;
 }
 function fit(el) { el.style.height = 'auto'; el.style.height = `${el.scrollHeight}px`; }
-function fitAll() { for (const el of document.querySelectorAll('textarea')) if(!el.closest('.excalidraw'))fit(el); }
 function title(b, glyph) {
   const head = element('div', 'block-heading'); const icon = element('span', 'type-glyph'); icon.textContent = glyph; icon.setAttribute('aria-hidden', 'true');
   head.append(icon, editable(b.title, `${b.type} title`, value => action('update_block', { blockId: b.id, patch: { title: value } }, { quiet: true }), { className: 'block-title', placeholder: 'Untitled' })); return head;
@@ -67,7 +72,7 @@ function dropTarget(el, canDrop, drop) {
   el.addEventListener('drop', event => { if (dragData && canDrop(dragData)) { event.preventDefault(); event.stopPropagation(); el.classList.remove('drop-active'); drop(dragData); } });
 }
 
-function blockList(blocks, containerId) {
+function makeBlockList(blocks, containerId, nodes) {
   const list = element('div', 'block-list'); list.dataset.container = containerId;
   function slot(index) {
     const el = element('div', 'drop-slot'); el.setAttribute('aria-hidden', 'true');
@@ -77,9 +82,9 @@ function blockList(blocks, containerId) {
       action('move_block', { blockId: data.blockId, containerId, index: targetIndex });
     }); return el;
   }
-  blocks.forEach((b, i) => { list.append(slot(i), renderBlock(b, containerId, i, blocks.length)); }); list.append(slot(blocks.length));
-  const add = button('Add a block', 'Add a block here', () => openPicker(containerId), 'add-block-button'); list.append(add);
-  dropTarget(add, data => data.kind === 'block', data => action('move_block', { blockId: data.blockId, containerId })); return list;
+  const children=[];nodes.forEach((node, i) => { children.push(slot(i), node); }); children.push(slot(blocks.length));
+  const add = button('Add a block', 'Add a block here', () => openPicker(containerId), 'add-block-button'); children.push(add);
+  dropTarget(add, data => data.kind === 'block', data => action('move_block', { blockId: data.blockId, containerId })); return {node:list,children};
 }
 function renderBlock(b, containerId, index, count) {
   const shell = element('section', `block block-type-${b.type}`); shell.dataset.blockId = b.id;
@@ -98,11 +103,11 @@ function renderBlock(b, containerId, index, count) {
     case 'reminder': renderReminder(shell, b); break;
     case 'kanban': renderKanban(shell, b); break;
     case 'mermaid': {
-      shell.append(title(b,'◇'),editable(b.source,'Mermaid Markdown source',value=>{if(action('update_block',{blockId:b.id,patch:{source:value}},{quiet:true}))diagrams.updateSource(b.id,value);},{multiline:true,className:'mermaid-source',id:`${b.id}-source`,placeholder:'flowchart LR\n  A --> B'}),diagrams.mount(b,store.getState().id)); break;
+      shell.append(title(b,'◇'),editable(b.source,'Mermaid Markdown source',value=>{if(action('update_block',{blockId:b.id,patch:{source:value}},{quiet:true}))diagrams.updateSource(b.id,value);},{multiline:true,className:'mermaid-source',id:`${b.id}-source`,placeholder:'flowchart LR\n  A --> B'}),diagrams.mount(b,renderPageId)); break;
     }
     case 'excalidraw': {
       const head=title(b,'✎');head.append(button('↗ Full page','Open canvas full page',()=>openCanvas(b.id), 'add-inline'));
-      const placeholder=element('div','canvas-placeholder');placeholder.dataset.canvasPlaceholder=b.id;placeholder.append(diagrams.mount(b,store.getState().id));shell.append(head,placeholder); break;
+      const placeholder=element('div','canvas-placeholder');placeholder.dataset.canvasPlaceholder=b.id;placeholder.append(diagrams.mount(b,renderPageId));shell.append(head,placeholder); break;
     }
   }
   return shell;
@@ -135,19 +140,19 @@ function renderTabs(shell, b) {
     action('tab_update', { blockId: b.id, tabId: t.id, title: value }, { quiet: true }); document.getElementById(`${t.id}-button`).textContent = value || 'Untitled';
   }, { className: 'tab-label-edit', placeholder: 'Tab name' }), rowsControls(() => action('tab_move', { blockId: b.id, tabId: t.id, index: i - 1 }), () => action('tab_move', { blockId: b.id, tabId: t.id, index: i + 1 }), async () => { if (b.tabs.length > 1 && await confirmAction('Remove this tab?', 'Everything inside this tab will be removed. You can undo it.', 'Remove tab')) action('tab_remove', { blockId: b.id, tabId: t.id }); }, i === 0, i === b.tabs.length - 1, 'tab'));
   edit.querySelector('.row-controls').style.opacity = '1'; if (b.tabs.length === 1) edit.querySelector('.delete').disabled = true;
-  panel.append(edit, blockList(t.blocks, t.id)); layout.append(tablist, panel); group.append(layout); shell.append(group);
+  panel.append(edit, renderer.childList(t.id)); layout.append(tablist, panel); group.append(layout); shell.append(group);
 }
 function renderToggle(shell, b) {
   const head = element('div', 'toggle-head'); const arrow = button(b.open ? '▾' : '▸', `${b.open ? 'Collapse' : 'Expand'} ${b.title}`, () => action('update_block', { blockId: b.id, patch: { open: !b.open } }), 'toggle-arrow'); arrow.setAttribute('aria-expanded', String(b.open)); arrow.setAttribute('aria-controls', `${b.id}-content`);
   head.append(arrow, editable(b.title, 'Expandable block title', value => action('update_block', { blockId: b.id, patch: { title: value } }, { quiet: true }), { className: 'block-title' })); shell.append(head);
-  if (b.open) { const content = element('div', 'toggle-content'); content.id = `${b.id}-content`; content.append(blockList(b.blocks, b.id)); shell.append(content); }
+  if (b.open) { const content = element('div', 'toggle-content'); content.id = `${b.id}-content`; content.append(renderer.childList(b.id)); shell.append(content); }
 }
 function renderAccordion(shell, b) {
   shell.append(title(b, '≡')); const group = element('div', 'accordion');
   b.items.forEach((item, i) => {
     const part = element('div', 'accordion-item'); const head = element('div', 'accordion-head'); const arrow = button(item.open ? '▾' : '▸', `${item.open ? 'Collapse' : 'Expand'} ${item.title}`, () => action('accordion_update', { blockId: b.id, itemId: item.id, patch: { open: !item.open } }), 'toggle-arrow'); arrow.setAttribute('aria-expanded', String(item.open)); arrow.setAttribute('aria-controls', `${item.id}-content`);
     head.append(arrow, editable(item.title, 'Accordion item title', value => action('accordion_update', { blockId: b.id, itemId: item.id, patch: { title: value } }, { quiet: true }), { className: 'block-title' }), rowsControls(() => action('accordion_move', { blockId: b.id, itemId: item.id, index: i - 1 }), () => action('accordion_move', { blockId: b.id, itemId: item.id, index: i + 1 }), async () => { if (await confirmAction('Remove this section?', 'Its contents will be removed too. You can undo it.', 'Remove')) action('accordion_remove', { blockId: b.id, itemId: item.id }); }, i === 0, i === b.items.length - 1, 'accordion section'));
-    part.append(head); if (item.open) { const content = element('div', 'accordion-content'); content.id = `${item.id}-content`; content.append(blockList(item.blocks, item.id)); part.append(content); } group.append(part);
+    part.append(head); if (item.open) { const content = element('div', 'accordion-content'); content.id = `${item.id}-content`; content.append(renderer.childList(item.id)); part.append(content); } group.append(part);
   }); shell.append(group, button('+ Add a section', 'Add accordion section', () => action('accordion_add', { blockId: b.id }), 'add-inline'));
 }
 function toLocalDateTime(iso) { if (!iso) return ''; const d = new Date(iso); const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000); return local.toISOString().slice(0, 16); }
@@ -213,11 +218,13 @@ function applyTheme(theme) {
   document.documentElement.dataset.theme = resolved; document.querySelector('meta[name=theme-color]').content = resolved === 'dark' ? '#171c1a' : '#f5f4ef';
   if(changed)diagrams?.themeChanged();
 }
-function render(state, { quiet = false, reminderBlockId, reminderPageId } = {}) {
+let renderPageId;
+function render(state, { quiet = false, reminderBlockId, reminderPageId, changedBlockId, changedPageId } = {}) {
   applyTheme(state.theme); $('#theme').value = state.theme; $('#notification-mode').value = state.notificationMode;
   $('#save-status').replaceChildren(); const dot = element('span', 'status-dot'); $('#save-status').append(dot, document.createTextNode('Saved here'));
   $('#undo-button').disabled = !store.canUndo(); $('#redo-button').disabled = !store.canRedo();
   diagrams?.syncHeader(); if (quiet) {
+    if(changedBlockId && changedPageId===state.id)renderer.accept(changedBlockId,findBlock(state,changedBlockId).block);
     if(reminderBlockId && reminderPageId===state.id) { const badge=document.querySelector(`[data-block-id="${CSS.escape(reminderBlockId)}"] .reminder-status`);if(badge)badge.textContent='Delivered'; }
     return;
   }
@@ -225,7 +232,9 @@ function render(state, { quiet = false, reminderBlockId, reminderPageId } = {}) 
   const focused = document.activeElement; const focusId = focused?.id; const selection = focused?.selectionStart == null ? null : [focused.selectionStart, focused.selectionEnd];
   const scroll = [scrollX, scrollY];
   $('#page-title').value = state.title; $('#page-subtitle').value = state.subtitle;
-  diagrams?.begin(); $('#notebook').replaceChildren(blockList(state.blocks, 'page')); diagrams?.end(); fitAll();
+  renderPageId=state.id;diagrams?.begin();renderer.begin(state.id);
+  reconcile($('#notebook'),[renderer.list(state.blocks,'page')]);renderer.end();diagrams?.end();
+  for(const el of document.querySelectorAll('[data-autofit]'))if(!el.dataset.fitted){fit(el);el.dataset.fitted='true';}
   if (focusId) { const next = document.getElementById(focusId); if (next) { next.focus({ preventScroll: true }); if (selection && next.setSelectionRange) next.setSelectionRange(...selection); } }
   scrollTo(...scroll);
 }
@@ -260,6 +269,7 @@ function boot() {
   for (const close of document.querySelectorAll('[data-close]')) close.addEventListener('click', () => close.closest('dialog').close());
   for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', e => { if (e.target === dialog) { const rect = dialog.getBoundingClientRect(); if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) dialog.close(); } });
   diagrams=createDiagramManager(store,{notify});
+  renderer=createRenderCache({makeBlock:renderBlock,makeList:makeBlockList});
   store.subscribe(render); render(store.getState());
   palette = setupPalette(store, { onError: error => notify(error.message, 'error', true), beforeNavigate:()=>diagrams.beforeNavigate() });
   $('#canvas-stage-close').addEventListener('click',closeCanvas);$('#canvas-stage-pages').addEventListener('click',openPalette);
@@ -271,8 +281,8 @@ function boot() {
   }
   $('#theme').addEventListener('change', e => action('set_page', { theme: e.target.value })); themeQuery.addEventListener('change', () => applyTheme(store.getState().theme));
   $('#notification-mode').addEventListener('change', e => action('set_page', { notificationMode: e.target.value }));
-  $('#undo-button').addEventListener('click', () => { try { diagrams.flushAll();store.undo(); render(store.getState()); } catch (e) { notify(e.message, 'error'); } });
-  $('#redo-button').addEventListener('click', () => { try { diagrams.flushAll();store.redo(); render(store.getState()); } catch (e) { notify(e.message, 'error'); } });
+  $('#undo-button').addEventListener('click', () => { try { diagrams.flushAll();store.undo(); } catch (e) { notify(e.message, 'error'); } });
+  $('#redo-button').addEventListener('click', () => { try { diagrams.flushAll();store.redo(); } catch (e) { notify(e.message, 'error'); } });
   $('#export-button').addEventListener('click', () => { downloadJson(); notify('Notebook exported. Keep it somewhere safe.'); });
   $('#import-button').addEventListener('click', () => $('#import-file').click());
   $('#import-file').addEventListener('change', async event => {

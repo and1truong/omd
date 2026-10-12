@@ -20,6 +20,14 @@ Add **Excalidraw** for a real editable canvas, including drawing, text, shapes a
 
 Canvas changes save after a short debounce and flush before navigation, export, agent actions and page closure. Native Excalidraw undo remains available; external notebook undo updates the mounted scene. Runtime library assets and fonts are precached for offline editing.
 
+## Rendering and memory
+
+Only the active page, selected tab panels, expanded toggles and open accordion sections mount their content. Mermaid/Excalidraw engines import on first visible use. Switching tabs or closing sections discards their DOM and renderer caches, unmounts React canvases and cancels pending diagram timers. Canvas edits flush before navigation. Full-page canvas commands reveal any inactive or closed ancestors first.
+
+Blocks and content lists reconcile by stable IDs. A changed leaf rebuilds its own block while preserving ancestor headers and unrelated inputs/canvases. Reordering updates affected controls; adding a sibling does not rebuild every block. Local typing keeps its existing input, cursor and composition state. Diagram source/scene changes and theme changes update the appropriate engines; unrelated commands do not call React render. Hidden-tab data edits do not mount its content. Container event handlers retain metadata, not descendant scenes.
+
+This frees rendered content, not the notebook's JSON or the browser's imported module cache. The localStorage store still loads the complete notebook and serializes it on edits; undo history also remains in memory. Very large notebooks can therefore still hit storage and state-management costs. No application quantity limits are introduced.
+
 ## Install and offline use
 
 After the first online load, the service worker caches the app shell. Install from Chrome/Edge's browser menu, or Safari's Share → Add to Home Screen. When an install prompt is available, Settings also shows an install button. Closing the browser/PWA and reopening keeps the notebook in localStorage. Offline edits persist too.
@@ -62,6 +70,7 @@ Local verification: 32 model, multi-page migration, scene, reminder, asset and W
 - #3: `codex/omd-03-pwa-webmcp` → `codex/omd-02-notebook`: PWA, WebMCP and CI.
 - #5: `codex/omd-04-pages` → `codex/omd-03-pwa-webmcp`: multiple pages and command palette.
 - #6: `codex/omd-05-diagrams` → `codex/omd-04-pages`: Mermaid and Excalidraw, including full-page canvas.
+- Rendering follow-up: `codex/omd-06-lazy-render` → `codex/omd-05-diagrams`: lazy visible content and block-scoped DOM reconciliation.
 
 The final branch contains the complete app. Review the incremental diffs; merge bottom to top and retarget each remaining PR after its predecessor merges.
 

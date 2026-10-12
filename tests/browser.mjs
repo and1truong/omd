@@ -10,11 +10,13 @@ const server = spawn(process.execPath, ['scripts/serve.mjs'], { cwd: root, env: 
 let browser,page;
 const errors = [];
 const consoleErrors=[];
+const engineRequests=[];
 try {
   await new Promise((resolve,reject) => { server.stdout.once('data', resolve); server.once('error', reject); server.once('exit', code => reject(new Error(`Server exited: ${code}`))); });
   browser = await chromium.launch({ headless: true, args: ['--enable-features=WebMCP,WebMCPTesting', '--enable-experimental-web-platform-features'] });
   const context = await browser.newContext({ viewport: { width: 1440, height: 1100 }, colorScheme: 'light' });
   page = await context.newPage(); page.on('pageerror', error => errors.push(error.message));page.on('console',msg=>{if(msg.type()==='error')consoleErrors.push(msg.text());});
+  page.on('request',request=>{if(/\/(?:excalidraw|mermaid)-engine\.(?:js|css)/.test(request.url()))engineRequests.push(request.url());});
   await page.goto('http://localhost:4317/');
   await page.waitForFunction(() => document.getElementById('agent-status').textContent.includes('48 tools'));
   const call = (name, input = {}) => page.evaluate(async ({name,input}) => {
@@ -82,6 +84,42 @@ try {
   await page.locator('#theme').selectOption('system'); await page.emulateMedia({ colorScheme: 'dark' });
   await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
   await page.emulateMedia({ colorScheme: 'light' }); await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
+  // Unrelated edits keep both container headers and leaf inputs connected.
+  await page.evaluate(({outerId,innerId,checklistId})=>{
+    window.omdIdentity={outer:document.querySelector(`[data-block-id="${outerId}"]`),inner:document.querySelector(`[data-block-id="${innerId}"]`),input:document.querySelector(`[data-block-id="${innerId}"] textarea`),checklist:document.querySelector(`[data-block-id="${checklistId}"]`)};
+    window.omdIdentity.input.focus();window.omdIdentity.input.setSelectionRange(3,8);
+  },{outerId:outer.id,innerId:inner.id,checklistId:checklist.id});
+  await call('card_update',{blockId:board.id,cardId:card,patch:{description:'An isolated update'}});
+  assert.ok(await page.evaluate(()=>Object.values(window.omdIdentity).every(node=>node.isConnected)));
+  assert.deepEqual(await page.evaluate(()=>[document.activeElement===window.omdIdentity.input,window.omdIdentity.input.selectionStart,window.omdIdentity.input.selectionEnd]),[true,3,8]);
+  const nestedText=(await call('get_notebook')).blocks.find(b=>b.id===outer.id).tabs[0].blocks[0].tabs[0].blocks[0];
+  await call('update_block',{blockId:nestedText.id,patch:{text:'Updated without rebuilding ancestors'}});
+  assert.ok(await page.evaluate(()=>window.omdIdentity.outer.isConnected&&window.omdIdentity.inner.isConnected&&window.omdIdentity.checklist.isConnected&&!window.omdIdentity.input.isConnected));
+  await page.evaluate(()=>delete window.omdIdentity);
+  // The engines have never been imported, even when hidden scenes are edited.
+  const hiddenDiagram=(await call('add_block',{type:'mermaid',source:'flowchart LR\n Lazy --> Visible',containerId:outer.tabs[1].id})).block;
+  const hiddenDrawing=(await call('add_block',{type:'excalidraw',containerId:outer.tabs[1].id})).block;
+  const lazyScene={elements:[{id:'lazy-shape',type:'rectangle',x:50,y:50,width:120,height:80}],appState:{},files:{}};
+  await call('excalidraw_set_scene',{blockId:hiddenDrawing.id,json:JSON.stringify(lazyScene)});
+  assert.equal(await page.locator(`[data-block-id="${hiddenDrawing.id}"],[data-block-id="${hiddenDiagram.id}"]`).count(),0);
+  assert.deepEqual(engineRequests,[]);
+  await call('tab_select',{blockId:outer.id,tabId:outer.tabs[1].id});
+  await page.locator(`[data-diagram-block="${hiddenDrawing.id}"] .excalidraw canvas`).first().waitFor();
+  await page.locator(`[data-diagram-block="${hiddenDiagram.id}"] svg`).waitFor();
+  await page.evaluate(({canvasId,diagramId})=>{window.omdOldHosts=[document.querySelector(`[data-diagram-block="${canvasId}"]`),document.querySelector(`[data-diagram-block="${diagramId}"]`)];},{canvasId:hiddenDrawing.id,diagramId:hiddenDiagram.id});
+  await call('tab_select',{blockId:outer.id,tabId:outer.tabs[0].id});
+  assert.ok(await page.evaluate(()=>window.omdOldHosts.every(host=>!host.isConnected&&host.childElementCount===0)), 'Hidden engine DOM must be torn down, not merely detached.');
+  await call('tab_select',{blockId:outer.id,tabId:outer.tabs[1].id});
+  await page.locator(`[data-diagram-block="${hiddenDrawing.id}"] .excalidraw canvas`).first().waitFor();
+  assert.ok(await page.evaluate(id=>document.querySelector(`[data-diagram-block="${id}"]`)!==window.omdOldHosts[0],hiddenDrawing.id));
+  assert.equal((await call('get_notebook')).blocks.find(b=>b.id===outer.id).tabs[1].blocks.find(b=>b.id===hiddenDrawing.id).scene.elements[0].id,'lazy-shape');
+  await call('tab_select',{blockId:outer.id,tabId:outer.tabs[0].id});
+  await call('open_canvas',{blockId:hiddenDrawing.id});
+  assert.equal((await call('get_notebook')).blocks.find(b=>b.id===outer.id).activeTabId,outer.tabs[1].id);
+  await page.locator('#canvas-stage .excalidraw canvas').first().waitFor();
+  await call('tab_select',{blockId:outer.id,tabId:outer.tabs[0].id});
+  assert.ok(await page.locator('#canvas-stage').isHidden());
+  await call('remove_block',{blockId:hiddenDrawing.id});await call('remove_block',{blockId:hiddenDiagram.id});await page.evaluate(()=>delete window.omdOldHosts);
   const diagram=(await call('add_block',{type:'mermaid',source:'flowchart LR\n  One --> Two'})).block;
   await page.locator(`[data-block-id="${diagram.id}"] [data-mermaid-preview] svg`).waitFor();
   assert.ok(await page.locator(`[data-block-id="${diagram.id}"]`).textContent().then(text=>text.includes('One')));
@@ -91,6 +129,10 @@ try {
   await page.locator(`[data-block-id="${diagram.id}"] [data-mermaid-preview] svg`).waitFor();
   const drawing=(await call('add_block',{type:'excalidraw',title:'My canvas'})).block;
   await page.locator(`[data-diagram-block="${drawing.id}"] .excalidraw canvas`).first().waitFor();
+  await page.evaluate(id=>{window.omdCanvas=document.querySelector(`[data-diagram-block="${id}"] canvas`);},drawing.id);
+  await call('set_page',{subtitle:'Header edit keeps the canvas alive'});
+  await call('card_update',{blockId:board.id,cardId:card,patch:{description:'No canvas rerender'}});
+  assert.ok(await page.evaluate(()=>window.omdCanvas.isConnected));await page.evaluate(()=>delete window.omdCanvas);
   await call('open_canvas',{blockId:drawing.id});
   assert.equal(await page.locator('#canvas-stage-title').textContent(),'Written by a person');
   await page.locator('#canvas-stage .excalidraw label[title*="Rectangle"]').first().click();
@@ -146,7 +188,7 @@ try {
   await page.locator(`[data-block-id="${diagram.id}"] [data-mermaid-preview] svg`).waitFor();
   assert.ok((await call('get_notebook')).blocks.find(b=>b.id===drawing.id).scene.elements.length>0);
   assert.deepEqual(errors.filter(error => error !== 'Tabs are limited to two levels.'), []);
-  console.log('Native WebMCP, notebook UI, persistence, mobile, theme, reminders, import/export, and offline reload passed.');
+  console.log('Native WebMCP, lazy engine loading/teardown, block identity/focus, notebook UI, persistence, mobile, theme, reminders, import/export, and offline reload passed.');
 } catch(error) {
   if(page) { await mkdir(`${root}/test-results`,{recursive:true});await page.screenshot({path:`${root}/test-results/failure.png`,fullPage:true});console.log(JSON.stringify({errors,consoleErrors,diagnostic:await page.evaluate(()=>({notices:document.getElementById('notices')?.textContent,canvas:[...document.querySelectorAll('#canvas-stage canvas')].map(c=>({class:c.className,width:c.width,height:c.height,rect:c.getBoundingClientRect().toJSON()})),selected:[...document.querySelectorAll('#canvas-stage input:checked')].map(e=>({value:e.value,title:e.closest('label')?.title})),notebook:JSON.parse(localStorage.getItem('omd.notebook.v1'))}))})); }
   throw error;
