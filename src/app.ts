@@ -28,7 +28,7 @@ export const getView = () => shell!.getView();
 export const setView = async (patch:PartialView) => {if(patch.sidebarOpen)await beforeNavigate();return shell!.setView(patch);};
 export async function flushPending(){await tabTitleEdit?.flush();await tableEdits?.flushAll();await textEditors?.flushAll();await diagrams?.flushAll();}
 export const flushDiagrams=flushPending;
-async function beforeNavigate(){await tabTitleEdit?.flush();await tableEdits?.flushAll();await textEditors?.flushAll();await diagrams?.beforeNavigate();}
+async function beforeNavigate(){await tabTitleEdit?.flush();await tableEdits?.flushAll();await textEditors?.flushAll({settle:false});await diagrams?.beforeNavigate();}
 export async function openCanvas(blockId:string,pageId?:string) {
   const page=await store.getPage(pageId);findBlock(page,blockId,'excalidraw');await flushPending();
   shell?.closeMobile();
@@ -38,19 +38,46 @@ export async function openCanvas(blockId:string,pageId?:string) {
 }
 export const closeCanvas = async () => {await flushPending();diagrams?.closeFocus();};
 let deferredRender=false;
-const composition=createCompositionGuard({onSettled:()=>{if(deferredRender){deferredRender=false;render(store.getRenderState(),{reset:true});}}});
+const composition=createCompositionGuard({onSettled:()=>{if(deferredRender){deferredRender=false;render(store.getRenderState(),{reset:true});}else textEditors?.end();}});
 const themeQuery = matchMedia('(prefers-color-scheme: dark)');
 export function notify(message:string,kind = '', persistent = false) {
   const el = element('div', `notice ${kind}`); const text = element('span'); text.textContent = message;
   const close = button('×', 'Dismiss message', () => el.remove()); el.append(text, close); domId('notices').append(el);
   if (!persistent) setTimeout(() => el.remove(), kind === 'error' ? 12000 : 5000);
 }
+const editorDraftNotices=new Map<string,HTMLElement>();
+let savePending=0,saveError:Error|null=null;
+function updateSaveStatus() {
+  const status=domId('save-status'),dot=element('span','status-dot');status.replaceChildren(dot,document.createTextNode(savePending?'Saving…':saveError||textEditors?.hasPending()?'Not saved':'Saved'));
+}
+function editorDraftsChanged() {
+  const drafts=textEditors?.drafts()??[],ids=new Set(drafts.map(draft=>draft.id));
+  for(const [id,notice] of editorDraftNotices)if(!ids.has(id)){notice.remove();editorDraftNotices.delete(id);}
+  for(const draft of drafts) {
+    let notice=editorDraftNotices.get(draft.id);
+    if(!notice) {
+      notice=element('div','notice error');notice.dataset.editorDraft=draft.id;
+      const content=element('div'),message=element('p');message.textContent='Unsaved Markdown draft kept in this tab. Retry saving or recover it before closing.';
+      const preview=element('textarea','page-subtitle');preview.readOnly=true;preview.rows=3;preview.setAttribute('aria-label','Unsaved Markdown draft');
+      const run=(operation:()=>Promise<unknown>)=>{retry.disabled=recover.disabled=true;void operation().catch(error=>notify(errorOf(error).message,'error',true)).finally(()=>{retry.disabled=recover.disabled=false;});};
+      const retry=button('Retry save','Retry Markdown draft save',()=>run(()=>textEditors!.retry(draft.id)),'secondary-button');
+      const recover=button('Recover as note','Recover Markdown draft as a new note',()=>run(()=>textEditors!.recover(draft.id)),'secondary-button');
+      const download=button('Download draft','Download unsaved Markdown draft',()=>{
+        const current=textEditors!.drafts().find(item=>item.id===draft.id);if(!current)return;
+        const url=URL.createObjectURL(new Blob([current.text],{type:'text/markdown;charset=utf-8'})),link=element('a');link.href=url;link.download='omd-unsaved-draft.md';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+      },'secondary-button');
+      content.append(message,preview,retry,recover,download);notice.append(content);domId('notices').append(notice);editorDraftNotices.set(draft.id,notice);
+    }
+    notice.querySelector('textarea')!.value=draft.text;
+  }
+  updateSaveStatus();
+}
 function element<T extends keyof HTMLElementTagNameMap>(tag:T,className = '') { const el = document.createElement(tag); el.className = className; return el; }
 function button(label:string,aria:string,fn:(event:MouseEvent)=>unknown,className = 'icon-button') {
   const b = element('button', className); b.type = 'button'; if(labelIcon[label])b.append(icon(labelIcon[label]));else b.textContent=label; b.title = aria; b.setAttribute('aria-label', aria); b.addEventListener('click', fn); return b;
 }
-async function action<K extends CommandName>(name:K,input:CommandInput<K>,{quiet=false,focus}: {quiet?:boolean;focus?:string}={}):Promise<MutationResult<K>|null> {
-  try { input={...input,pageId:input.pageId??store.getActivePageId()}; domId('save-status').textContent='Saving…'; if(!quiet)await flushPending(); const result = await store.dispatch(name, input, { quiet }); if (focus) requestAnimationFrame(()=>document.getElementById(focus)?.focus()); return result; }
+async function action<K extends CommandName>(name:K,input:CommandInput<K>,{quiet=false,focus}: {quiet?:boolean;focus?:string|(()=>void)}={}):Promise<MutationResult<K>|null> {
+  try { input={...input,pageId:input.pageId??store.getActivePageId()}; domId('save-status').textContent='Saving…'; if(!quiet)await flushPending(); const result = await store.dispatch(name, input, { quiet }); if (focus) requestAnimationFrame(()=>typeof focus==='function'?focus():document.getElementById(focus)?.focus()); return result; }
   catch (error) { domId('save-status').textContent = 'Not saved'; notify(errorOf(error).message, 'error', true); return null; }
 }
 function editable(value:string,aria:string,fn:(value:string,pageId:string)=>unknown,{multiline=false,className='',placeholder='',id}: {multiline?:boolean;className?:string;placeholder?:string;id?:string}={}) {
@@ -164,8 +191,9 @@ function renderBlock(b:Block,containerId:string,index:number,count:number) {
   return shell;
 }
 function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
+  const pageId=store.getActivePageId(),focusItem=(itemId:string)=>textEditors!.focusChecklist(b.id,itemId,pageId);
   let total=0,done=0;
-  async function addItem(parentId?:string,index?:number) {const result=await action('checklist_add',{blockId:b.id,parentId,index});if(result)requestAnimationFrame(()=>domId(result.itemId)?.focus());}
+  async function addItem(parentId?:string,index?:number) {const result=await action('checklist_add',{pageId,blockId:b.id,parentId,index});if(result)requestAnimationFrame(()=>focusItem(result.itemId));}
   function renderItems(items:ChecklistItem[],ancestors:ChecklistItem[]=[]):HTMLElement {
     const list=element('div','checklist-items');list.setAttribute('role','list');
     items.forEach((item,index)=>{
@@ -173,30 +201,30 @@ function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
       const parent=ancestors.at(-1),level=ancestors.length+1;
       const entry=element('div','checklist-item');entry.setAttribute('role','listitem');entry.dataset.itemId=item.id;entry.dataset.level=String(level);
       const row=element('div',`check-row ${item.done?'done':''}`),check=element('input');check.type='checkbox';check.checked=item.done;check.setAttribute('aria-label',`Complete ${item.text||'item'}`);
-      check.addEventListener('change',()=>action('checklist_update',{blockId:b.id,itemId:item.id,patch:{done:check.checked}}));
+      check.addEventListener('change',()=>action('checklist_update',{pageId,blockId:b.id,itemId:item.id,patch:{done:check.checked}}));
       const canIndent=index>0&&level+checklistHeight(item)<=MAX_CHECKLIST_LEVELS;
-      const indent=()=>action('checklist_move',{blockId:b.id,itemId:item.id,parentId:items[index-1].id,index:items[index-1].children?.length??0},{focus:item.id});
+      const indent=()=>action('checklist_move',{pageId,blockId:b.id,itemId:item.id,parentId:items[index-1].id,index:items[index-1].children?.length??0},{focus:()=>focusItem(item.id)});
       const outdent=()=>{
         const grandparent=ancestors.at(-2),siblings=grandparent?.children??b.items;
-        return action('checklist_move',{blockId:b.id,itemId:item.id,parentId:grandparent?.id??'',index:siblings.findIndex(sibling=>sibling.id===parent!.id)+1},{focus:item.id});
+        return action('checklist_move',{pageId,blockId:b.id,itemId:item.id,parentId:grandparent?.id??'',index:siblings.findIndex(sibling=>sibling.id===parent!.id)+1},{focus:()=>focusItem(item.id)});
       };
-      const text=textEditors!.mountChecklist(b.id,item,store.getActivePageId(),key=>{
+      const text=textEditors!.mountChecklist(b.id,item,pageId,key=>{
         if(key.ctrlKey||key.metaKey||key.altKey)return false;
         if(key.key==='Enter'){if(!key.repeat)void addItem(parent?.id,index+1);return true;}
         if(key.key==='Tab'&&((key.shiftKey&&parent)||(!key.shiftKey&&canIndent))){if(!key.repeat)void (key.shiftKey?outdent():indent());return true;}
         return false;
       });
-      const controls=rowsControls(()=>action('checklist_move',{blockId:b.id,itemId:item.id,index:index-1},{focus:item.id}),()=>action('checklist_move',{blockId:b.id,itemId:item.id,index:index+1},{focus:item.id}),()=>action('checklist_remove',{blockId:b.id,itemId:item.id}),index===0,index===items.length-1,'checklist item');
+      const controls=rowsControls(()=>action('checklist_move',{pageId,blockId:b.id,itemId:item.id,index:index-1},{focus:()=>focusItem(item.id)}),()=>action('checklist_move',{pageId,blockId:b.id,itemId:item.id,index:index+1},{focus:()=>focusItem(item.id)}),()=>action('checklist_remove',{pageId,blockId:b.id,itemId:item.id}),index===0,index===items.length-1,'checklist item');
       const more=button('…','Checklist item actions',()=>showMenu('block-actions-dialog','Checklist item actions',[
         {label:'Add child checklist item',icon:'plus',disabled:level>=MAX_CHECKLIST_LEVELS,run:()=>addItem(item.id)},
         {label:'Indent checklist item',icon:'right',disabled:!canIndent,run:indent},
         {label:'Outdent checklist item',icon:'left',disabled:!parent,run:outdent}
-      ],more));more.id=`${item.id}-menu`;controls.prepend(more);
+      ],more));more.id=textEditors!.checklistId(b.id,item.id,pageId,'menu');controls.prepend(more);
       row.append(check,text,controls);entry.append(row);if(item.children?.length)entry.append(renderItems(item.children,[...ancestors,item]));list.append(entry);
     });return list;
   }
   const head=title(b,'☑'),progress=element('span','checklist-progress'),items=renderItems(b.items);progress.textContent=`${done} / ${total}`;head.append(progress);shell.append(head,items);
-  shell.append(button('+ Add an item', 'Add checklist item', async () => { const r = await action('checklist_add', { blockId: b.id }); if (r) requestAnimationFrame(() => domId(r.itemId)?.focus()); }, 'add-inline'));
+  shell.append(button('+ Add an item', 'Add checklist item', ()=>addItem(), 'add-inline'));
 }
 function renderTable(shell:HTMLElement,b:BlockOf<'table'>) {
   const pageId=store.getActivePageId(),cellKey=(rowId:string,columnId:string)=>`table-cell-${encodeURIComponent(JSON.stringify([b.id,rowId,columnId]))}`,cellId=(r:number,c:number)=>cellKey(b.rows[r].id,b.columns[c].id);
@@ -490,7 +518,7 @@ async function boot() {
   for (const close of document.querySelectorAll('[data-close]')) close.addEventListener('click', () => close.closest('dialog')!.close());
   for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', e => { if (e.target === dialog) { const rect = dialog.getBoundingClientRect(); if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) dialog.close(); } });
   diagrams=createDiagramManager(store,{notify});
-  textEditors=createTextEditors(store,{composition,notify,createNext:createTextAfter});
+  textEditors=createTextEditors(store,{composition,notify,createNext:createTextAfter,flushPending,onDraftsChange:editorDraftsChanged});
   tableEdits=createTableEdits(store,{settled:()=>composition.settled(input=>input instanceof Element&&input.classList.contains('table-cell'))});
   const dirtyContainers=new Set<string>();
   renderer=createRenderCache({makeBlock:renderBlock,makeList:makeBlockList,
@@ -511,7 +539,7 @@ async function boot() {
   });
   shell=setupShell(store,{beforeNavigate,openPalette,confirm:confirmAction,onError:error=>notify(errorOf(error).message,'error',true),onThemeChange:applyTheme});
   store.subscribe(render); render(store.getRenderState());
-  store.subscribeStatus(({pending,navigating,error})=>{domId('page-title').disabled=navigating&&!composition.isComposing(domId('page-title'));domId('page-subtitle').disabled=navigating&&!composition.isComposing(domId('page-subtitle'));domId('notebook').inert=navigating&&!composition.hasActive();const status=domId('save-status');status.replaceChildren();const dot=element('span','status-dot');status.append(dot,document.createTextNode(pending?'Saving…':error?'Not saved':'Saved'));});
+  store.subscribeStatus(({pending,navigating,error})=>{domId('page-title').disabled=navigating&&!composition.isComposing(domId('page-title'));domId('page-subtitle').disabled=navigating&&!composition.isComposing(domId('page-subtitle'));domId('notebook').inert=navigating&&!composition.hasActive();savePending=pending;saveError=error;updateSaveStatus();});
   palette = setupPalette(store, { onError: error => notify(errorOf(error).message, 'error', true), beforeOpen:()=>shell!.closeMobile(), beforeNavigate });
   setupRoutes(store,{beforeNavigate,onError:error=>notify(error.message,'error',true)});
   let fitFrame=0;window.addEventListener('resize',()=>{cancelAnimationFrame(fitFrame);fitFrame=requestAnimationFrame(()=>{for(const el of document.querySelectorAll<HTMLElement>('[data-autofit],.auto-height'))fit(el);});});
