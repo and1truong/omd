@@ -26,6 +26,7 @@ export function createNativeEdits(store:NotebookStore,composition:Pick<ReturnTyp
     if(drafts.get(id)===draft)await flush(id,draft);
   }
   return {
+    id:key,
     value:(target:NativeTarget,saved:string)=>drafts.get(key(target))?.value??saved,
     stage,
     write(target:NativeTarget,value:string,label:string) {
