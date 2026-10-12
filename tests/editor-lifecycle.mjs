@@ -161,6 +161,19 @@ async function idlePreeditStatus(type,same=false) {
   await input.evaluate(el=>el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));await flush(page);
   assert.equal(await text(page,f),draft);assert.equal(await page.locator('#save-status').innerText(),'Saved');await context.close();
 }
+async function idleCompositionSettlement(type) {
+  const {context,page}=await fresh(),f=await fixture(page,{type}),input=f.itemId?editor(page,f.itemId):textEditor(page,f.blockId),saved=await text(page,f);
+  assert.equal(await page.locator('#save-status').innerText(),'Saved');
+  await input.evaluate(el=>{
+    window.idleFrames=[];window.idleRAF=requestAnimationFrame;window.requestAnimationFrame=callback=>{idleFrames.push(callback);return 1;};
+    el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));
+  });
+  await page.waitForFunction(({itemId,blockId})=>idleFrames.length>0&&!document.querySelector(itemId?`[data-checklist-editor="${itemId}"] .markdown-editor`:`[data-text-editor="${blockId}"] .markdown-editor`).editor.view.composing,f,{polling:20});
+  await page.evaluate(()=>{window.idleFinished=false;window.idleFlush=lifecycleApp.flushPending().then(()=>{window.idleFinished=true;});});await page.waitForTimeout(50);
+  assert.equal(await page.evaluate(()=>idleFinished),false);assert.match(await page.locator('#save-status').innerText(),/^Not saved/);assert.equal(await text(page,f),saved);
+  await page.evaluate(()=>{window.requestAnimationFrame=idleRAF;idleFrames.splice(0).forEach(callback=>callback(performance.now()));});await page.evaluate(()=>idleFlush);
+  assert.equal(await page.locator('#save-status').innerText(),'Saved');assert.equal(await text(page,f),saved);await context.close();
+}
 async function holdFinalTransaction(page,f,first) {
   await page.evaluate(({f,first})=>{
     const put=IDBObjectStore.prototype.put;window.restoreFinalPut=()=>{IDBObjectStore.prototype.put=put;};
@@ -299,7 +312,7 @@ try {
   await mkdir(`${root}/test-results`,{recursive:true});browser=await ({chromium,webkit}[engine]).launch({headless:true});
   await historyBarrier();await retainedDrafts('checklist');await retainedDrafts('text');await deletedDrafts();await deletedDrafts(true);
   await compositionBarrier('checklist');await compositionBarrier('text');
-  for(const type of ['checklist','text']){await idlePreeditStatus(type);await idlePreeditStatus(type,true);for(const mode of ['preedit','same','finishing','ordinary','failure'])await overlappingCompositions(type,mode);await immediateCompositionRestart(type);}
+  for(const type of ['checklist','text']){await idleCompositionSettlement(type);await idlePreeditStatus(type);await idlePreeditStatus(type,true);for(const mode of ['preedit','same','finishing','ordinary','failure'])await overlappingCompositions(type,mode);await immediateCompositionRestart(type);}
   await importedFocus();await deferredChecklistFocus();await activeRestoreFocus();await scopedSettlement();await composingDeletion();assert.deepEqual(errors,[]);
   console.log(`${engine} ${basePath||'/'}: history/draft recovery, strict scoped composition/export, held-IDB confirmed snapshots, overlapping generations, active native caret and imported focus identity passed.`);
 } finally {await browser?.close();server.kill();}
