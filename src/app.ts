@@ -215,7 +215,7 @@ function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
     requestAnimationFrame(()=>{
       if(pageId!==store.getActivePageId())return;
       const block=[...document.querySelectorAll<HTMLElement>('.block-type-checklist')].find(block=>block.dataset.blockId===b.id),entry=block&&[...block.querySelectorAll<HTMLElement>('[data-item-id]')].find(entry=>entry.dataset.itemId===itemId),target=entry?.querySelector<HTMLElement>(':scope > .check-row .markdown-editor');
-      if(target){revealChecklistItem(target);textEditors!.focusChecklist(b.id,itemId,pageId);}
+      if(target){revealChecklistItem(target);if(document.activeElement!==target)textEditors!.focusChecklist(b.id,itemId,pageId);}
     });
   }
   async function addItem(parentId?:string,index?:number) {const result=await action('checklist_add',{pageId,blockId:b.id,parentId,index});if(result)focusItem(result.itemId);}
