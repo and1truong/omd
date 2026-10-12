@@ -32,6 +32,7 @@ After installing dependencies and building:
 npx playwright install chromium
 npm run test:browser
 npm run test:checklist
+npm run test:editor
 ```
 
 The browser suite enables Chrome's native WebMCP feature and executes tools through the real registry. It also checks mobile layout, themes, reminders, import confirmation, persistent edits and offline reopening. An unavailable browser binary or unsupported native API is a verification failure. Adapter tests alone do not verify a Gemini integration; that requires a real extension session.
@@ -40,11 +41,13 @@ CI runs the native suite at both the origin root and `/omd/`, including lazy lib
 
 The checklist browser suite checks four-level nesting, sibling ordering, Enter/Tab/Shift+Tab, composition, focus, independent checkboxes, undo/redo, persistence and touch controls. CI runs it on Chromium and WebKit at both the origin root and `/omd/`.
 
+The editor browser suite covers Tiptap Markdown rendering, formatting, paste, Shift+Enter insertion and cursor transfer, ordinary Enter, nested containers, history, selection, composition, safe rendering, persistence and touch controls. It stops the real server to verify offline reopening and editing with cached libraries. CI runs it on Chromium and WebKit at the origin root and `/omd/`.
+
 ## Static hosting and GitHub Pages
 
 Run `npm run build` and serve `dist` from a static HTTPS host. Relative asset, manifest and worker URLs support deployment beneath a subpath.
 
-The GitHub Pages workflow builds and uploads `dist` on pull requests; it deploys only main pushes or a manual run on main. Set **Settings → Pages → Source** to **GitHub Actions**. Main then publishes to [omd](https://and1truong.github.io/omd/), unless a custom domain is configured. Generated files and a publishing branch are not committed.
+The GitHub Pages workflow runs only for pushes to `main` or a manual run on `main`. Both build and deploy jobs require `refs/heads/main`; a manual run selecting another branch skips them. Pull requests and feature branches use the separate Checks workflow. Set **Settings → Pages → Source** to **GitHub Actions**. Main then publishes to [omd](https://and1truong.github.io/omd/), unless a custom domain is configured. Generated files and a publishing branch are not committed.
 
 The deploy job uses the `github-pages` environment and Pages/OIDC permissions. Build checks include strict TypeScript, source tests and static-artifact integrity.
 

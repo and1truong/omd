@@ -1,5 +1,5 @@
 import {byId as domId} from './dom.js';
-import { ready, getStore, notify, openSettings, openPalette, openCanvas, closeCanvas, getView, setView, flushDiagrams, downloadJson, confirmAction, deliverReminder } from './app.js';
+import { ready, getStore, notify, openSettings, openPalette, openCanvas, closeCanvas, getView, setView, flushPending, downloadJson, confirmAction, deliverReminder } from './app.js';
 import { registerWebMCP } from './webmcp.js';
 import { setupPWA } from './pwa.js';
 
@@ -8,7 +8,7 @@ const store = getStore();
 if (store) {
   setupPWA({ notify, openSettings });
   registerWebMCP(store, {
-    download: downloadJson, openSettings, openPalette,openCanvas,closeCanvas,getView,setView,flushPending:flushDiagrams,
+    download: downloadJson, openSettings, openPalette,openCanvas,closeCanvas,getView,setView,flushPending,
     notificationPermission: () => 'Notification' in window ? Notification.permission : 'unsupported',
     confirmImport: signal => {
       const dialog = domId('confirm-dialog');

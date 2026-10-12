@@ -9,7 +9,7 @@ Your notebook stays in your browser. No account, analytics or AI API key is requ
 ## Features
 
 - **Pages and subpages:** organize a notebook with a sidebar, breadcrumbs and Cmd/Ctrl+K search.
-- **Flexible blocks:** text, headings, checklists, horizontal/vertical tabs, expandable blocks, accordions and dividers.
+- **Flexible blocks:** Tiptap Markdown text, headings, nested checklists, horizontal/vertical tabs, expandable blocks, accordions and dividers. Shift+Enter continues into a new text block.
 - **Planning:** reminders and kanban boards.
 - **Diagrams:** Mermaid with live preview and Excalidraw with an editable full-page canvas.
 - **Everyday controls:** undo/redo, JSON import/export, keyboard and touch-friendly reordering, and system-aware light/dark themes.

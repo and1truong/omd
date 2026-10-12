@@ -103,6 +103,28 @@ body[data-content-width=wide] .paper { max-width: none; }
 .block-type-heading textarea { font-size: 24px; font-weight: 600; line-height: 1.4; }
 .block-type-text textarea { font-size: 14px; line-height: 1.8; min-height: 25px; }
 .block-type-text>textarea, .block-type-heading>textarea { background: transparent; outline: 0; border-radius: 0; }
+.text-editor { min-width: 0; position: relative; }
+.markdown-toolbar { position: absolute; left: 0; bottom: 100%; display: flex; flex-wrap: wrap; gap: 3px; padding: 3px; margin-bottom: 4px; border: 1px solid var(--line); border-radius: 5px; background: var(--paper); z-index: 3; opacity: 0; pointer-events: none; transition: opacity .12s ease; }
+.text-editor:hover .markdown-toolbar, .text-editor:focus-within .markdown-toolbar { opacity: 1; pointer-events: auto; }
+.markdown-tool { min-width: 28px; min-height: 28px; padding: 2px 6px; border-radius: 4px; font-size: 11px; color: var(--secondary); }
+.markdown-tool:hover, .markdown-tool[aria-pressed=true] { background: var(--soft); color: var(--accent); }
+.markdown-editor { min-height: 28px; outline: none; font-size: 14px; line-height: 1.8; overflow-wrap: anywhere; white-space: pre-wrap; }
+.markdown-editor:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; border-radius: 4px; }
+.markdown-editor p { margin: 0 0 8px; }
+.markdown-editor>:last-child { margin-bottom: 0; }
+.text-editor[data-empty=true] .markdown-editor>p:first-child::before { content: 'Write something…'; color: var(--secondary); pointer-events: none; float: left; height: 0; }
+.markdown-editor h1, .markdown-editor h2, .markdown-editor h3 { line-height: 1.4; margin: 14px 0 8px; }
+.markdown-editor h1 { font-size: 28px; }
+.markdown-editor h2 { font-size: 23px; }
+.markdown-editor h3 { font-size: 18px; }
+.markdown-editor ul, .markdown-editor ol { padding-left: 24px; margin: 8px 0; }
+.markdown-editor li p { margin: 0; }
+.markdown-editor blockquote { margin: 8px 0; border-left: 3px solid var(--line); padding-left: 14px; color: var(--secondary); }
+.markdown-editor code { background: var(--wash); border-radius: 3px; padding: 2px 4px; font-size: 12px; }
+.markdown-editor pre { margin: 8px 0; padding: 12px; background: var(--wash); border: 1px solid var(--line); border-radius: 5px; overflow-x: auto; white-space: pre; }
+.markdown-editor pre code { padding: 0; }
+.markdown-editor a { color: var(--accent); text-decoration: underline; }
+.markdown-editor hr { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }
 .block-title { font-size: 13px; font-weight: 600; padding: 4px 0; }
 .block-heading { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
 .block-heading .block-title { flex: 1; }
@@ -265,6 +287,8 @@ h3 { font-size: 13px; margin: 0 0 12px; }
   .block-controls .icon-button { min-width: 32px; min-height: 30px; }
   .block>.block-heading, .block>.toggle-head { padding-right: 34px; }
   .block-type-text>textarea, .block-type-heading>textarea { padding-right: 34px; }
+  .markdown-toolbar { position: static; opacity: 1; pointer-events: auto; padding-right: 34px; border: 0; margin-bottom: 5px; }
+  .markdown-tool { min-width: 32px; min-height: 34px; }
   .block-type-reminder>.block-controls { top: 8px; right: 5px; }
   .block-type-reminder .reminder-box { padding-right: 34px; }
   .row-controls { opacity: .7; }
@@ -308,7 +332,7 @@ h3 { font-size: 13px; margin: 0 0 12px; }
 }
 @media print {
   body { background: #fff; color: #000; --nav-offset: 0px; }
-  .app-header, .sidebar, .block-controls, .row-controls, .add-block-button, .insert-slot, .add-inline, .tab-editbar, .notices { display: none!important; }
+  .app-header, .sidebar, .block-controls, .row-controls, .add-block-button, .insert-slot, .add-inline, .tab-editbar, .markdown-toolbar, .notices { display: none!important; }
   #workspace { margin: 0; padding: 0; }
   .paper { max-width: none; padding: 0; }
   .kanban-board { overflow: visible; flex-wrap: wrap; }

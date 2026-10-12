@@ -75,7 +75,7 @@ try {
   await page.reload();await page.waitForFunction(()=>document.getElementById('agent-status').textContent.includes('50 tools'));
   assert.equal((await call('get_notebook')).id,treeLeaf);assert.equal(await page.locator(`.sidebar-page[data-page-id="${treeLeaf}"]`).count(),0);
   await page.keyboard.press('Control+k');await page.locator('#page-search').fill('Milestone');await page.locator('#page-search').press('Enter');await settle();
-  assert.ok(await page.getByRole('button',{name:'Switch to Milestone',exact:true}).isVisible());assert.equal(await page.getByRole('textbox',{name:'text content',exact:true}).inputValue(),'Nested page content');
+  assert.ok(await page.getByRole('button',{name:'Switch to Milestone',exact:true}).isVisible());assert.equal(await page.getByRole('textbox',{name:'text content',exact:true}).innerText(),'Nested page content');
   await call('page_move',{pageId:treeRoot,parentId:createdPage});assert.equal((await call('list_pages')).find(p=>p.pageId===treeLeaf).depth,3);
   await page.getByRole('button',{name:'Page actions for Tree root',exact:true}).click();await settle();await page.locator('#page-actions-dialog').getByRole('button',{name:'Move to…',exact:true}).click();await settle();
   assert.equal(await page.locator(`#page-parent-target option[value="${treeLeaf}"]`).count(),0,'Move picker must exclude descendant destinations.');
@@ -106,7 +106,7 @@ try {
   const outer = (await call('add_block', { type: 'tabs', orientation: 'horizontal', title: 'Chapters' })).block;
   const inner = (await call('add_block', { type: 'tabs', orientation: 'vertical', containerId: outer.tabs[0].id })).block;
   await call('add_block', { type: 'text', text: 'Inside both tab levels', containerId: inner.tabs[0].id });
-  assert.equal(await page.getByRole('textbox', { name: 'text content', exact: true }).inputValue(), 'Inside both tab levels');
+  assert.equal(await page.getByRole('textbox', { name: 'text content', exact: true }).innerText(), 'Inside both tab levels');
   const before = (await call('get_notebook')).revision;
   await assert.rejects(() => call('add_block', { type: 'tabs', containerId: inner.tabs[0].id }));
   assert.equal((await call('get_notebook')).revision, before);
@@ -135,15 +135,16 @@ try {
   await page.getByRole('button',{name:'Close settings',exact:true}).click();await settle();
   // Unrelated edits keep both container headers and leaf inputs connected.
   await page.evaluate(({outerId,innerId,checklistId})=>{
-    window.omdIdentity={outer:document.querySelector(`[data-block-id="${outerId}"]`),inner:document.querySelector(`[data-block-id="${innerId}"]`),input:document.querySelector(`[data-block-id="${innerId}"] textarea`),checklist:document.querySelector(`[data-block-id="${checklistId}"]`)};
-    window.omdIdentity.input.focus();window.omdIdentity.input.setSelectionRange(3,8);
+    window.omdIdentity={outer:document.querySelector(`[data-block-id="${outerId}"]`),inner:document.querySelector(`[data-block-id="${innerId}"]`),input:document.querySelector(`[data-block-id="${innerId}"] [contenteditable="true"]`),checklist:document.querySelector(`[data-block-id="${checklistId}"]`)};
+    window.omdIdentity.input.focus();const node=window.omdIdentity.input.querySelector('p').firstChild;getSelection().setBaseAndExtent(node,3,node,8);
   },{outerId:outer.id,innerId:inner.id,checklistId:checklist.id});
   await call('card_update',{blockId:board.id,cardId:card,patch:{description:'An isolated update'}});
   assert.ok(await page.evaluate(()=>Object.values(window.omdIdentity).every(node=>node.isConnected)));
-  assert.deepEqual(await page.evaluate(()=>[document.activeElement===window.omdIdentity.input,window.omdIdentity.input.selectionStart,window.omdIdentity.input.selectionEnd]),[true,3,8]);
+  assert.deepEqual(await page.evaluate(()=>[document.activeElement===window.omdIdentity.input,getSelection().anchorOffset,getSelection().focusOffset]),[true,3,8]);
   const nestedText=(await call('get_notebook')).blocks.find(b=>b.id===outer.id).tabs[0].blocks[0].tabs[0].blocks[0];
   await call('update_block',{blockId:nestedText.id,patch:{text:'Updated without rebuilding ancestors'}});
-  assert.ok(await page.evaluate(()=>window.omdIdentity.outer.isConnected&&window.omdIdentity.inner.isConnected&&window.omdIdentity.checklist.isConnected&&!window.omdIdentity.input.isConnected));
+  assert.ok(await page.evaluate(()=>window.omdIdentity.outer.isConnected&&window.omdIdentity.inner.isConnected&&window.omdIdentity.checklist.isConnected&&window.omdIdentity.input.isConnected));
+  assert.equal(await page.getByRole('textbox',{name:'text content',exact:true}).innerText(),'Updated without rebuilding ancestors');
   await page.evaluate(()=>delete window.omdIdentity);
   // Composition keeps the real DOM control connected through an external edit of the same block.
   const composeItem=(await call('get_notebook')).blocks.find(b=>b.id===checklist.id).items[0];

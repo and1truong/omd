@@ -25,7 +25,7 @@ await writeFile(join(folder, 'package.json'), JSON.stringify({
 await writeFile(join(folder, 'README.md'), `# omd v${manifest.version}
 
 This ready-to-run package includes the compiled app and all browser dependencies:
-Mermaid, Excalidraw, React, React DOM, Zustand, Immer, their bundled dependencies,
+Tiptap, ProseMirror, Mermaid, Excalidraw, React, React DOM, Zustand, Immer, their bundled dependencies,
 fonts, styles and icons. No npm install, build step or runtime CDN is needed.
 
 ## Run locally
