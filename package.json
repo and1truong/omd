@@ -15,6 +15,7 @@
     "test:insertion": "node tests/block-insertion.mjs",
     "test:checklist": "node tests/checklist-browser.mjs",
     "test:editor": "node tests/text-editor.mjs",
+    "test:editor-lifecycle": "node tests/editor-lifecycle.mjs",
     "test:table": "node tests/table-browser.mjs",
     "test:tabs": "node tests/tabs-drag.mjs",
     "typecheck": "tsc --noEmit && tsc --project tsconfig.worker.json --noEmit",

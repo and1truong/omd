@@ -490,7 +490,7 @@ async function boot() {
   for (const close of document.querySelectorAll('[data-close]')) close.addEventListener('click', () => close.closest('dialog')!.close());
   for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', e => { if (e.target === dialog) { const rect = dialog.getBoundingClientRect(); if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) dialog.close(); } });
   diagrams=createDiagramManager(store,{notify});
-  textEditors=createTextEditors(store,{composition,notify,createNext:createTextAfter});
+  textEditors=createTextEditors(store,{composition,notify,createNext:createTextAfter,flushPending});
   tableEdits=createTableEdits(store,{settled:()=>composition.settled(input=>input instanceof Element&&input.classList.contains('table-cell'))});
   const dirtyContainers=new Set<string>();
   renderer=createRenderCache({makeBlock:renderBlock,makeList:makeBlockList,

@@ -4,7 +4,7 @@ import type {createCompositionGuard} from './composition.js';
 import {errorOf} from './dom.js';
 
 /** Visible Markdown controls own a Tiptap instance; persisted content stays Markdown. */
-export function createTextEditors(store:NotebookStore,{composition,notify,createNext}:{composition:ReturnType<typeof createCompositionGuard>;notify:Notify;createNext:(blockId:string,pageId:string)=>Promise<unknown>}) {
+export function createTextEditors(store:NotebookStore,{composition,notify,createNext,flushPending}:{composition:ReturnType<typeof createCompositionGuard>;notify:Notify;createNext:(blockId:string,pageId:string)=>Promise<unknown>;flushPending:()=>Promise<unknown>}) {
   type ItemKeyDown=(event:KeyboardEvent)=>boolean;
   interface Entry {host:HTMLDivElement;editor:Editor;pageId:string;blockId:string;itemId?:string;onKeyDown?:ItemKeyDown;source:string;serialized:string;pending:string|null;saving?:Promise<unknown>;creating:boolean}
   const entries=new Map<string,Entry>(),key=(pageId:string,blockId:string,itemId?:string)=>JSON.stringify([pageId,blockId,itemId]);
@@ -33,7 +33,7 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
     void flush(entry).catch(error=>notify(errorOf(error).message,'error',true));
   }
   async function history(redo:boolean) {
-    try {await manager.flushAll();if(redo)await store.redo();else await store.undo();}
+    try {await flushPending();if(redo)await store.redo();else await store.undo();}
     catch(error){notify(errorOf(error).message,'error',true);}
   }
   function mount(block:TextBlock,pageId:string,item?:ChecklistItem,onKeyDown?:ItemKeyDown) {
