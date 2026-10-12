@@ -182,7 +182,7 @@ try {
   // The left 200px is Excalidraw's shape-properties panel, not the drawing area.
   const drawX=bounds.x+bounds.width*.55,drawY=bounds.y+bounds.height*.45;
   await page.mouse.move(drawX,drawY);await page.mouse.down();await page.mouse.move(drawX+160,drawY+100,{steps:6});await page.mouse.up();
-  await page.waitForFunction(id=>JSON.parse(localStorage.getItem('omd.notebook.v1')).pages.some(p=>p.blocks.some(b=>b.id===id&&b.scene?.elements.length>0)),drawing.id);
+  await page.waitForFunction(async id=>(await import('/src/app.js')).getStore().getRenderState().blocks.some(b=>b.id===id&&b.scene?.elements.length>0),drawing.id);
   await mkdir(`${root}/test-results`,{recursive:true});await page.screenshot({path:`${root}/test-results/full-canvas.png`,fullPage:true});
   await page.getByRole('button',{name:'Back to notebook',exact:true}).click();
   assert.ok((await call('get_notebook')).blocks.find(b=>b.id===drawing.id).scene.elements.length>0);
@@ -268,11 +268,11 @@ try {
   releaseEngine();await racePage.locator('.excalidraw canvas').first().waitFor();
   // A rendered initial scene is normalized and saved by onChange. The normalized
   // data must still be the agent's newest shape, never the old empty snapshot.
-  await racePage.waitForFunction(id=>{const b=JSON.parse(localStorage.getItem('omd.notebook.v1')).pages.find(p=>p.blocks.some(b=>b.id===id)).blocks.find(b=>b.id===id);return b.scene.elements[0]?.id==='edited-during-download'&&b.scene.elements[0]?.version!==undefined;},drawing.id);
+  await racePage.waitForFunction(async id=>{const b=(await import('/src/app.js')).getStore().getRenderState().blocks.find(b=>b.id===id);return b.scene.elements[0]?.id==='edited-during-download'&&b.scene.elements[0]?.version!==undefined;},drawing.id);
   await raceContext.close();
   assert.deepEqual(errors.filter(error => error !== 'Tabs are limited to two levels.'), []);
   console.log('Native WebMCP, app shell/sidebar, view persistence, mobile drawer/focus/menu, lazy engine loading/teardown, block identity, theme, reminders, import/export, and offline reload passed.');
 } catch(error) {
-  if(page) { await mkdir(`${root}/test-results`,{recursive:true});await page.screenshot({path:`${root}/test-results/failure.png`,fullPage:true});console.log(JSON.stringify({errors,consoleErrors,diagnostic:await page.evaluate(()=>({notices:document.getElementById('notices')?.textContent,canvas:[...document.querySelectorAll('#canvas-stage canvas')].map(c=>({class:c.className,width:c.width,height:c.height,rect:c.getBoundingClientRect().toJSON()})),selected:[...document.querySelectorAll('#canvas-stage input:checked')].map(e=>({value:e.value,title:e.closest('label')?.title})),notebook:JSON.parse(localStorage.getItem('omd.notebook.v1'))}))})); }
+  if(page) { await mkdir(`${root}/test-results`,{recursive:true});await page.screenshot({path:`${root}/test-results/failure.png`,fullPage:true});console.log(JSON.stringify({errors,consoleErrors,diagnostic:await page.evaluate(()=>({notices:document.getElementById('notices')?.textContent,canvas:[...document.querySelectorAll('#canvas-stage canvas')].map(c=>({class:c.className,width:c.width,height:c.height,rect:c.getBoundingClientRect().toJSON()})),selected:[...document.querySelectorAll('#canvas-stage input:checked')].map(e=>({value:e.value,title:e.closest('label')?.title})),notebook:localStorage.getItem('omd.notebook.v1')}))})); }
   throw error;
 } finally { await browser?.close(); server.kill(); }

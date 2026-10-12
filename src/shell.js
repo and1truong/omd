@@ -11,7 +11,7 @@ export function showMenu(id,title,actions,anchor) {
 export function setupShell(store,{beforeNavigate,openPalette,confirm,onError}) {
   const sidebar=document.getElementById('sidebar'),toggle=document.getElementById('sidebar-toggle'),pages=document.getElementById('sidebar-pages'),media=matchMedia('(max-width: 760px)'),view=createView(localStorage),rows=new Map();
   const menu=document.getElementById('page-menu');let drawerOpen=false,lastActivePath=null,movingPageId=null,breadcrumbSignature='';
-  function run(name,input){try{beforeNavigate();return store.dispatch(name,input);}catch(error){onError(error);return null;}}
+  async function run(name,input){try{await beforeNavigate();return await store.dispatch(name,input);}catch(error){onError(error);return null;}}
   function closeMobile(){if(media.matches){drawerOpen=false;if(sidebar.open)sidebar.close();sync();}}
   function sync(){
     const state=view.get(),open=media.matches?drawerOpen:state.sidebarOpen;
@@ -25,8 +25,8 @@ export function setupShell(store,{beforeNavigate,openPalette,confirm,onError}) {
     if(patch.collapsedPageIds){const ids=new Set(store.listPages().map(p=>p.pageId));if(patch.collapsedPageIds.some(id=>!ids.has(id)))throw new Error('Collapsed page not found.');}
     if(Object.keys(saved).length)view.set(saved);
     if(media.matches&&patch.sidebarOpen!==undefined)drawerOpen=patch.sidebarOpen;
-    if(patch.sidebarOpen&&document.body.classList.contains('canvas-focused'))beforeNavigate();
-    sync();if(patch.collapsedPageIds)render(store.getState());return getView();
+    if(patch.sidebarOpen&&document.body.classList.contains('canvas-focused'))beforeNavigate().catch(onError);
+    sync();if(patch.collapsedPageIds)render(store.getRenderState());return getView();
   }
   function safeView(patch){try{setView(patch);}catch(error){onError(error);}}
   function render(state,{actionName}={}){
@@ -71,7 +71,7 @@ export function setupShell(store,{beforeNavigate,openPalette,confirm,onError}) {
     document.getElementById('page-new-child').disabled=byId.get(state.id).depth+1>=MAX_PAGE_LEVELS;
     const signature=JSON.stringify(ancestors.map(p=>[p.pageId,p.title]));if(signature!==breadcrumbSignature){const trail=document.getElementById('page-ancestors');trail.replaceChildren();for(const parent of ancestors){const segment=document.createElement('span');segment.className='ancestor-segment';const link=document.createElement('button');link.textContent=parent.title||'Untitled page';link.title=link.textContent;link.setAttribute('aria-label',`Open parent page ${link.textContent}`);link.addEventListener('click',()=>{closeMobile();run('page_select',{pageId:parent.pageId});});const divider=document.createElement('span');divider.textContent='/';divider.setAttribute('aria-hidden','true');segment.append(link,divider);trail.append(segment);}trail.hidden=!ancestors.length;breadcrumbSignature=signature;}
   }
-  function createPage(parentId=''){closeMobile();menu.open=false;if(run('page_add',{parentId})){const title=document.getElementById('page-title');title.focus();title.select();}}
+  async function createPage(parentId=''){closeMobile();menu.open=false;if(await run('page_add',{parentId})){const title=document.getElementById('page-title');title.focus();title.select();}}
   function openMove(pageId){
     movingPageId=pageId;const all=store.listPages(),byId=new Map(all.map(p=>[p.pageId,p])),invalid=new Set([pageId]);
     for(const page of all)if(invalid.has(page.parentId))invalid.add(page.pageId);
@@ -85,7 +85,7 @@ export function setupShell(store,{beforeNavigate,openPalette,confirm,onError}) {
   document.getElementById('sidebar-close').addEventListener('click',()=>safeView({sidebarOpen:false}));
   document.getElementById('sidebar-new-page').addEventListener('click',()=>createPage());
   document.getElementById('page-new-child').addEventListener('click',()=>createPage(store.getActivePageId()));
-  document.getElementById('page-parent-apply').addEventListener('click',()=>{document.getElementById('page-parent-dialog').close();run('page_move',{pageId:movingPageId,parentId:document.getElementById('page-parent-target').value});});
+  document.getElementById('page-parent-apply').addEventListener('click',()=>{document.getElementById('page-parent-dialog').close();const parentId=document.getElementById('page-parent-target').value;if(parentId!==store.listPages().find(p=>p.pageId===movingPageId)?.parentId)run('page_move',{pageId:movingPageId,parentId});});
   document.getElementById('sidebar-search').addEventListener('click',()=>{closeMobile();openPalette();});
   document.getElementById('wide-page').addEventListener('change',event=>safeView({contentWidth:event.target.checked?'wide':'reading'}));
   sidebar.addEventListener('close',()=>{if(media.matches&&!sidebar.open){drawerOpen=false;toggle.setAttribute('aria-expanded','false');}});
@@ -101,5 +101,5 @@ export function setupShell(store,{beforeNavigate,openPalette,confirm,onError}) {
   for(const dialog of document.querySelectorAll('.action-menu'))dialog.addEventListener('keydown',event=>{
     if(!['ArrowUp','ArrowDown','Home','End'].includes(event.key))return;event.preventDefault();const buttons=[...dialog.querySelectorAll('.action-item:not(:disabled)')],i=buttons.indexOf(document.activeElement),next=event.key==='Home'?0:event.key==='End'?buttons.length-1:(i+(event.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length;buttons[next]?.focus();
   });
-  store.subscribe(render);render(store.getState());sync();return {getView,setView,closeMobile};
+  store.subscribe(render);render(store.getRenderState());sync();return {getView,setView,closeMobile};
 }

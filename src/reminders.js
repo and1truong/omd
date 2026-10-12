@@ -1,4 +1,3 @@
-import { dueReminders } from './model.js';
 
 /** Delivery is recorded before presentation, and serialized across tabs with Web Locks. */
 export function startReminders(store, { deliver, onError, locks = globalThis.navigator?.locks,
@@ -10,9 +9,10 @@ export function startReminders(store, { deliver, onError, locks = globalThis.nav
     running = true;
     const run = async () => {
       // A different tab may have delivered a reminder while this tab was suspended.
-      store.reload();
-      for (const page of store.getNotebook().pages) for (const reminder of dueReminders(page, now())) {
-        store.dispatch('reminder_fired', { pageId: page.id, blockId: reminder.id, firedAt: new Date(now()).toISOString() }, { quiet: true, reminderBlockId:reminder.id, reminderPageId:page.id });
+      await store.reload();
+      for (const reminder of await store.dueReminders(now())) {
+        const page = store.getPageMetadata(reminder.pageId);
+        await store.dispatch('reminder_fired', { pageId: page.id, blockId: reminder.id, firedAt: new Date(now()).toISOString() }, { quiet: true, reminderBlockId:reminder.id, reminderPageId:page.id });
         await deliver({ ...reminder, pageId: page.id }, page.notificationMode);
       }
     };

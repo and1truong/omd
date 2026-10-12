@@ -10,7 +10,20 @@
     "build": "node scripts/build.mjs",
     "test:browser": "node tests/browser.mjs"
   },
-  "engines": { "node": ">=22" },
-  "dependencies": { "mermaid":"12.1.0", "@excalidraw/excalidraw":"0.18.1", "react":"19.2.0", "react-dom":"19.2.0" },
-  "devDependencies": { "playwright": "1.62.1", "esbuild":"0.25.5" }
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@excalidraw/excalidraw": "0.18.1",
+    "immer": "11.1.21",
+    "mermaid": "12.1.0",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "zustand": "5.0.15"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.5",
+    "fake-indexeddb": "6.2.5",
+    "playwright": "1.62.1"
+  }
 }

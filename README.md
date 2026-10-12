@@ -34,7 +34,7 @@ Add **Mermaid** for editable raw diagram definitions or fenced Mermaid Markdown,
 
 Add **Excalidraw** for a real editable canvas, including drawing, text, shapes and image files. **Full page** expands the same canvas across the webpage and retains the notebook page title/description. **Back to notebook** restores the embedded canvas. Cmd/Ctrl+K works in canvas mode; changing pages closes it and saves pending edits. Scene elements, image files and viewport settings are part of notebook storage and JSON exports. Excalidraw 0.18.1 is the upstream security-patched release.
 
-Canvas changes save after a short debounce and flush before navigation, export, agent actions and page closure. Native Excalidraw undo remains available; external notebook undo updates the mounted scene. Runtime library assets and fonts are precached for offline editing.
+Canvas changes start an IndexedDB save immediately; while a transaction is in flight, only the newest pending scene is retained. Navigation, export and agent actions await pending saves. “Saved” appears after the transaction completes. Native Excalidraw undo remains available; external notebook undo updates the mounted scene. Runtime library assets and fonts are precached for offline editing.
 
 ## Rendering and memory
 
@@ -42,11 +42,15 @@ Only the active page, selected tab panels, expanded toggles and open accordion s
 
 Blocks and content lists reconcile by stable IDs. A changed leaf rebuilds its own block while preserving ancestor headers and unrelated inputs/canvases. Reordering updates affected controls; adding a sibling does not rebuild every block. Local typing keeps its existing input, cursor and composition state. Diagram source/scene changes and theme changes update the appropriate engines; unrelated commands do not call React render. Hidden-tab data edits do not mount its content. Container event handlers retain metadata, not descendant scenes.
 
-This frees rendered content, not the notebook's JSON or the browser's imported module cache. The localStorage store still loads the complete notebook and serializes it on edits; undo history also remains in memory. Very large notebooks can therefore still hit storage and state-management costs. No application quantity limits are introduced.
+Zustand vanilla holds normalized records for the active page, plus lightweight metadata for every page. Switching pages reads only the new page and releases the previous payload and materializer cache. Mounted blocks and lists subscribe to their own records; a commit batches the affected DOM updates before returning. Inactive tab/closed-section renderers are released, but their data remains in the active page's records. JavaScript modules imported by the browser remain cached.
+
+IndexedDB stores page metadata, block records, container order and canvas scenes separately. Edits use immutable structural sharing, validate the affected page, and write only changed records in a transaction with a notebook revision check. Canvas title edits do not write scene data. Undo/redo keeps only journal IDs in RAM, with forward/inverse record patches in IndexedDB; history navigation remains session-local. Reminder delivery uses an indexed summary across pages and a durable delivery ledger, without hydrating inactive pages. Failed transactions publish no state or history changes. BroadcastChannel reloads other windows; revision checks prevent stale writes.
+
+Migration accepts old localStorage v1/v2/v3 notebooks, initializes IndexedDB atomically, and retains the original localStorage bytes for recovery. Normal edits never serialize the whole notebook or mirror it to localStorage. Full JSON materialization occurs only for explicit import/export/read operations. Validation and record traversal still scan the affected page, and the active page's content remains in RAM; this is not out-of-viewport data eviction. No content quantity quotas are introduced.
 
 ## Install and offline use
 
-After the first online load, the service worker caches the app shell. Install from Chrome/Edge's browser menu, or Safari's Share → Add to Home Screen. When an install prompt is available, Settings also shows an install button. Closing the browser/PWA and reopening keeps the notebook in localStorage. Offline edits persist too.
+After the first online load, the service worker caches the app shell. Install from Chrome/Edge's browser menu, or Safari's Share → Add to Home Screen. When an install prompt is available, Settings also shows an install button. Closing the browser/PWA and reopening keeps the notebook in IndexedDB. Offline edits persist too.
 
 Builds fingerprint the service-worker cache. Network-first app assets allow upgrades; cached assets provide offline fallback. Mermaid, Excalidraw, React and their fonts/chunks are bundled into the static output and cached with the app. No CDN is required at runtime. No server, account, analytics or AI API key is needed by omd.
 
@@ -68,16 +72,16 @@ Examples of prompts: “Create a work checklist in a vertical tab under Personal
 - Horizontal tabs may contain vertical tabs; vertical tabs may contain horizontal tabs. At most two tab groups per ancestor path, including through other containers.
 - No application quotas on numbers of blocks, tabs, list items, columns, cards, text length, or import size. Browser storage and device resources impose their own physical limits.
 - One validated command path for UI and agents. Invalid operations are atomic.
-- Write-through localStorage, revision checks across windows, undo/redo, validated JSON import/export. Failed writes keep the previous state; corrupt saved data is never silently overwritten.
+- Transactional IndexedDB records, Zustand selectors, revision checks across windows, patch-based undo/redo, validated JSON import/export. Failed writes keep the previous state; corrupt saved data is never silently overwritten.
 - Reminders include persisted delivery records and are found in hidden containers too.
 
 ## Verification
 
-Run `npm test` (no installation required) and `npm run build`. Tests cover atomic actions, tabs, unlimited content quantities, import/export, storage failures, cross-window conflicts, reminder catch-up, single delivery under Web Locks, undo/redo, WebMCP registration/cleanup, valid and invalid tool execution, cancellation, and offline asset completeness.
+After `npm install`, run `npm test` and `npm run build`. Tests cover atomic actions, tabs, unlimited content quantities, import/export, storage failures, cross-window conflicts, reminder catch-up, single delivery under Web Locks, undo/redo, WebMCP registration/cleanup, valid and invalid tool execution, cancellation, and offline asset completeness.
 
 For native browser integration, install the development dependency with `npm install`, install Chromium with `npx playwright install chromium`, build, then run `npm run test:browser`. The browser test enables Chrome's native WebMCP feature, discovers and executes tools through the real registry (no polyfill), checks visible UI results and invalid inputs, then verifies mobile layout, themes, reminders, import confirmation, persistent edits and offline reopening. CI runs both sets of checks and uploads the static app and screenshots. An unavailable browser binary or unsupported native API is a verification failure, not a mocked success.
 
-Local verification: 48 model, multi-page migration, scene, reminder, asset and WebMCP adapter tests pass; JavaScript syntax checks pass. Diagram bundling and native browser verification run in CI. Browser/extension compatibility requires the native browser check and a real extension session; adapter tests alone do not verify a Gemini integration.
+Local verification: 57 model, record-store, multi-page migration, scene, reminder, asset and WebMCP adapter tests pass; JavaScript syntax checks pass. Diagram bundling and native browser verification run in CI. Browser/extension compatibility requires the native browser check and a real extension session; adapter tests alone do not verify a Gemini integration.
 
 ## PR stack
 
@@ -89,6 +93,7 @@ Local verification: 48 model, multi-page migration, scene, reminder, asset and W
 - App shell: `codex/omd-07-app-shell` → `codex/omd-06-lazy-render`: full-window workspace, page sidebar and contextual actions.
 - Rendering follow-up: `codex/omd-06-lazy-render` → `codex/omd-05-diagrams`: lazy visible content and block-scoped DOM reconciliation.
 
+- Record store: `codex/omd-09-record-store` → `codex/omd-08-page-tree`: Zustand, incremental IndexedDB persistence, lazy page hydration and patch history.
 - Page tree: `codex/omd-08-page-tree` → `codex/omd-07-app-shell`: nested pages, tree navigation and subtree moves.
 
 The final branch contains the complete app. Review the incremental diffs; merge bottom to top and retarget each remaining PR after its predecessor merges.

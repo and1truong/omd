@@ -6,7 +6,7 @@ const root = resolve(new URL('..', import.meta.url).pathname);
 const output = resolve(root, 'dist');
 await rm(output, { recursive: true, force: true }); await mkdir(output, { recursive: true });
 for (const name of ['index.html', 'icon.svg', 'manifest.webmanifest', 'service-worker.js', 'src', 'icons']) await cp(resolve(root, name), resolve(output, name), { recursive: true });
-await build({ absWorkingDir:root, entryPoints:{'mermaid-engine':'src/mermaid-engine.js','excalidraw-engine':'src/excalidraw-engine.js'},outdir:resolve(output,'src'),bundle:true,splitting:true,format:'esm',platform:'browser',target:'es2022',minify:true,
+await build({ absWorkingDir:root, entryPoints:{'state-engine':'src/state-engine.js','mermaid-engine':'src/mermaid-engine.js','excalidraw-engine':'src/excalidraw-engine.js'},outdir:resolve(output,'src'),bundle:true,splitting:true,format:'esm',platform:'browser',target:'es2022',minify:true,
   conditions:['production'],chunkNames:'chunks/[name]-[hash]',assetNames:'assets/[name]-[hash]',
   define:{'process.env.NODE_ENV':'"production"','process.env.IS_PREACT':'false'},loader:{'.woff2':'file','.woff':'file','.ttf':'file','.png':'file','.svg':'file','.wasm':'file'} });
 await cp(resolve(root,'node_modules/@excalidraw/excalidraw/dist/prod/fonts'),resolve(output,'excalidraw-assets/fonts'),{recursive:true});

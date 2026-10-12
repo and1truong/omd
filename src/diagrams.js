@@ -5,19 +5,21 @@ export function createDiagramManager(store,{notify}) {
   const entries=new Map(); let used=new Set(),focused=null;
   const theme=()=>document.documentElement.dataset.theme === 'dark'?'dark':'light';
   const key=(pageId,blockId)=>`${pageId}:${blockId}`;
-  function get(pageId,blockId) { return findBlock(store.getPage(pageId),blockId).block; }
-  function flush(entry) {
+  function get(pageId,blockId) { return findBlock(store.getRenderState(),blockId).block; }
+  async function flush(entry) {
     if (!entry.pending) return;
+    if(entry.saving){await entry.saving;if(entry.pending)return flush(entry);return;}
     clearTimeout(entry.saveTimer); const scene=entry.pending;
-    try { store.dispatch('update_block',{pageId:entry.pageId,blockId:entry.blockId,patch:{scene}},{quiet:true}); entry.saved=JSON.stringify(scene); entry.pending=null; }
-    catch(error) { notify(error.message,'error',true); }
+    try { entry.saving=store.dispatch('update_block',{pageId:entry.pageId,blockId:entry.blockId,patch:{scene}},{quiet:true});await entry.saving; entry.saved=JSON.stringify(scene); if(entry.pending===scene)entry.pending=null; }
+    catch(error) { notify(error.message,'error',true); throw error; }finally{entry.saving=null;}
+    if(entry.pending)await flush(entry);
   }
   function canvasChange(entry,elements,appState,files) {
     if (entry.disposed || !entry.api) return;
     const app=Object.fromEntries(stateKeys.filter(k=>appState[k]!==undefined).map(k=>[k,appState[k]]));
     const scene=JSON.parse(JSON.stringify({elements,appState:app,files}));
     if (JSON.stringify(scene)===entry.saved || JSON.stringify(scene)===JSON.stringify(entry.pending)) return;
-    entry.pending=scene; clearTimeout(entry.saveTimer); entry.saveTimer=setTimeout(()=>flush(entry),160);
+    entry.pending=scene;if(!entry.saving)flush(entry).catch(()=>{});
   }
   function scheduleMermaid(entry,source) {
     entry.source=source; const token=++entry.token; clearTimeout(entry.timer);
@@ -66,22 +68,22 @@ export function createDiagramManager(store,{notify}) {
   }
   function closeFocus() {
     if(!focused)return;
-    const entry=entries.get(focused);if(entry) { flush(entry);const placeholder=document.querySelector(`[data-canvas-placeholder="${CSS.escape(entry.blockId)}"]`); if(placeholder)placeholder.replaceChildren(entry.host); }
+    const entry=entries.get(focused);if(entry) { flush(entry).catch(()=>{});const placeholder=document.querySelector(`[data-canvas-placeholder="${CSS.escape(entry.blockId)}"]`); if(placeholder)placeholder.replaceChildren(entry.host); }
     focused=null;document.getElementById('canvas-stage').hidden=true;document.body.classList.remove('canvas-focused');
   }
   function openFocus(blockId) {
-    closeFocus();const page=store.getState(),block=findBlock(page,blockId,'excalidraw').block;
+    closeFocus();const page=store.getRenderState(),block=findBlock(page,blockId,'excalidraw').block;
     const host=mount(block,page.id); focused=key(page.id,block.id);
     document.getElementById('canvas-stage-title').textContent=page.title || 'Untitled page';
     document.getElementById('canvas-stage-subtitle').textContent=page.subtitle;
     document.getElementById('canvas-stage').hidden=false;document.getElementById('canvas-stage-host').replaceChildren(host);document.body.classList.add('canvas-focused');
     requestAnimationFrame(()=>window.dispatchEvent(new Event('resize')));
   }
-  function cleanup(entry) { flush(entry);entry.disposed=true;clearTimeout(entry.timer);clearTimeout(entry.saveTimer);entry.renderer?.unmount();entry.api=null;entry.renderer=null;entry.pending=null;entry.saved=null;entry.source=null;entry.host.replaceChildren();entries.delete(key(entry.pageId,entry.blockId)); }
+  function cleanup(entry) {entry.disposed=true;clearTimeout(entry.timer);clearTimeout(entry.saveTimer);entry.renderer?.unmount();entry.api=null;entry.renderer=null;entry.pending=null;entry.saved=null;entry.source=null;entry.host.replaceChildren();entries.delete(key(entry.pageId,entry.blockId)); }
   return {
     mount,openFocus,closeFocus,
-    updateSource(blockId,source) { const entry=entries.get(key(store.getState().id,blockId));if(entry)scheduleMermaid(entry,source); },
-    begin() { used=new Set(); if(focused) { const entry=entries.get(focused);try{const block=get(entry.pageId,entry.blockId);if(entry.pageId!==store.getState().id||block.type!=='excalidraw')closeFocus();}catch{closeFocus();} } },
+    updateSource(blockId,source) { const entry=entries.get(key(store.getRenderState().id,blockId));if(entry)scheduleMermaid(entry,source); },
+    begin() { used=new Set(); if(focused) { const entry=entries.get(focused);try{const block=get(entry.pageId,entry.blockId);if(entry.pageId!==store.getRenderState().id||block.type!=='excalidraw')closeFocus();}catch{closeFocus();} } },
     end() {
       // Cached blocks do not call mount again. Derive lifetime from the connected
       // visible notebook, rather than from how many blocks were rebuilt.
@@ -96,8 +98,8 @@ export function createDiagramManager(store,{notify}) {
       if(focused){const entry=entries.get(focused);const stage=document.getElementById('canvas-stage-host');if(entry.host.parentNode!==stage)stage.replaceChildren(entry.host);}
     },
     themeChanged() { for(const entry of entries.values()) { if(entry.type==='mermaid')scheduleMermaid(entry,entry.source);else if(entry.renderer)entry.renderer.draw(get(entry.pageId,entry.blockId).scene,theme()); } },
-    flushAll() {for(const entry of entries.values())flush(entry);},
-    beforeNavigate() {closeFocus();for(const entry of entries.values())flush(entry);},
-    syncHeader() { if(focused) { document.getElementById('canvas-stage-title').textContent=store.getState().title;document.getElementById('canvas-stage-subtitle').textContent=store.getState().subtitle; } }
+    async flushAll() {await Promise.all([...entries.values()].map(flush));await store.idle();},
+    async beforeNavigate() {await this.flushAll();closeFocus();},
+    syncHeader() { if(focused) { document.getElementById('canvas-stage-title').textContent=store.getRenderState().title;document.getElementById('canvas-stage-subtitle').textContent=store.getRenderState().subtitle; } }
   };
 }

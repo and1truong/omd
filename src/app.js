@@ -1,5 +1,5 @@
 import { createStore } from './store.js';
-import { STORAGE_KEY, allowedTypes, findBlock } from './model.js';
+import { STORAGE_KEY, allowedTypes, findBlock, findContainer } from './model.js';
 import { startReminders } from './reminders.js';
 import { setupPalette } from './palette.js';
 import { createDiagramManager } from './diagrams.js';
@@ -11,16 +11,16 @@ const $ = selector => document.querySelector(selector);
 let store, palette, diagrams, renderer, shell, dragData, pickerTarget = 'page';
 export const openPalette = () => {shell?.closeMobile();palette?.open();};
 export const getView = () => shell.getView();
-export const setView = patch => shell.setView(patch);
-export const flushDiagrams = () => diagrams?.flushAll();
-export function openCanvas(blockId,pageId) {
-  const page=store.getPage(pageId);findBlock(page,blockId,'excalidraw');diagrams?.flushAll();
+export const setView = async patch => {if(patch.sidebarOpen)await diagrams?.beforeNavigate();return shell.setView(patch);};
+export const flushDiagrams = async () => await diagrams?.flushAll();
+export async function openCanvas(blockId,pageId) {
+  const page=await store.getPage(pageId);findBlock(page,blockId,'excalidraw');await diagrams?.flushAll();
   shell?.closeMobile();
-  if(page.id!==store.getActivePageId())store.dispatch('page_select',{pageId:page.id});
-  for(const [name,input] of revealActions(page.blocks,blockId))store.dispatch(name,input);
+  if(page.id!==store.getActivePageId())await store.dispatch('page_select',{pageId:page.id});
+  for(const [name,input] of revealActions(page.blocks,blockId))await store.dispatch(name,input);
   diagrams.openFocus(blockId);
 }
-export const closeCanvas = () => diagrams?.closeFocus();
+export const closeCanvas = async () => {await diagrams?.flushAll();diagrams?.closeFocus();};
 const themeQuery = matchMedia('(prefers-color-scheme: dark)');
 export function notify(message, kind = '', persistent = false) {
   const el = element('div', `notice ${kind}`); const text = element('span'); text.textContent = message;
@@ -31,8 +31,8 @@ function element(tag, className = '') { const el = document.createElement(tag); 
 function button(label, aria, fn, className = 'icon-button') {
   const b = element('button', className); b.type = 'button'; if(labelIcon[label])b.append(icon(labelIcon[label]));else b.textContent=label; b.title = aria; b.setAttribute('aria-label', aria); b.addEventListener('click', fn); return b;
 }
-function action(name, input, { quiet = false, focus } = {}) {
-  try { if(!quiet)diagrams?.flushAll(); const result = store.dispatch(name, input, { quiet }); if (focus) requestAnimationFrame(() => document.getElementById(focus)?.focus()); return result; }
+async function action(name, input, { quiet = false, focus } = {}) {
+  try { input={...input,pageId:input.pageId??store.getActivePageId()}; $('#save-status').textContent='Saving…'; if(!quiet)await diagrams?.flushAll(); const result = await store.dispatch(name, input, { quiet }); if (focus) requestAnimationFrame(() => document.getElementById(focus)?.focus()); return result; }
   catch (error) { $('#save-status').textContent = 'Not saved'; notify(error.message, 'error', true); return null; }
 }
 function editable(value, aria, fn, { multiline = false, className = '', placeholder = '', id } = {}) {
@@ -82,7 +82,7 @@ function makeBlockList(blocks, containerId, nodes) {
   function slot(index) {
     const el = element('div', 'drop-slot'); el.setAttribute('aria-hidden', 'true');
     dropTarget(el, data => data.kind === 'block', data => {
-      const source = findBlock(store.getState(), data.blockId); let targetIndex = index;
+      const source = findBlock(store.getRenderState(), data.blockId); let targetIndex = index;
       if (source.siblings.some(b => b.id === data.blockId) && data.containerId === containerId && source.siblings.findIndex(b => b.id === data.blockId) < index) targetIndex--;
       action('move_block', { blockId: data.blockId, containerId, index: targetIndex });
     }); return el;
@@ -95,7 +95,7 @@ function renderBlock(b, containerId, index, count) {
   const shell = element('section', `block block-type-${b.type}`); shell.dataset.blockId = b.id;
   const controls = element('div', 'block-controls'); const handle = button('⠿', 'Drag block', () => {}, 'icon-button block-drag'); draggable(handle, { kind: 'block', blockId: b.id, containerId });
   const more=button('…','Block actions',()=>{
-    const current=findBlock(store.getState(),b.id),position=current.siblings.findIndex(block=>block.id===b.id);
+    const current=findBlock(store.getRenderState(),b.id),position=current.siblings.findIndex(block=>block.id===b.id);
     showMenu('block-actions-dialog','Block actions',[
       {label:'Move block up',icon:'up',disabled:position===0,run:()=>action('move_block',{blockId:b.id,containerId,index:position-1},{focus:`${b.id}-menu`})},
       {label:'Move block down',icon:'down',disabled:position===current.siblings.length-1,run:()=>action('move_block',{blockId:b.id,containerId,index:position+1},{focus:`${b.id}-menu`})},
@@ -113,7 +113,7 @@ function renderBlock(b, containerId, index, count) {
     case 'reminder': renderReminder(shell, b); break;
     case 'kanban': renderKanban(shell, b); break;
     case 'mermaid': {
-      shell.append(title(b,'◇'),editable(b.source,'Mermaid Markdown source',value=>{if(action('update_block',{blockId:b.id,patch:{source:value}},{quiet:true}))diagrams.updateSource(b.id,value);},{multiline:true,className:'mermaid-source',id:`${b.id}-source`,placeholder:'flowchart LR\n  A --> B'}),diagrams.mount(b,renderPageId)); break;
+      shell.append(title(b,'◇'),editable(b.source,'Mermaid Markdown source',async value=>{if(await action('update_block',{blockId:b.id,patch:{source:value}},{quiet:true}))diagrams.updateSource(b.id,value);},{multiline:true,className:'mermaid-source',id:`${b.id}-source`,placeholder:'flowchart LR\n  A --> B'}),diagrams.mount(b,renderPageId)); break;
     }
     case 'excalidraw': {
       const head=title(b,'✎');head.append(button('↗ Full page','Open canvas full page',()=>openCanvas(b.id), 'add-inline'));
@@ -128,10 +128,10 @@ function renderChecklist(shell, b) {
     const row = element('div', `check-row ${item.done ? 'done' : ''}`); const check = element('input'); check.type = 'checkbox'; check.checked = item.done; check.setAttribute('aria-label', `Complete ${item.text || 'item'}`);
     check.addEventListener('change', () => action('checklist_update', { blockId: b.id, itemId: item.id, patch: { done: check.checked } }));
     const text = editable(item.text, 'Checklist item', value => action('checklist_update', { blockId: b.id, itemId: item.id, patch: { text: value } }, { quiet: true }), { placeholder: 'A little thing to do', id: item.id });
-    text.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); const result = action('checklist_add', { blockId: b.id, index: index + 1 }); if (result) requestAnimationFrame(() => document.getElementById(result.itemId)?.focus()); } });
+    text.addEventListener('keydown', async event => { if (event.key === 'Enter') { event.preventDefault(); const result = await action('checklist_add', { blockId: b.id, index: index + 1 }); if (result) requestAnimationFrame(() => document.getElementById(result.itemId)?.focus()); } });
     row.append(check, text, rowsControls(() => action('checklist_move', { blockId: b.id, itemId: item.id, index: index - 1 }), () => action('checklist_move', { blockId: b.id, itemId: item.id, index: index + 1 }), () => action('checklist_remove', { blockId: b.id, itemId: item.id }), index === 0, index === b.items.length - 1, 'checklist item')); shell.append(row);
   });
-  shell.append(button('+ Add an item', 'Add checklist item', () => { const r = action('checklist_add', { blockId: b.id }); if (r) requestAnimationFrame(() => document.getElementById(r.itemId)?.focus()); }, 'add-inline'));
+  shell.append(button('+ Add an item', 'Add checklist item', async () => { const r = await action('checklist_add', { blockId: b.id }); if (r) requestAnimationFrame(() => document.getElementById(r.itemId)?.focus()); }, 'add-inline'));
 }
 function renderTabs(shell, b) {
   shell.append(title(b, '▤')); const group = element('div', 'tab-group'); const layout = element('div', `tabs-layout ${b.orientation}`);
@@ -196,7 +196,7 @@ function renderKanban(shell, b) {
       tools.append(handle, select, rowsControls(() => action('card_move', { blockId: b.id, cardId: card.id, columnId: col.id, index: i - 1 }), () => action('card_move', { blockId: b.id, cardId: card.id, columnId: col.id, index: i + 1 }), () => action('card_remove', { blockId: b.id, cardId: card.id }), i === 0, i === col.cards.length - 1, 'card'));
       el.append(tools); dropTarget(el, data => data.kind === 'card' && data.blockId === b.id && data.cardId !== card.id, data => { let index = i; if (data.columnId === col.id && col.cards.findIndex(c => c.id === data.cardId) < i) index--; action('card_move', { blockId: b.id, cardId: data.cardId, columnId: col.id, index }); }); cards.append(el);
     });
-    const add = button('+ Add a card', 'Add card to column', () => { const r = action('card_add', { blockId: b.id, columnId: col.id }); if (r) requestAnimationFrame(() => document.getElementById(r.cardId)?.focus()); }, 'add-inline');
+    const add = button('+ Add a card', 'Add card to column', async () => { const r = await action('card_add', { blockId: b.id, columnId: col.id }); if (r) requestAnimationFrame(() => document.getElementById(r.cardId)?.focus()); }, 'add-inline');
     dropTarget(cards, data => data.kind === 'card' && data.blockId === b.id, data => action('card_move', { blockId: b.id, cardId: data.cardId, columnId: col.id }));
     dropTarget(column, data => data.kind === 'column' && data.blockId === b.id && data.columnId !== col.id, data => action('column_move', { blockId: b.id, columnId: data.columnId, index: ci })); column.append(cards, add); board.append(column);
   }); shell.append(board);
@@ -211,12 +211,12 @@ const options = [
   ['mermaid',null,'◇','Mermaid','Markdown to a diagram'],['excalidraw',null,'✎','Excalidraw','A canvas for your thoughts']
 ];
 export function openPicker(containerId = 'page') {
-  pickerTarget = containerId; const allowed = allowedTypes(store.getState(), containerId); const grid = $('#picker-options'); grid.replaceChildren();
+  pickerTarget = containerId; const allowed = allowedTypes(store.getRenderState(), containerId); const grid = $('#picker-options'); grid.replaceChildren();
   for (const [type, orientation, glyph, name, caption] of options) {
     if (!allowed.types.includes(type) || type === 'tabs' && allowed.tabOrientation && allowed.tabOrientation !== orientation) continue;
-    const btn = button('', `Add ${name.toLowerCase()}`, () => {
+    const btn = button('', `Add ${name.toLowerCase()}`, async () => {
       const input = { type, containerId: pickerTarget }; if (orientation) input.orientation = orientation;
-      const r = action('add_block', input); if (r) { $('#picker').close(); requestAnimationFrame(() => document.querySelector(`[data-block-id="${CSS.escape(r.blockId)}"] input,[data-block-id="${CSS.escape(r.blockId)}"] textarea`)?.focus()); }
+      const r = await action('add_block', input); if (r) { $('#picker').close(); requestAnimationFrame(() => document.querySelector(`[data-block-id="${CSS.escape(r.blockId)}"] input,[data-block-id="${CSS.escape(r.blockId)}"] textarea`)?.focus()); }
     }, 'picker-option'); const glyphIcon=icon(type==='tabs'&&orientation==='vertical'?'vertical':type);glyphIcon.classList.add('glyph');
     const body = element('span'); const strong = element('strong'); strong.textContent = name; const small = element('small'); small.textContent = caption; body.append(strong, small); btn.append(glyphIcon, body); grid.append(btn);
   }
@@ -229,9 +229,9 @@ function applyTheme(theme) {
   if(changed)diagrams?.themeChanged();
 }
 let renderPageId;
-function render(state, { quiet = false, reminderBlockId, reminderPageId, changedBlockId, changedPageId } = {}) {
+function render(state, { quiet = false, reminderBlockId, reminderPageId, changedBlockId, changedPageId, reset = false } = {}) {
   applyTheme(state.theme); $('#theme').value = state.theme; $('#notification-mode').value = state.notificationMode;
-  $('#save-status').replaceChildren(); const dot = element('span', 'status-dot'); $('#save-status').append(dot, document.createTextNode('Saved'));
+
   $('#undo-button').disabled = !store.canUndo(); $('#redo-button').disabled = !store.canRedo();
   diagrams?.syncHeader(); if (quiet) {
     if(changedBlockId && changedPageId===state.id)renderer.accept(changedBlockId,findBlock(state,changedBlockId).block);
@@ -244,14 +244,15 @@ function render(state, { quiet = false, reminderBlockId, reminderPageId, changed
   const focused = document.activeElement; const focusId = focused?.id; const selection = focused?.selectionStart == null ? null : [focused.selectionStart, focused.selectionEnd];
   const scroll = [scrollX, scrollY];
   for(const [selector,value] of [['#page-title',state.title],['#page-subtitle',state.subtitle]]){const el=$(selector);if(el.value!==value){el.value=value;fit(el);}}
+  if(renderPageId===state.id&&!reset)return;
   renderPageId=state.id;diagrams?.begin();renderer.begin(state.id);
   reconcile($('#notebook'),[renderer.list(state.blocks,'page')]);renderer.end();diagrams?.end();
   for(const el of document.querySelectorAll('[data-autofit],.auto-height'))if(!el.dataset.fitted){fit(el);el.dataset.fitted='true';}
   if (focusId) { const next = document.getElementById(focusId); if (next) { next.focus({ preventScroll: true }); if (selection && next.setSelectionRange) next.setSelectionRange(...selection); } }
   scrollTo(...scroll);
 }
-export function downloadJson(raw, filename = `omd-${new Date().toISOString().slice(0, 10)}.json`) {
-  diagrams?.flushAll(); raw ??= store.export();
+export async function downloadJson(raw, filename = `omd-${new Date().toISOString().slice(0, 10)}.json`) {
+  await diagrams?.flushAll(); raw ??= await store.export();
   const url = URL.createObjectURL(new Blob([raw], { type: 'application/json' })); const a = element('a'); a.href = url; a.download = filename; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 export function openSettings() {
@@ -276,14 +277,29 @@ function startupError(error) {
   const backup = button('Download saved data', 'Download saved data', () => { try { downloadJson(localStorage.getItem(STORAGE_KEY) ?? '', 'omd-recovery.json'); } catch { location.reload(); } }, 'secondary-button');
   box.append(h, p, backup, button('Try again', 'Reload app', () => location.reload(), 'secondary-button')); document.body.append(box);
 }
-function boot() {
-  try { store = createStore(localStorage); } catch (error) { startupError(error); return; }
+async function boot() {
+  try { store = await createStore(localStorage); } catch (error) { startupError(error); return; }
   for (const close of document.querySelectorAll('[data-close]')) close.addEventListener('click', () => close.closest('dialog').close());
   for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', e => { if (e.target === dialog) { const rect = dialog.getBoundingClientRect(); if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) dialog.close(); } });
   diagrams=createDiagramManager(store,{notify});
-  renderer=createRenderCache({makeBlock:renderBlock,makeList:makeBlockList});
+  const dirtyContainers=new Set();
+  renderer=createRenderCache({makeBlock:renderBlock,makeList:makeBlockList,
+    observeBlock:(id,fn)=>store.subscribeBlock(id,fn),observeList:(id,fn)=>store.subscribeContainer(id,fn),
+    onChange:({blockId,containerId})=>{
+      const state=store.getRenderState(),options=store.getLastEvent();if(options.quiet||options.reset||state.id!==renderPageId)return;
+      const id=containerId??renderer.containerFor(blockId);if(id)dirtyContainers.add(id);
+    }
+  });
+  store.afterChange(()=>{
+    if(!dirtyContainers.size)return;const state=store.getRenderState(),options=store.getLastEvent(),ids=[...dirtyContainers];dirtyContainers.clear();if(options.reset)return;
+    const focused=document.activeElement,focusId=focused?.id,selection=focused?.selectionStart==null?null:[focused.selectionStart,focused.selectionEnd],scroll=[scrollX,scrollY];
+    diagrams.begin();for(const id of ids)try{renderer.refresh(findContainer(state,id).blocks,id);}catch(error){if(!/not found/.test(error.message))notify(error.message,'error',true);}diagrams.end();
+    for(const el of document.querySelectorAll('[data-autofit],.auto-height'))if(!el.dataset.fitted){fit(el);el.dataset.fitted='true';}
+    if(focusId){const next=document.getElementById(focusId);if(next){next.focus({preventScroll:true});if(selection&&next.setSelectionRange)next.setSelectionRange(...selection);}}scrollTo(...scroll);
+  });
   shell=setupShell(store,{beforeNavigate:()=>diagrams.beforeNavigate(),openPalette,confirm:confirmAction,onError:error=>notify(error.message,'error',true)});
-  store.subscribe(render); render(store.getState());
+  store.subscribe(render); render(store.getRenderState());
+  store.subscribeStatus(({pending,error})=>{const status=$('#save-status');status.replaceChildren();const dot=element('span','status-dot');status.append(dot,document.createTextNode(error?'Not saved':pending?'Saving…':'Saved'));});
   palette = setupPalette(store, { onError: error => notify(error.message, 'error', true), beforeOpen:()=>shell.closeMobile(), beforeNavigate:()=>diagrams.beforeNavigate() });
   let fitFrame;window.addEventListener('resize',()=>{cancelAnimationFrame(fitFrame);fitFrame=requestAnimationFrame(()=>{for(const el of document.querySelectorAll('[data-autofit],.auto-height'))fit(el);});});
   $('#canvas-stage-close').addEventListener('click',closeCanvas);$('#canvas-stage-pages').addEventListener('click',openPalette);
@@ -293,27 +309,27 @@ function boot() {
     const write = () => { action('set_page', { [key]: el.value }, { quiet: true }); fit(el); };
     el.addEventListener('compositionstart', () => { composing = true; }); el.addEventListener('compositionend', () => { composing = false; write(); }); el.addEventListener('input', () => { if (!composing) write(); });
   }
-  $('#theme').addEventListener('change', e => action('set_page', { theme: e.target.value })); themeQuery.addEventListener('change', () => applyTheme(store.getState().theme));
+  $('#theme').addEventListener('change', e => action('set_page', { theme: e.target.value })); themeQuery.addEventListener('change', () => applyTheme(store.getRenderState().theme));
   $('#notification-mode').addEventListener('change', e => action('set_page', { notificationMode: e.target.value }));
-  $('#undo-button').addEventListener('click', () => { try { diagrams.flushAll();store.undo(); } catch (e) { notify(e.message, 'error'); } });
-  $('#redo-button').addEventListener('click', () => { try { diagrams.flushAll();store.redo(); } catch (e) { notify(e.message, 'error'); } });
-  $('#export-button').addEventListener('click', () => { $('#page-menu').open=false;downloadJson(); notify('Notebook exported.'); });
+  $('#undo-button').addEventListener('click', async () => { try { await diagrams.flushAll();await store.undo(); } catch (e) { notify(e.message, 'error'); } });
+  $('#redo-button').addEventListener('click', async () => { try { await diagrams.flushAll();await store.redo(); } catch (e) { notify(e.message, 'error'); } });
+  $('#export-button').addEventListener('click', async () => { $('#page-menu').open=false;await downloadJson(); notify('Notebook exported.'); });
   $('#import-button').addEventListener('click', () => {$('#page-menu').open=false;$('#import-file').click();});
   $('#import-file').addEventListener('change', async event => {
     const file = event.target.files[0]; event.target.value = ''; if (!file) return;
     try { const raw = await file.text(); const { parseBook } = await import('./notebook.js'); parseBook(raw);
-      if (await confirmAction('Replace this notebook?', 'All current pages will be exported as a backup before importing. Import replaces the entire notebook, page order and settings.', 'Back up & import')) { diagrams.beforeNavigate();downloadJson(store.export(), `omd-before-import-${Date.now()}.json`); store.import(raw); notify('Notebook imported.'); }
+      if (await confirmAction('Replace this notebook?', 'All current pages will be exported as a backup before importing. Import replaces the entire notebook, page order and settings.', 'Back up & import')) { await diagrams.beforeNavigate();await downloadJson(await store.export(), `omd-before-import-${Date.now()}.json`); await store.import(raw); notify('Notebook imported.'); }
     } catch (error) { notify(error.message, 'error', true); }
   });
   $('#settings-button').addEventListener('click', openSettings); $('#sidebar-settings').addEventListener('click', openSettings); $('#agent-status').addEventListener('click', openSettings);
   $('#enable-notifications').addEventListener('click', async () => { try { if ('Notification' in window) { await Notification.requestPermission(); openSettings(); } } catch (e) { notify(e.message, 'error'); } });
-  $('#test-notification').addEventListener('click', () => deliverReminder({ id: 'test', title: 'A little nudge. Your reminders are ready.' }, store.getState().notificationMode));
+  $('#test-notification').addEventListener('click', () => deliverReminder({ id: 'test', title: 'A little nudge. Your reminders are ready.' }, store.getRenderState().notificationMode));
   $('#persist-storage').addEventListener('click', async () => { try { const kept = await navigator.storage?.persist?.(); $('#storage-state').textContent = kept ? ' Persistent storage granted.' : ' Browser did not grant persistent storage. Keep exports.'; } catch { $('#storage-state').textContent = ' Not supported by this browser.'; } });
-  window.addEventListener('storage', event => { if (event.key === STORAGE_KEY) { try { store.reload(); } catch (e) { notify(e.message, 'error', true); } } });
+  window.addEventListener('storage', async event => { if (event.key === STORAGE_KEY) { try { await store.reload(); } catch (e) { notify(e.message, 'error', true); } } });
   const reminders = startReminders(store, { deliver: deliverReminder, onError: e => notify(e.message, 'error', true) });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reminders.tick(); }); window.addEventListener('pageshow', () => reminders.tick()); setTimeout(() => reminders.tick(), 800);
   // Used by the PWA/WebMCP integration in the next stack layer.
   window.dispatchEvent(new CustomEvent('omd:ready', { detail: { store } }));
 }
-boot();
+export const ready = boot();
 export const getStore = () => store;

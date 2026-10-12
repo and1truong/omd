@@ -149,7 +149,12 @@ function move(items, id, index) { integer(index, items.length - 1); const item =
 /** Applies one atomic action to a clone; invalid actions never change the input. */
 export function applyAction(current, action, input = {}) {
   assert(object(input), 'Tool input must be an object.');
-  const doc = copy(current);
+  return mutatePage(copy(current), action, input);
+}
+
+/** Mutate an isolated Immer draft; the store publishes it only after validation and persistence. */
+export function mutatePage(doc, action, input = {}, validate = true) {
+  assert(object(input), 'Tool input must be an object.');
   let result = {};
   const block = type => findBlock(doc, input.blockId, type).block;
   switch (action) {
@@ -202,10 +207,10 @@ export function applyAction(current, action, input = {}) {
       const target = member(b.columns, input.columnId); insert(target.cards, remove(source.cards, input.cardId), input.index); break;
     }
     case 'reminder_fired': fields(input, ['blockId', 'firedAt']); { const b = block('reminder'); assert(b.enabled && !b.firedAt, 'Reminder is not pending.'); date(input.firedAt, 'Delivery date'); assert(Date.parse(b.dueAt) <= Date.parse(input.firedAt), 'Reminder is not due.'); b.firedAt = input.firedAt; } break;
-    case 'import_notebook': fields(input, ['notebook']); validateNotebook(input.notebook); return { state: { ...copy(input.notebook), revision: current.revision + 1, updatedAt: new Date().toISOString() }, result: { imported: true } };
+    case 'import_notebook': fields(input, ['notebook']); validateNotebook(input.notebook); return { state: { ...copy(input.notebook), revision: doc.revision + 1, updatedAt: new Date().toISOString() }, result: { imported: true } };
     default: throw new Error(`Unknown action: ${action}.`);
   }
-  doc.revision++; doc.updatedAt = new Date().toISOString(); validateNotebook(doc);
+  doc.revision++; doc.updatedAt = new Date().toISOString(); if(validate)validateNotebook(doc);
   return { state: doc, result };
 }
 

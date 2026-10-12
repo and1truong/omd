@@ -2,7 +2,10 @@ export const emptyScene = () => ({ elements: [], appState: { viewBackgroundColor
 const kinds = ['rectangle','diamond','ellipse','text','line','arrow','freedraw','image','frame','magicframe','embeddable'];
 const obj = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const assert = (ok,msg) => { if (!ok) throw new Error(msg); };
+const validatedImmutableScenes=new WeakSet();
 export function validateScene(scene) {
+  if(validatedImmutableScenes.has(scene))return scene;
+  let immutable=true;
   assert(obj(scene) && Object.keys(scene).every(key => ['elements','appState','files'].includes(key)), 'Expected Excalidraw elements, appState and files.');
   assert(Array.isArray(scene.elements) && obj(scene.appState) && obj(scene.files), 'Invalid Excalidraw scene.');
   const ids = new Set();
@@ -12,12 +15,13 @@ export function validateScene(scene) {
   }
   for (const [id,file] of Object.entries(scene.files)) assert(obj(file) && file.id === id && typeof file.dataURL === 'string' && /^data:image\/(png|jpeg|webp|gif|svg\+xml);/.test(file.dataURL), 'Invalid Excalidraw image file.');
   function json(value) {
+    if(value && typeof value==='object'&&!Object.isFrozen(value))immutable=false;
     if (typeof value === 'number') assert(Number.isFinite(value), 'Scene numbers must be finite.');
     if (Array.isArray(value)) for (const item of value) json(item);
     else if (obj(value)) for (const [key,item] of Object.entries(value)) { assert(!['__proto__','constructor','prototype'].includes(key), 'Unsafe scene property.'); json(item); }
     else assert(value === null || ['string','boolean','number'].includes(typeof value), 'Scene must be JSON data.');
   }
-  json(scene); return scene;
+  json(scene); if(immutable)validatedImmutableScenes.add(scene);return scene;
 }
 export function parseScene(raw) {
   let value; try { value=JSON.parse(raw); } catch { throw new Error('Excalidraw scene must be valid JSON.'); }

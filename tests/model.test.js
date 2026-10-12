@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { emptyNotebook, makeBlock, validateNotebook, applyAction, parseImport, allowedTypes, dueReminders } from '../src/model.js';
-import { createStore } from '../src/store.js';
+import { createStore, failWrites } from './store-helper.js';
 
 function fixture() {
   let doc = emptyNotebook();
@@ -12,7 +12,7 @@ function memoryStorage() {
   return { getItem: key => entries.get(key) ?? null, setItem: (key, value) => entries.set(key, value) };
 }
 
-test('tabs support both alternating two-level layouts, including through hidden containers', () => {
+test('tabs support both alternating two-level layouts, including through hidden containers', async () => {
   for (const orientation of ['horizontal', 'vertical']) {
     const f = fixture(); const outer = f.act('add_block', { type: 'tabs', orientation }).block;
     const toggle = f.act('add_block', { type: 'toggle', containerId: outer.tabs[0].id }).block;
@@ -28,7 +28,7 @@ test('tabs support both alternating two-level layouts, including through hidden 
   }
 });
 
-test('moves validate tab ancestors and reject cycles atomically', () => {
+test('moves validate tab ancestors and reject cycles atomically', async () => {
   const f = fixture(); const group = f.act('add_block', { type: 'tabs' }).block;
   const other = f.act('add_block', { type: 'tabs' }).block;
   assert.throws(() => f.act('move_block', { blockId: other.id, containerId: group.tabs[0].id }), /opposite/);
@@ -39,7 +39,7 @@ test('moves validate tab ancestors and reject cycles atomically', () => {
   assert.deepEqual(f.doc, before);
 });
 
-test('kanban supports column ordering, card ordering and cross-column moves', () => {
+test('kanban supports column ordering, card ordering and cross-column moves', async () => {
   const f = fixture(); const b = f.act('add_block', { type: 'kanban' }).block;
   const a = f.act('card_add', { blockId: b.id, columnId: b.columns[0].id, title: 'A' }).cardId;
   const c = f.act('card_add', { blockId: b.id, columnId: b.columns[0].id, title: 'B' }).cardId;
@@ -54,14 +54,14 @@ test('kanban supports column ordering, card ordering and cross-column moves', ()
   assert.equal(f.doc.blocks[0].columns.length, 2);
 });
 
-test('tab removal retains a valid active tab and preserves the final tab', () => {
+test('tab removal retains a valid active tab and preserves the final tab', async () => {
   const f = fixture(); const b = f.act('add_block', { type: 'tabs' }).block;
   f.act('tab_remove', { blockId: b.id, tabId: b.tabs[0].id });
   assert.equal(f.doc.blocks[0].activeTabId, b.tabs[1].id);
   assert.throws(() => f.act('tab_remove', { blockId: b.id, tabId: b.tabs[1].id }), /at least one/);
 });
 
-test('checklist and accordion CRUD and ordering', () => {
+test('checklist and accordion CRUD and ordering', async () => {
   const f = fixture(); const list = f.act('add_block', { type: 'checklist' }).block;
   const item = f.act('checklist_add', { blockId: list.id, text: 'First' }).itemId;
   const second = f.act('checklist_add', { blockId: list.id, text: 'Second' }).itemId;
@@ -77,7 +77,7 @@ test('checklist and accordion CRUD and ordering', () => {
   f.act('accordion_remove', { blockId: accordion.id, itemId: section });
 });
 
-test('no application quota on block count, list count, text size or import bytes', () => {
+test('no application quota on block count, list count, text size or import bytes', async () => {
   const doc = emptyNotebook();
   for (let i = 0; i < 2100; i++) doc.blocks.push(makeBlock('text', { text: 'x'.repeat(2600) }));
   const parsed = parseImport(JSON.stringify(doc));
@@ -88,7 +88,7 @@ test('no application quota on block count, list count, text size or import bytes
   assert.doesNotThrow(() => validateNotebook(doc));
 });
 
-test('malformed imports and duplicate IDs are rejected without touching the current page', () => {
+test('malformed imports and duplicate IDs are rejected without touching the current page', async () => {
   const f = fixture(); f.act('add_block', { type: 'text' });
   const bad = structuredClone(f.doc); bad.blocks.push(structuredClone(bad.blocks[0]));
   assert.throws(() => parseImport(JSON.stringify(bad)), /unique/);
@@ -98,45 +98,45 @@ test('malformed imports and duplicate IDs are rejected without touching the curr
   assert.equal(f.doc.blocks.length, 1);
 });
 
-test('store survives closing, round-trips imports and maintains undo/redo', () => {
-  const storage = memoryStorage(); const store = createStore(storage, { initial: emptyNotebook });
-  store.dispatch('set_page', { title: 'My work' });
-  assert.equal(createStore(storage).getState().title, 'My work');
-  assert.ok(store.undo()); assert.equal(store.getState().title, 'My day, on a page');
-  assert.ok(store.redo()); assert.equal(store.getState().title, 'My work');
-  const raw = store.export(); store.dispatch('set_page', { title: 'Other' }); store.import(raw);
+test('store survives closing, round-trips imports and maintains undo/redo', async () => {
+  const storage = memoryStorage(); const store = (await createStore(storage, { initial: emptyNotebook }));
+  (await store.dispatch('set_page', { title: 'My work' }));
+  assert.equal((await createStore(storage)).getState().title, 'My work');
+  assert.ok((await store.undo())); assert.equal(store.getState().title, 'My day, on a page');
+  assert.ok((await store.redo())); assert.equal(store.getState().title, 'My work');
+  const raw = (await store.export()); (await store.dispatch('set_page', { title: 'Other' })); (await store.import(raw));
   assert.equal(store.getState().title, 'My work');
 });
 
-test('storage write errors preserve the live page and last saved data', () => {
-  const storage = memoryStorage(); const store = createStore(storage, { initial: emptyNotebook });
-  const original = store.export(); storage.setItem = () => { throw new Error('quota'); };
-  assert.throws(() => store.dispatch('set_page', { title: 'Lost' }), /Could not save/);
-  assert.equal(store.export(), original);
-  assert.equal(store.canUndo(), false);
+test('storage write errors preserve the live page and last saved data', async () => {
+  const storage = memoryStorage(); const store = (await createStore(storage, { initial: emptyNotebook }));
+  const original = (await store.export()); const recover=failWrites(store);
+  await assert.rejects(async () => (await store.dispatch('set_page', { title: 'Lost' })), /Could not save/);
+  assert.equal((await store.export()), original);
+  assert.equal(store.canUndo(), false);recover();
 });
 
-test('corrupt persisted data is preserved and stale windows cannot overwrite newer changes', () => {
+test('corrupt persisted data is preserved and stale windows cannot overwrite newer changes', async () => {
   const storage = memoryStorage(); storage.setItem('bad', '{bad');
-  assert.throws(() => createStore(storage, { key: 'bad' }), /preserved/);
+  await assert.rejects(async () => (await createStore(storage, { key: 'bad' })), /preserved/);
   assert.equal(storage.getItem('bad'), '{bad');
-  const one = createStore(storage, { initial: emptyNotebook }); const two = createStore(storage);
-  one.dispatch('set_page', { title: 'Newer' });
-  assert.throws(() => two.dispatch('set_page', { title: 'Older' }), /Another window/);
-  two.reload(); two.dispatch('set_page', { title: 'Now current' });
-  assert.equal(createStore(storage).getState().title, 'Now current');
+  const one = (await createStore(storage, { initial: emptyNotebook })); const two = (await createStore(storage));
+  (await one.dispatch('set_page', { title: 'Newer' }));
+  await assert.rejects(async () => (await two.dispatch('set_page', { title: 'Older' })), /Another window/);
+  (await two.reload()); (await two.dispatch('set_page', { title: 'Now current' }));
+  assert.equal((await createStore(storage)).getState().title, 'Now current');
 });
 
-test('reminders are due even inside inactive tabs and closed toggles, and only deliver once', () => {
-  const storage = memoryStorage(); const store = createStore(storage, { initial: emptyNotebook });
-  const tab = store.dispatch('add_block', { type: 'tabs' }).block;
-  const r = store.dispatch('add_block', { type: 'reminder', containerId: tab.tabs[1].id, dueAt: '2020-01-01T00:00:00Z' }).block;
-  store.dispatch('set_page', { title: 'Other edit' });
+test('reminders are due even inside inactive tabs and closed toggles, and only deliver once', async () => {
+  const storage = memoryStorage(); const store = (await createStore(storage, { initial: emptyNotebook }));
+  const tab = (await store.dispatch('add_block', { type: 'tabs' })).block;
+  const r = (await store.dispatch('add_block', { type: 'reminder', containerId: tab.tabs[1].id, dueAt: '2020-01-01T00:00:00Z' })).block;
+  (await store.dispatch('set_page', { title: 'Other edit' }));
   assert.equal(dueReminders(store.getState()).length, 1);
-  store.dispatch('reminder_fired', { blockId: r.id, firedAt: new Date().toISOString() });
-  assert.equal(dueReminders(createStore(storage).getState()).length, 0);
-  store.undo(); assert.equal(dueReminders(store.getState()).length, 0);
-  store.redo(); assert.equal(dueReminders(store.getState()).length, 0);
-  store.dispatch('update_block', { blockId: r.id, patch: { dueAt: '2021-01-01T00:00:00Z' } });
+  (await store.dispatch('reminder_fired', { blockId: r.id, firedAt: new Date().toISOString() }));
+  assert.equal(dueReminders((await createStore(storage)).getState()).length, 0);
+  (await store.undo()); assert.equal(dueReminders(store.getState()).length, 0);
+  (await store.redo()); assert.equal(dueReminders(store.getState()).length, 0);
+  (await store.dispatch('update_block', { blockId: r.id, patch: { dueAt: '2021-01-01T00:00:00Z' } }));
   assert.equal(dueReminders(store.getState()).length, 1);
 });

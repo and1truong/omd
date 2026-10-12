@@ -44,38 +44,45 @@ export function reconcile(parent,nodes) {
   }
   while(cursor) { const next=cursor.nextSibling; parent.removeChild(cursor);cursor=next; }
 }
-export function createRenderCache({makeBlock,makeList}) {
+export function createRenderCache({makeBlock,makeList,observeBlock,observeList,onChange}) {
   const blocks=new Map(),lists=new Map();let pageId,usedBlocks,usedLists;
   function list(data,id) {
     usedLists.add(id);const shape=JSON.stringify(data.map(b=>b.id));let entry=lists.get(id);
     const nodes=data.map((b,index)=>block(b,id,index,data.length));
     if(!entry || entry.shape!==shape) {
       const fresh=makeList(data,id,nodes);
-      if(!entry) { entry={shape,node:fresh.node};lists.set(id,entry); }
+      if(!entry) { entry={shape,node:fresh.node,ids:[]};lists.set(id,entry);entry.unsubscribe=observeList?.(id,()=>onChange?.({containerId:id})); }
       reconcile(entry.node,fresh.children);entry.shape=shape;
     }
     else {
       // Drop slots and the add button keep their existing event handlers.
       const children=[...entry.node.childNodes];nodes.forEach((node,i)=>{children[i*2+1]=node;});reconcile(entry.node,children);
     }
-    return entry.node;
+    entry.ids=data.map(b=>b.id);return entry.node;
   }
   function block(data,containerId,index,count) {
     usedBlocks.add(data.id);const signature=blockSignature(data);let entry=blocks.get(data.id);
+    if(Object.isFrozen(data)&&entry?.data===data&&entry.context===`${containerId}:${index}:${index===count-1}`){mark(data.id);return entry.node;}
     // Synchronize descendants independently; changes inside a tab do not rebuild
     // its headers or its parent block.
     for(const child of visibleContainers(data))list(child.blocks,child.id);
     const context=`${containerId}:${index}:${index===count-1}`;
     if(!entry || entry.signature!==signature || entry.context!==context) {
-      entry={signature,context,node:makeBlock(renderData(data),containerId,index,count)};blocks.set(data.id,entry);
+      const unsubscribe=entry?.unsubscribe??observeBlock?.(data.id,()=>onChange?.({blockId:data.id}));
+      entry={signature,context,node:makeBlock(renderData(data),containerId,index,count),unsubscribe};blocks.set(data.id,entry);
     }
-    return entry.node;
+    entry.data=data;entry.children=visibleContainers(data).map(c=>c.id);entry.containerId=containerId;return entry.node;
   }
+  function mark(id){const entry=blocks.get(id);if(!entry)return;usedBlocks.add(id);for(const child of entry.children??[]){usedLists.add(child);for(const nested of lists.get(child)?.ids??[])mark(nested);}}
+  function unmark(id){usedBlocks.delete(id);for(const child of blocks.get(id)?.children??[]){usedLists.delete(child);for(const nested of lists.get(child)?.ids??[])unmark(nested);}}
+  function clear(){for(const entry of [...blocks.values(),...lists.values()])entry.unsubscribe?.();blocks.clear();lists.clear();}
   return {
-    begin(id) { if(id!==pageId){blocks.clear();lists.clear();pageId=id;}usedBlocks=new Set();usedLists=new Set(); },
+    begin(id) { if(id!==pageId){clear();pageId=id;}usedBlocks=new Set();usedLists=new Set(); },
     list,
+    refresh(data,id){if(!lists.has(id))return;usedBlocks=new Set(blocks.keys());usedLists=new Set(lists.keys());for(const old of lists.get(id).ids)unmark(old);list(data,id);this.end();},
+    containerFor:id=>blocks.get(id)?.containerId,
     childList: id => lists.get(id).node,
-    accept(id,data) { const entry=blocks.get(id);if(entry)entry.signature=blockSignature(data); },
-    end() { for(const id of blocks.keys())if(!usedBlocks.has(id))blocks.delete(id);for(const id of lists.keys())if(!usedLists.has(id))lists.delete(id); },
+    accept(id,data) { const entry=blocks.get(id);if(entry){entry.signature=blockSignature(data);entry.data=data;} },
+    end() { for(const id of blocks.keys())if(!usedBlocks.has(id)){blocks.get(id).unsubscribe?.();blocks.delete(id);}for(const id of lists.keys())if(!usedLists.has(id)){lists.get(id).unsubscribe?.();lists.delete(id);} },
   };
 }

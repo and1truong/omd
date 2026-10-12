@@ -1,7 +1,8 @@
-import { getStore, notify, openSettings, openPalette, openCanvas, closeCanvas, getView, setView, flushDiagrams, downloadJson, confirmAction, deliverReminder } from './app.js';
+import { ready, getStore, notify, openSettings, openPalette, openCanvas, closeCanvas, getView, setView, flushDiagrams, downloadJson, confirmAction, deliverReminder } from './app.js';
 import { registerWebMCP } from './webmcp.js';
 import { setupPWA } from './pwa.js';
 
+await ready;
 const store = getStore();
 if (store) {
   setupPWA({ notify, openSettings });
