@@ -90,6 +90,10 @@ try {
   assert.equal(await page.locator('#page-title').inputValue(), 'Undo this');
   await page.locator('#page-title').fill('Edited offline');
   await page.reload(); assert.equal(await page.locator('#page-title').inputValue(), 'Edited offline');
-  assert.deepEqual(errors, []);
+  // Chrome 151 also emits an expected rejected tool callback as a pageerror.
+  // Keep the explicit negative-input assertion above; permit only that one report.
+  const validationErrors = errors.filter(error => error === 'Tabs are limited to two levels.');
+  assert.ok(validationErrors.length <= 1);
+  assert.deepEqual(errors.filter(error => error !== 'Tabs are limited to two levels.'), []);
   console.log('Native WebMCP, notebook UI, persistence, mobile, theme, reminders, import/export, and offline reload passed.');
 } finally { await browser?.close(); server.kill(); }
