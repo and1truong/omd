@@ -60,7 +60,7 @@ try{
   await block().getByRole('combobox',{name:'Pinned first columns',exact:true}).selectOption('2');await settled();assert.equal((await grid()).pinnedColumns,2);
   await mkdir(`${root}/test-results`,{recursive:true});await page.evaluate(async()=>await tableApp.setView({theme:'light',contentWidth:'reading',sidebarOpen:false}));await shot('light');
   await page.evaluate(async()=>await tableApp.setView({theme:'dark',contentWidth:'wide'}));await shot('dark');
-  await page.emulateMedia({colorScheme:'dark'});await page.evaluate(async()=>await tableApp.setView({theme:'system'}));assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');
+  await page.emulateMedia({colorScheme:'dark'});await page.evaluate(async()=>await tableApp.setView({theme:'system'}));await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark');
   await page.emulateMedia({colorScheme:'light'});await page.waitForFunction(()=>document.documentElement.dataset.theme==='light');
   const saved=await grid();await page.reload();await page.evaluate(async source=>{window.tableApp=await import(`${source}app.js`);await tableApp.ready;},source);assert.deepEqual(await grid(),saved);
   // JSON export/import through the actual UI including confirmation and backup.
