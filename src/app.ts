@@ -199,17 +199,18 @@ function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
     return [done,total];
   }
   async function setCollapsed(folds:HTMLButtonElement[],collapsed:boolean) {
+    const keys=new Set(folds.map(fold=>fold.dataset.viewKey));
     try {
       await flushPending();if(pageId!==store.getActivePageId())return;
-      for(const fold of folds) {
-        if(!fold.isConnected)continue;
+      const liveFolds=[...document.querySelectorAll<HTMLButtonElement>('.checklist-fold')].filter(fold=>keys.has(fold.dataset.viewKey));
+      for(const fold of liveFolds) {
         const list=fold.closest('.checklist-item')!.querySelector<HTMLElement>(':scope > .checklist-items')!;
         if(collapsed&&list.contains(document.activeElement))fold.focus();
         list.hidden=collapsed;fold.setAttribute('aria-expanded',String(!collapsed));
         fold.title=collapsed?'Expand checklist branch':'Collapse checklist branch';fold.setAttribute('aria-label',fold.title);
         if(collapsed)collapsedChecklistItems.add(fold.dataset.viewKey!);else collapsedChecklistItems.delete(fold.dataset.viewKey!);
       }
-      syncChecklistFolds(folds[0]?.closest('.block')??shell);
+      syncChecklistFolds(liveFolds[0]?.closest('.block')??shell);
     }catch(error){notify(errorOf(error).message,'error',true);}
   }
   function renderItems(items:ChecklistItem[],ancestors:ChecklistItem[]=[]):HTMLElement {
