@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { emptyNotebook } from '../src/model.js';
+import { emptyNotebook } from '../src/model.ts';
 import { createStore, failWrites } from './store-helper.js';
-import { startReminders } from '../src/reminders.js';
+import { startReminders } from '../src/reminders.ts';
 const storage = () => { const map = new Map(); return { getItem: k => map.get(k) ?? null, setItem: (k,v) => map.set(k,v) }; };
 const timers = { setInterval: () => 1, clearInterval: () => {} };
 

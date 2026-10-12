@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createStore} from './store-helper.js';
-import {emptyNotebook,makeBlock,validateNotebook,applyAction,parseImport,STORAGE_KEY} from '../src/model.js';
-import {wrapPage} from '../src/notebook.js';
-import {createTools} from '../src/webmcp.js';
-import {diagramKey} from '../src/diagrams.js';
-import {createCompositionGuard} from '../src/composition.js';
+import {emptyNotebook,makeBlock,validateNotebook,applyAction,parseImport,STORAGE_KEY} from '../src/model.ts';
+import {wrapPage} from '../src/notebook.ts';
+import {createTools} from '../src/webmcp.ts';
+import {diagramKey} from '../src/diagrams.ts';
+import {createCompositionGuard} from '../src/composition.ts';
 const memory=()=>{const data=new Map();return {getItem:k=>data.get(k)??null,setItem:(k,v)=>data.set(k,v)};};
 test('subscribers receive immutable snapshots and current undo/redo availability',async()=>{
   const store=await createStore(memory(),{initial:emptyNotebook}),seen=[];let retained;

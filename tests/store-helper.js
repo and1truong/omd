@@ -1,5 +1,5 @@
 import 'fake-indexeddb/auto';
-import {createStore as openStore} from '../src/store.js';
+import {createStore as openStore} from '../src/store.ts';
 const names=new WeakMap();
 export function createStore(storage,options={}) {
   if(!names.has(storage))names.set(storage,crypto.randomUUID());

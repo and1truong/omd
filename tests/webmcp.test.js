@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createTools, registerWebMCP } from '../src/webmcp.js';
+import { createTools, registerWebMCP } from '../src/webmcp.ts';
 import { createStore } from './store-helper.js';
-import { emptyNotebook } from '../src/model.js';
+import { emptyNotebook } from '../src/model.ts';
 async function setup() {
   const map = new Map(); const store = (await createStore({ getItem: k => map.get(k) ?? null, setItem: (k,v) => map.set(k,v) }, { initial: emptyNotebook }));
   return store;

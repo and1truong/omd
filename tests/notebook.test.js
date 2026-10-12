@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createStore } from './store-helper.js';
-import { emptyNotebook, STORAGE_KEY } from '../src/model.js';
-import { parseBook } from '../src/notebook.js';
-import { startReminders } from '../src/reminders.js';
+import { emptyNotebook, STORAGE_KEY } from '../src/model.ts';
+import { parseBook } from '../src/notebook.ts';
+import { startReminders } from '../src/reminders.ts';
 const memory = () => { const m = new Map(); return { getItem:k=>m.get(k)??null, setItem:(k,v)=>m.set(k,v) }; };
 test('v1 migration preserves page IDs, content, settings and original bytes', async () => {
   const data=memory(), legacy=emptyNotebook(); legacy.title='Existing work'; legacy.theme='dark';

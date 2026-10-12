@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createStore } from './store-helper.js';
-import { emptyNotebook } from '../src/model.js';
-import { parseScene, mermaidSource } from '../src/scene.js';
-import { createTools } from '../src/webmcp.js';
+import { emptyNotebook } from '../src/model.ts';
+import { parseScene, mermaidSource } from '../src/scene.ts';
+import { createTools } from '../src/webmcp.ts';
 const setup=async()=>{const m=new Map();return (await createStore({getItem:k=>m.get(k)??null,setItem:(k,v)=>m.set(k,v)},{initial:emptyNotebook}));};
 const rectangle={id:'shape-1',type:'rectangle',x:10,y:20,width:100,height:60};
 test('Mermaid stores raw and fenced Markdown without losing invalid source',async () =>{

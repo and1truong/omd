@@ -1,4 +1,4 @@
-const paths={
+const paths:Record<string,string[]>={
   notebook:['M4 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H4V3Z','M8 3v18','M2 7h4M2 12h4M2 17h4'],
   page:['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z','M14 2v6h6'],
   panel:['M3 4h18v16H3Z','M9 4v16'],search:['M21 21l-5-5','M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0'],
@@ -14,10 +14,10 @@ const paths={
   kanban:['M3 4h18v16H3Z','M9 4v16M15 4v16M5 8h2M11 8h2M17 8h2M5 12h2M11 12h2'],divider:['M3 12h18'],
   mermaid:['M8 3h8v6H8Z','M3 15h6v6H3ZM15 15h6v6h-6Z','M12 9v3M6 15v-3h12v3'],excalidraw:['m4 16-1 5 5-1L20 8l-5-5Z','m13 5 6 6'],
 };
-export function icon(name) {
+export function icon(name:string) {
   const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('width','18');svg.setAttribute('height','18');svg.setAttribute('fill','none');svg.setAttribute('stroke','currentColor');svg.setAttribute('stroke-width','1.6');svg.setAttribute('stroke-linecap','round');svg.setAttribute('stroke-linejoin','round');svg.setAttribute('aria-hidden','true');svg.classList.add('ui-icon');
-  if(name==='more'||name==='drag')for(const [cx,cy] of name==='more'?[[5,12],[12,12],[19,12]]:[[8,5],[16,5],[8,12],[16,12],[8,19],[16,19]]){const c=document.createElementNS(ns,'circle');c.setAttribute('cx',cx);c.setAttribute('cy',cy);c.setAttribute('r','1.3');c.setAttribute('fill','currentColor');c.setAttribute('stroke','none');svg.append(c);}
+  if(name==='more'||name==='drag')for(const [cx,cy] of name==='more'?[[5,12],[12,12],[19,12]]:[[8,5],[16,5],[8,12],[16,12],[8,19],[16,19]]){const c=document.createElementNS(ns,'circle');c.setAttribute('cx',String(cx));c.setAttribute('cy',String(cy));c.setAttribute('r','1.3');c.setAttribute('fill','currentColor');c.setAttribute('stroke','none');svg.append(c);}
   else for(const d of paths[name]??paths.page){const p=document.createElementNS(ns,'path');p.setAttribute('d',d);svg.append(p);}
   return svg;
 }
-export const labelIcon={'↑':'up','↓':'down','×':'close','⠿':'drag','▾':'down','▸':'toggle','↶':'undo','↷':'redo','…':'more'};
+export const labelIcon:Record<string,string>={'↑':'up','↓':'down','×':'close','⠿':'drag','▾':'down','▸':'toggle','↶':'undo','↷':'redo','…':'more'};

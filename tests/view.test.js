@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createView,VIEW_KEY} from '../src/view.js';
+import {createView,VIEW_KEY} from '../src/view.ts';
 import {createStore} from './store-helper.js';
-import {emptyNotebook} from '../src/model.js';
-import {createTools} from '../src/webmcp.js';
+import {emptyNotebook} from '../src/model.ts';
+import {createTools} from '../src/webmcp.ts';
 function storage(){const map=new Map();return {map,getItem:k=>map.get(k)??null,setItem:(k,v)=>map.set(k,v)};}
 test('view preferences persist independently of notebook data and recover from malformed UI preferences',async () =>{
   const saved=storage(),store=(await createStore(saved,{initial:emptyNotebook})),before=(await store.export()),view=createView(saved);

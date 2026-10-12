@@ -14,7 +14,7 @@ Content width and desktop sidebar preferences persist separately in browser stor
 
 ## Run
 
-Node 22 or newer. Run `npm start` (builds first) and open localhost port 3000. Run `npm install` once to install the pinned diagram libraries and build tools. For production, run `npm run build` and serve `dist` from any static HTTPS host. Relative URLs support deployment at a subpath, including GitHub Pages.
+Node 22 or newer. Run `npm start` (builds first) and open localhost port 3000. Run `npm install` once to install the pinned libraries and development tools. Application modules and the service worker are TypeScript; `npm run typecheck` checks both browser and worker environments in strict mode. `npm test` runs source-level tests through tsx. Build scripts remain Node ESM. For production, run `npm run build` and serve `dist` from any static HTTPS host. Relative URLs support deployment at a subpath, including GitHub Pages.
 
 ## Pages
 
@@ -77,11 +77,11 @@ Examples of prompts: “Create a work checklist in a vertical tab under Personal
 
 ## Verification
 
-After `npm install`, run `npm test` and `npm run build`. Tests cover atomic actions, tabs, unlimited content quantities, import/export, storage failures, cross-window conflicts, reminder catch-up, single delivery under Web Locks, undo/redo, WebMCP registration/cleanup, valid and invalid tool execution, cancellation, and offline asset completeness.
+After `npm install`, run `npm run typecheck`, `npm test` and `npm run build`. Tests cover atomic actions, tabs, unlimited content quantities, import/export, storage failures, cross-window conflicts, reminder catch-up, single delivery under Web Locks, undo/redo, WebMCP registration/cleanup, valid and invalid tool execution, cancellation, and offline asset completeness.
 
-For native browser integration, install the development dependency with `npm install`, install Chromium with `npx playwright install chromium`, build, then run `npm run test:browser`. The browser test enables Chrome's native WebMCP feature, discovers and executes tools through the real registry (no polyfill), checks visible UI results and invalid inputs, then verifies mobile layout, themes, reminders, import confirmation, persistent edits and offline reopening. CI runs both sets of checks and uploads the static app and screenshots. An unavailable browser binary or unsupported native API is a verification failure, not a mocked success.
+For native browser integration, install the development dependency with `npm install`, install Chromium with `npx playwright install chromium`, build, then run `npm run test:browser`. The browser test enables Chrome's native WebMCP feature, discovers and executes tools through the real registry (no polyfill), checks visible UI results and invalid inputs, then verifies mobile layout, themes, reminders, import confirmation, persistent edits and offline reopening. CI requires strict TypeScript checks before running either set of checks and uploads the static app and screenshots. An unavailable browser binary or unsupported native API is a verification failure, not a mocked success.
 
-Local verification: 62 model, record-store, multi-page migration, scene, reminder, asset and WebMCP adapter tests pass; JavaScript syntax checks pass. Production bundling and native Chromium 151 verification pass in CI, including cross-tab IndexedDB synchronization and active-page residency. Browser/extension compatibility requires the native browser check and a real extension session; adapter tests alone do not verify a Gemini integration.
+Local verification: 68 model, record-store, multi-page migration, scene, reminder, asset and WebMCP adapter tests pass; JavaScript syntax checks pass. Production bundling and native Chromium 151 verification pass in CI, including cross-tab IndexedDB synchronization and active-page residency. Browser/extension compatibility requires the native browser check and a real extension session; adapter tests alone do not verify a Gemini integration.
 
 ## PR stack
 
@@ -93,6 +93,8 @@ Local verification: 62 model, record-store, multi-page migration, scene, reminde
 - App shell: `codex/omd-07-app-shell` → `codex/omd-06-lazy-render`: full-window workspace, page sidebar and contextual actions.
 - Rendering follow-up: `codex/omd-06-lazy-render` → `codex/omd-05-diagrams`: lazy visible content and block-scoped DOM reconciliation.
 
+- TypeScript: `codex/omd-11-typescript` → main after #11 merged: strict browser/worker type checks, block/command/storage contracts and typed external boundaries.
+- Review follow-up: #11 fixes the remaining merged-stack findings; see [audit](docs/review-findings.md).
 - Record store: `codex/omd-09-record-store` → `codex/omd-08-page-tree`: Zustand, incremental IndexedDB persistence, lazy page hydration and patch history.
 - Page tree: `codex/omd-08-page-tree` → `codex/omd-07-app-shell`: nested pages, tree navigation and subtree moves.
 

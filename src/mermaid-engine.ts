@@ -1,6 +1,6 @@
 import mermaid from 'mermaid';
-let chain=Promise.resolve();
-export function renderDiagram(id,source,dark) {
+let chain:Promise<unknown>=Promise.resolve();
+export function renderDiagram(id:string,source:string,dark:boolean) {
   const next=chain.then(async()=>{
     mermaid.initialize({ startOnLoad:false, securityLevel:'strict', theme:dark?'dark':'neutral', suppressErrorRendering:true,
       maxTextSize:Number.MAX_SAFE_INTEGER, maxEdges:Number.MAX_SAFE_INTEGER, htmlLabels:false,
