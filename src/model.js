@@ -13,7 +13,7 @@ function string(value, label) {
 }
 function integer(value, max) { assert(Number.isInteger(value) && value >= 0 && value <= max, 'Invalid position.'); }
 function boolean(value, label) { assert(typeof value === 'boolean', `${label} must be true or false.`); }
-function date(value, label) { assert(typeof value === 'string' && Number.isFinite(Date.parse(value)), `${label} must be a valid date-time.`); }
+function date(value, label) { assert(typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value)), `${label} must be an ISO date-time with a timezone.`); }
 function fields(value, allowed) {
   assert(object(value), 'Expected an object.');
   for (const key of Object.keys(value)) assert(allowed.includes(key), `Unknown field: ${key}.`);
