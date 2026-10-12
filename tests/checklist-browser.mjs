@@ -105,6 +105,18 @@ async function styleCases() {
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await page.screenshot({path:`${root}/test-results/checklist-style-${engine}-mobile.png`,fullPage:true});
   await page.setViewportSize({width:320,height:844});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  // Checkbox persistence rebuilds rows before the pending fold can resume.
+  await fold().evaluate(el=>{window.omdBeforeFoldRender=el;});
+  await page.evaluate(()=>{
+    const descriptor=Object.getOwnPropertyDescriptor(IDBTransaction.prototype,'oncomplete');window.omdHoldFoldTransaction=true;
+    Object.defineProperty(IDBTransaction.prototype,'oncomplete',{...descriptor,set(listener){descriptor.set.call(this,function(event){if(this.mode==='readwrite'&&window.omdHoldFoldTransaction){window.omdHoldFoldTransaction=false;window.omdFoldTransactionReady=true;window.omdReleaseFoldTransaction=()=>listener.call(this,event);}else listener.call(this,event);});}});
+    window.omdRestoreFoldTransaction=()=>Object.defineProperty(IDBTransaction.prototype,'oncomplete',descriptor);
+  });
+  await row(ids.long).getByRole('checkbox').check();await page.waitForFunction(()=>window.omdFoldTransactionReady);
+  await fold().click();assert.equal(await fold().getAttribute('aria-expanded'),'true');
+  await page.evaluate(()=>{window.omdRestoreFoldTransaction();window.omdReleaseFoldTransaction();});await branch().waitFor({state:'hidden'});
+  assert.equal(await fold().evaluate(el=>el!==window.omdBeforeFoldRender),true,'The fold intent must survive replacement controls.');
+  await fold().click();await branch().waitFor({state:'visible'});await call('checklist_update',{blockId,itemId:ids.long,patch:{done:false}});
   // A fold waits for pending writes and never hides a failed draft.
   await page.evaluate(async()=>{
     const store=(await import(new URL('./src/app.js',document.baseURI).href)).getStore(),dispatch=store.dispatch;
@@ -128,8 +140,12 @@ async function styleCases() {
   await call('checklist_update',{blockId,itemId:ids.long,patch:{text:'Kiểm tra dòng dài, [đường dẫn](https://example.com) và `inline code` ở cấp 4.'}});
   // Detached controls retain the page that created them, not the new selection.
   await row(ids.publish).getByRole('checkbox').evaluate(el=>{window.omdStaleChecklistCheck=el;});
-  await call('page_select',{pageId:another});await page.evaluate(()=>window.omdStaleChecklistCheck.click());
-  await page.waitForFunction(async({pageId,blockId,id})=>{const store=(await import(new URL('./src/app.js',document.baseURI).href)).getStore();return (await store.getPage(pageId)).blocks.find(b=>b.id===blockId).items.find(i=>i.id===id).done;},{pageId,blockId,id:ids.publish});
+  await call('page_select',{pageId:another});await page.evaluate(()=>{const check=window.omdStaleChecklistCheck;check.checked=true;check.dispatchEvent(new Event('change',{bubbles:true}));});
+  await page.evaluate(async({pageId,blockId,id})=>{
+    const store=(await import(new URL('./src/app.js',document.baseURI).href)).getStore(),start=performance.now();
+    while(performance.now()-start<5000){await store.idle();if((await store.getPage(pageId)).blocks.find(b=>b.id===blockId).items.find(i=>i.id===id).done)return;await new Promise(resolve=>setTimeout(resolve,25));}
+    throw new Error('Detached checkbox did not update its original page');
+  },{pageId,blockId,id:ids.publish});
   assert.equal(await page.evaluate(async()=> (await import(new URL('./src/app.js',document.baseURI).href)).getStore().getState().blocks.length),0);
   await call('page_select',{pageId});await call('checklist_update',{blockId,itemId:ids.publish,patch:{done:false}});
   await fold().click();await branch().waitFor({state:'hidden'});await page.reload();await page.evaluate(async()=>await (await import(new URL('./src/app.js',document.baseURI).href)).ready);
