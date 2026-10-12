@@ -50,3 +50,22 @@ jobs:
           name: omd-browser-screenshots-${{ matrix.scope }}
           path: test-results
           if-no-files-found: ignore
+  startup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        engine: [chromium, webkit]
+        base_path: ['', '/omd']
+    env:
+      OMD_BROWSER: ${{ matrix.engine }}
+      OMD_BASE_PATH: ${{ matrix.base_path }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: npx playwright install --with-deps ${{ matrix.engine }}
+      - run: npm run build
+      - run: npm run test:startup
