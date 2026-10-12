@@ -4,6 +4,14 @@
 
 A single-page web app with multiple notebook pages and editable text and headings, checklists, horizontal and vertical tabs, expandable blocks, accordions, reminders, and kanban boards. System-aware light/dark themes. Keyboard and touch-friendly ordering controls alongside drag-and-drop.
 
+## App interface
+
+A full-window notebook workspace with a compact fixed app bar, collapsible page sidebar, neutral system typography and consistent SVG icons. Switch/create pages from the sidebar or Cmd/Ctrl+K; per-page menus reorder the notebook. Mobile navigation becomes a native modal drawer with keyboard focus containment, Escape/backdrop dismissal and automatic closure after selection.
+
+The page menu contains reading/full-width layout, JSON import/export and settings. Block actions appear on hover/focus on desktop and remain reachable on touch; their menus support keyboard navigation and expose move/delete actions. Text flows continuously, with no artificial page breaks or decorative site header/footer. Full-page Excalidraw retains the notebook header.
+
+Content width and desktop sidebar preferences persist separately in browser storage under `omd.view.v1`, without modifying notebook content or undo history. Mobile drawers start closed. View preferences are device-specific and do not enter notebook JSON exports. WebMCP `omd_get_view` and `omd_set_view` share the UI's validated preference path.
+
 ## Run
 
 Node 22 or newer. Run `npm start` (builds first) and open localhost port 3000. Run `npm install` once to install the pinned diagram libraries and build tools. For production, run `npm run build` and serve `dist` from any static HTTPS host. Relative URLs support deployment at a subpath, including GitHub Pages.
@@ -36,7 +44,7 @@ Builds fingerprint the service-worker cache. Network-first app assets allow upgr
 
 ## WebMCP
 
-48 client-side tools cover reading the entire notebook, creating/editing/moving/removing all blocks and their items, selecting tabs, checklists, toggles/accordions, reminders, kanban columns/cards, themes/settings, undo/redo and import/export. UI and agents use the same validators and persistent store. Tool results include stable IDs for follow-up operations. Registration uses `document.modelContext`, with feature-detected compatibility for older `navigator.modelContext` implementations, and AbortSignal cleanup.
+50 client-side tools cover reading the entire notebook, creating/editing/moving/removing all blocks and their items, selecting tabs, checklists, toggles/accordions, reminders, kanban columns/cards, themes/settings, undo/redo and import/export. UI and agents use the same validators and persistent store. Tool results include stable IDs for follow-up operations. Registration uses `document.modelContext`, with feature-detected compatibility for older `navigator.modelContext` implementations, and AbortSignal cleanup.
 
 The footer/Settings show actual support and registration failures. Unsupported browsers retain full manual functionality; omd does not pretend a custom JavaScript bridge is native WebMCP.
 
@@ -61,7 +69,7 @@ Run `npm test` (no installation required) and `npm run build`. Tests cover atomi
 
 For native browser integration, install the development dependency with `npm install`, install Chromium with `npx playwright install chromium`, build, then run `npm run test:browser`. The browser test enables Chrome's native WebMCP feature, discovers and executes tools through the real registry (no polyfill), checks visible UI results and invalid inputs, then verifies mobile layout, themes, reminders, import confirmation, persistent edits and offline reopening. CI runs both sets of checks and uploads the static app and screenshots. An unavailable browser binary or unsupported native API is a verification failure, not a mocked success.
 
-Local verification: 32 model, multi-page migration, scene, reminder, asset and WebMCP adapter tests pass; JavaScript syntax checks pass. Diagram bundling and native browser verification run in CI. Browser/extension compatibility requires the native browser check and a real extension session; adapter tests alone do not verify a Gemini integration.
+Local verification: 40 model, multi-page migration, scene, reminder, asset and WebMCP adapter tests pass; JavaScript syntax checks pass. Diagram bundling and native browser verification run in CI. Browser/extension compatibility requires the native browser check and a real extension session; adapter tests alone do not verify a Gemini integration.
 
 ## PR stack
 
@@ -70,6 +78,7 @@ Local verification: 32 model, multi-page migration, scene, reminder, asset and W
 - #3: `codex/omd-03-pwa-webmcp` → `codex/omd-02-notebook`: PWA, WebMCP and CI.
 - #5: `codex/omd-04-pages` → `codex/omd-03-pwa-webmcp`: multiple pages and command palette.
 - #6: `codex/omd-05-diagrams` → `codex/omd-04-pages`: Mermaid and Excalidraw, including full-page canvas.
+- App shell: `codex/omd-07-app-shell` → `codex/omd-06-lazy-render`: full-window workspace, page sidebar and contextual actions.
 - Rendering follow-up: `codex/omd-06-lazy-render` → `codex/omd-05-diagrams`: lazy visible content and block-scoped DOM reconciliation.
 
 The final branch contains the complete app. Review the incremental diffs; merge bottom to top and retarget each remaining PR after its predecessor merges.

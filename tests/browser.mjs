@@ -18,7 +18,7 @@ try {
   page = await context.newPage(); page.on('pageerror', error => errors.push(error.message));page.on('console',msg=>{if(msg.type()==='error')consoleErrors.push(msg.text());});
   page.on('request',request=>{if(/\/(?:excalidraw|mermaid)-engine\.(?:js|css)/.test(request.url()))engineRequests.push(request.url());});
   await page.goto('http://localhost:4317/');
-  await page.waitForFunction(() => document.getElementById('agent-status').textContent.includes('48 tools'));
+  await page.waitForFunction(() => document.getElementById('agent-status').textContent.includes('50 tools'));
   const call = (name, input = {}, target = page) => target.evaluate(async ({name,input}) => {
     const registry = document.modelContext;
     if (!registry?.getTools || !registry?.executeTool) throw new Error('Native document.modelContext discovery/execution unavailable.');
@@ -34,6 +34,13 @@ try {
   for (const b of notebook.blocks) await call('remove_block', { blockId: b.id });
   await call('set_page', { title: 'My verified day', notificationMode: 'toast' });
   assert.equal(await page.locator('#page-title').inputValue(), 'My verified day');
+  assert.ok(await page.locator('#sidebar').isVisible());
+  const contentRevision=(await call('get_notebook')).revision;
+  await page.locator('#sidebar-toggle').click();assert.deepEqual(await call('get_view'),{sidebarOpen:false,contentWidth:'reading'});
+  await call('set_view',{sidebarOpen:true,contentWidth:'wide'});assert.ok(await page.locator('#sidebar').isVisible());
+  assert.equal(await page.locator('body').getAttribute('data-content-width'),'wide');
+  assert.equal((await call('get_notebook')).revision,contentRevision,'Layout preferences must not edit notebook content.');
+  await call('set_view',{contentWidth:'reading'});
   const firstPage = (await call('get_notebook')).id;
   await page.keyboard.press('Control+k');
   await page.locator('#page-search').fill('Project space');
@@ -47,13 +54,21 @@ try {
   await page.locator('#page-search').fill('My verified day');
   await page.locator('#page-search').press('Enter');
   assert.equal((await call('get_notebook')).id,firstPage);
+  await page.getByRole('button',{name:'Page actions for A second page',exact:true}).click();
+  await page.locator('#page-actions-dialog').getByRole('button',{name:'Move page down',exact:true}).click();
+  assert.equal((await call('list_pages'))[1].pageId,createdPage);
+  await page.getByRole('button',{name:'Switch to A second page',exact:true}).click();
+  assert.equal(await page.locator('#app-page-title').textContent(),'A second page');
+  await page.getByRole('button',{name:'Switch to My verified day',exact:true}).click();
   assert.equal((await call('get_page',{pageId:createdPage})).title,'A second page');
   const checklist = (await call('add_block', { type: 'checklist', title: 'Test tasks' })).block;
   await call('checklist_add', { blockId: checklist.id, text: 'An agent-created task' });
   await page.getByRole('checkbox', { name: 'Complete An agent-created task', exact: true }).check();
   notebook = await call('get_notebook'); assert.ok(notebook.blocks[0].items[0].done);
   await page.locator('#page-title').fill('Written by a person');
-  await page.reload(); await page.waitForFunction(() => document.getElementById('agent-status').textContent.includes('48 tools'));
+  await call('set_view',{sidebarOpen:false,contentWidth:'wide'});
+  await page.reload(); await page.waitForFunction(() => document.getElementById('agent-status').textContent.includes('50 tools'));
+  assert.deepEqual(await call('get_view'),{sidebarOpen:false,contentWidth:'wide'});await call('set_view',{sidebarOpen:true,contentWidth:'reading'});
   assert.equal(await page.locator('#page-title').inputValue(), 'Written by a person');
   assert.ok((await call('get_notebook')).blocks[0].items[0].done);
   const outer = (await call('add_block', { type: 'tabs', orientation: 'horizontal', title: 'Chapters' })).block;
@@ -80,10 +95,12 @@ try {
   await call('column_move', { blockId: board.id, columnId: board.columns[1].id, index: 0 });
   await call('card_update', { blockId: board.id, cardId: card, patch: { description: 'Tiny next step' } });
   assert.equal((await call('get_notebook')).blocks.find(b => b.id === board.id).columns[0].cards[0].id, card);
+  await call('open_settings');
   await page.locator('#theme').selectOption('dark'); assert.equal(await page.locator('html').getAttribute('data-theme'), 'dark');
   await page.locator('#theme').selectOption('system'); await page.emulateMedia({ colorScheme: 'dark' });
   await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
   await page.emulateMedia({ colorScheme: 'light' }); await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
+  await page.getByRole('button',{name:'Close settings',exact:true}).click();
   // Unrelated edits keep both container headers and leaf inputs connected.
   await page.evaluate(({outerId,innerId,checklistId})=>{
     window.omdIdentity={outer:document.querySelector(`[data-block-id="${outerId}"]`),inner:document.querySelector(`[data-block-id="${innerId}"]`),input:document.querySelector(`[data-block-id="${innerId}"] textarea`),checklist:document.querySelector(`[data-block-id="${checklistId}"]`)};
@@ -132,6 +149,7 @@ try {
   await page.evaluate(id=>{window.omdCanvas=document.querySelector(`[data-diagram-block="${id}"] canvas`);},drawing.id);
   await call('set_page',{subtitle:'Header edit keeps the canvas alive'});
   await call('card_update',{blockId:board.id,cardId:card,patch:{description:'No canvas rerender'}});
+  await call('set_view',{sidebarOpen:false,contentWidth:'wide'});await call('set_view',{sidebarOpen:true,contentWidth:'reading'});
   assert.ok(await page.evaluate(()=>window.omdCanvas.isConnected));await page.evaluate(()=>delete window.omdCanvas);
   await call('open_canvas',{blockId:drawing.id});
   assert.equal(await page.locator('#canvas-stage-title').textContent(),'Written by a person');
@@ -173,10 +191,26 @@ try {
   await page.evaluate(() => navigator.serviceWorker.ready);
   await page.waitForFunction(() => !!navigator.serviceWorker.controller);
   await mkdir(`${root}/test-results`, { recursive: true });
-  await page.screenshot({ path: `${root}/test-results/desktop.png`, fullPage: true });
+  await page.evaluate(()=>scrollTo(0,0));await page.screenshot({ path: `${root}/test-results/desktop.png` });
+  await call('set_page',{theme:'dark'});await page.screenshot({path:`${root}/test-results/desktop-dark.png`});await call('set_page',{theme:'system'});
   await page.setViewportSize({ width: 390, height: 844 });
+  assert.deepEqual(await call('get_view'),{sidebarOpen:false,contentWidth:'reading'});
+  await page.locator('#sidebar-toggle').click();assert.ok(await page.locator('#sidebar').isVisible());
+  assert.ok(await page.evaluate(()=>document.getElementById('sidebar').contains(document.activeElement)),'Drawer opening must move keyboard focus inside.');
+  await page.screenshot({path:`${root}/test-results/mobile-drawer.png`});
+  await page.keyboard.press('Shift+Tab');assert.ok(await page.evaluate(()=>document.getElementById('sidebar').contains(document.activeElement)),'Native modal must trap focus.');
+  await page.getByRole('button',{name:'Switch to A second page',exact:true}).click();assert.ok(await page.locator('#sidebar').isHidden());
+  assert.equal(await page.locator('#page-title').inputValue(),'A second page');await call('page_select',{pageId:firstPage});
+  await call('set_view',{sidebarOpen:true});await page.keyboard.press('Escape');assert.ok(await page.locator('#sidebar').isHidden());
+  await page.locator('#page-menu > summary').click();await page.locator('#wide-page').check();assert.equal((await call('get_view')).contentWidth,'wide');await page.locator('#wide-page').uncheck();await page.locator('#page-menu > summary').click();
+  const menuBlock=(await call('add_block',{type:'text',text:'Context menu fixture'})).block;
+  const menuShell=page.locator(`[data-block-id="${menuBlock.id}"]`);
+  await menuShell.getByRole('button',{name:'Block actions',exact:true}).click();await page.locator('#block-actions-dialog').getByRole('button',{name:'Move block up',exact:true}).click();
+  const order=(await call('get_notebook')).blocks;assert.equal(order.at(-2).id,menuBlock.id);
+  await menuShell.getByRole('button',{name:'Block actions',exact:true}).click();await page.locator('#block-actions-dialog').getByRole('button',{name:'Delete block',exact:true}).click();await page.locator('#confirm-dialog').getByRole('button',{name:'Remove',exact:true}).click();
+  assert.equal(await menuShell.count(),0);
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Page must not overflow on mobile.');
-  await page.screenshot({ path: `${root}/test-results/mobile.png`, fullPage: true });
+  await page.evaluate(()=>scrollTo(0,0));await page.screenshot({ path: `${root}/test-results/mobile.png` });
   await context.setOffline(true); await page.reload();
   assert.equal(await page.locator('#page-title').inputValue(), 'Undo this');
   await page.locator('#page-title').fill('Edited offline');
@@ -198,7 +232,7 @@ try {
   const engineGate=new Promise(resolve=>{releaseEngine=resolve;}),requested=new Promise(resolve=>{engineRequested=resolve;});
   await racePage.route('**/src/excalidraw-engine.js',async route=>{engineRequested();await engineGate;await route.continue();});
   await racePage.goto('http://localhost:4317/',{waitUntil:'domcontentloaded'});
-  await requested;await racePage.waitForFunction(()=>document.getElementById('agent-status').textContent.includes('48 tools'));
+  await requested;await racePage.waitForFunction(()=>document.getElementById('agent-status').textContent.includes('50 tools'));
   const latestScene={elements:[{id:'edited-during-download',type:'rectangle',x:50,y:50,width:220,height:80}],appState:{},files:{}};
   await call('excalidraw_set_scene',{blockId:drawing.id,json:JSON.stringify(latestScene)},racePage);
   releaseEngine();await racePage.locator('.excalidraw canvas').first().waitFor();
@@ -207,7 +241,7 @@ try {
   await racePage.waitForFunction(id=>{const b=JSON.parse(localStorage.getItem('omd.notebook.v1')).pages.find(p=>p.blocks.some(b=>b.id===id)).blocks.find(b=>b.id===id);return b.scene.elements[0]?.id==='edited-during-download'&&b.scene.elements[0]?.version!==undefined;},drawing.id);
   await raceContext.close();
   assert.deepEqual(errors.filter(error => error !== 'Tabs are limited to two levels.'), []);
-  console.log('Native WebMCP, lazy engine loading/teardown, block identity/focus, notebook UI, persistence, mobile, theme, reminders, import/export, and offline reload passed.');
+  console.log('Native WebMCP, app shell/sidebar, view persistence, mobile drawer/focus/menu, lazy engine loading/teardown, block identity, theme, reminders, import/export, and offline reload passed.');
 } catch(error) {
   if(page) { await mkdir(`${root}/test-results`,{recursive:true});await page.screenshot({path:`${root}/test-results/failure.png`,fullPage:true});console.log(JSON.stringify({errors,consoleErrors,diagnostic:await page.evaluate(()=>({notices:document.getElementById('notices')?.textContent,canvas:[...document.querySelectorAll('#canvas-stage canvas')].map(c=>({class:c.className,width:c.width,height:c.height,rect:c.getBoundingClientRect().toJSON()})),selected:[...document.querySelectorAll('#canvas-stage input:checked')].map(e=>({value:e.value,title:e.closest('label')?.title})),notebook:JSON.parse(localStorage.getItem('omd.notebook.v1'))}))})); }
   throw error;

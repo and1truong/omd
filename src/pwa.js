@@ -8,7 +8,7 @@ export function setupPWA({ notify, openSettings }) {
     await installPrompt.prompt(); await installPrompt.userChoice; installPrompt = null; install.hidden = true;
   });
   window.addEventListener('appinstalled', () => { installPrompt = null; install.hidden = true; notify('omd is installed. A little space of your own.'); });
-  function connectivity() { document.getElementById('offline-status').textContent = navigator.onLine ? 'Local-first. No account needed.' : 'Offline. Your notebook still saves here.'; }
+  function connectivity() { document.getElementById('offline-status').textContent = navigator.onLine ? 'Saved on this device' : 'Offline · saved on this device'; }
   window.addEventListener('online', connectivity); window.addEventListener('offline', connectivity); connectivity();
   if ('serviceWorker' in navigator && window.isSecureContext) {
     navigator.serviceWorker.register(new URL('../service-worker.js', import.meta.url), { scope: new URL('../', import.meta.url).pathname }).catch(() => notify('Offline caching could not start. Your notebook still saves in this browser.', 'error', true));

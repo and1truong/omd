@@ -4,13 +4,18 @@ import { startReminders } from './reminders.js';
 import { setupPalette } from './palette.js';
 import { createDiagramManager } from './diagrams.js';
 import { createRenderCache, reconcile, revealActions } from './render-cache.js';
+import { setupShell, showMenu } from './shell.js';
+import { icon, labelIcon } from './icons.js';
 
 const $ = selector => document.querySelector(selector);
-let store, palette, diagrams, renderer, dragData, pickerTarget = 'page';
-export const openPalette = () => palette?.open();
+let store, palette, diagrams, renderer, shell, dragData, pickerTarget = 'page';
+export const openPalette = () => {shell?.closeMobile();palette?.open();};
+export const getView = () => shell.getView();
+export const setView = patch => shell.setView(patch);
 export const flushDiagrams = () => diagrams?.flushAll();
 export function openCanvas(blockId,pageId) {
   const page=store.getPage(pageId);findBlock(page,blockId,'excalidraw');diagrams?.flushAll();
+  shell?.closeMobile();
   if(page.id!==store.getActivePageId())store.dispatch('page_select',{pageId:page.id});
   for(const [name,input] of revealActions(page.blocks,blockId))store.dispatch(name,input);
   diagrams.openFocus(blockId);
@@ -24,7 +29,7 @@ export function notify(message, kind = '', persistent = false) {
 }
 function element(tag, className = '') { const el = document.createElement(tag); el.className = className; return el; }
 function button(label, aria, fn, className = 'icon-button') {
-  const b = element('button', className); b.type = 'button'; b.textContent = label; b.title = aria; b.setAttribute('aria-label', aria); b.addEventListener('click', fn); return b;
+  const b = element('button', className); b.type = 'button'; if(labelIcon[label])b.append(icon(labelIcon[label]));else b.textContent=label; b.title = aria; b.setAttribute('aria-label', aria); b.addEventListener('click', fn); return b;
 }
 function action(name, input, { quiet = false, focus } = {}) {
   try { if(!quiet)diagrams?.flushAll(); const result = store.dispatch(name, input, { quiet }); if (focus) requestAnimationFrame(() => document.getElementById(focus)?.focus()); return result; }
@@ -43,8 +48,8 @@ function editable(value, aria, fn, { multiline = false, className = '', placehol
 }
 function fit(el) { el.style.height = 'auto'; el.style.height = `${el.scrollHeight}px`; }
 function title(b, glyph) {
-  const head = element('div', 'block-heading'); const icon = element('span', 'type-glyph'); icon.textContent = glyph; icon.setAttribute('aria-hidden', 'true');
-  head.append(icon, editable(b.title, `${b.type} title`, value => action('update_block', { blockId: b.id, patch: { title: value } }, { quiet: true }), { className: 'block-title', placeholder: 'Untitled' })); return head;
+  const head = element('div', 'block-heading'); const glyphIcon=icon(b.type);glyphIcon.classList.add('type-glyph');
+  head.append(glyphIcon, editable(b.title, `${b.type} title`, value => action('update_block', { blockId: b.id, patch: { title: value } }, { quiet: true }), { className: 'block-title', placeholder: 'Untitled' })); return head;
 }
 function rowsControls(onUp, onDown, onRemove, upDisabled, downDisabled, label) {
   const tools = element('div', 'row-controls');
@@ -89,9 +94,14 @@ function makeBlockList(blocks, containerId, nodes) {
 function renderBlock(b, containerId, index, count) {
   const shell = element('section', `block block-type-${b.type}`); shell.dataset.blockId = b.id;
   const controls = element('div', 'block-controls'); const handle = button('⠿', 'Drag block', () => {}, 'icon-button block-drag'); draggable(handle, { kind: 'block', blockId: b.id, containerId });
-  const up = button('↑', 'Move block up', () => action('move_block', { blockId: b.id, containerId, index: index - 1 })); up.disabled = index === 0;
-  const down = button('↓', 'Move block down', () => action('move_block', { blockId: b.id, containerId, index: index + 1 })); down.disabled = index === count - 1;
-  controls.append(handle, up, down, button('×', 'Delete block', async () => { if (await confirmAction('Remove this block?', 'This removes the block and everything inside it. You can undo this change.', 'Remove')) action('remove_block', { blockId: b.id }); }, 'icon-button delete'));
+  const more=button('…','Block actions',()=>{
+    const current=findBlock(store.getState(),b.id),position=current.siblings.findIndex(block=>block.id===b.id);
+    showMenu('block-actions-dialog','Block actions',[
+      {label:'Move block up',icon:'up',disabled:position===0,run:()=>action('move_block',{blockId:b.id,containerId,index:position-1},{focus:`${b.id}-menu`})},
+      {label:'Move block down',icon:'down',disabled:position===current.siblings.length-1,run:()=>action('move_block',{blockId:b.id,containerId,index:position+1},{focus:`${b.id}-menu`})},
+      {label:'Delete block',icon:'trash',danger:true,run:async()=>{if(await confirmAction('Remove this block?','This removes the block and everything inside it. You can undo this change.','Remove'))action('remove_block',{blockId:b.id});}},
+    ],more);
+  });more.id=`${b.id}-menu`;controls.append(handle,more);
   shell.append(controls);
   switch (b.type) {
     case 'text': case 'heading': shell.append(editable(b.text, `${b.type} content`, value => action('update_block', { blockId: b.id, patch: { text: value } }, { quiet: true }), { multiline: true, placeholder: b.type === 'text' ? 'Write something…' : 'A new section', id: `${b.id}-text` })); break;
@@ -157,12 +167,12 @@ function renderAccordion(shell, b) {
 }
 function toLocalDateTime(iso) { if (!iso) return ''; const d = new Date(iso); const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000); return local.toISOString().slice(0, 16); }
 function renderReminder(shell, b) {
-  const box = element('div', 'reminder-box'); const icon = element('span', 'reminder-icon'); icon.textContent = '◴'; icon.setAttribute('aria-hidden', 'true');
+  const box = element('div', 'reminder-box'); const reminderIcon=icon('reminder');reminderIcon.classList.add('reminder-icon');
   const body = element('div', 'reminder-body'); body.append(editable(b.title, 'Reminder text', value => action('update_block', { blockId: b.id, patch: { title: value } }, { quiet: true }), { className: 'block-title' }));
   const dateRow = element('div', 'reminder-date'); const input = element('input'); input.type = 'datetime-local'; input.value = toLocalDateTime(b.dueAt); input.setAttribute('aria-label', 'Reminder date and time');
   input.addEventListener('change', () => { const dueAt = input.value ? new Date(input.value).toISOString() : ''; action('update_block', { blockId: b.id, patch: { dueAt, enabled: !!dueAt } }); });
   const status = element('span', 'reminder-status'); status.textContent = b.firedAt ? 'Delivered' : !b.enabled ? 'Off' : Date.parse(b.dueAt) <= Date.now() ? 'Due' : 'Scheduled'; dateRow.append(input, status); body.append(dateRow);
-  const label = element('label', 'reminder-enable'); const enabled = element('input'); enabled.type = 'checkbox'; enabled.checked = b.enabled; enabled.disabled = !b.dueAt; enabled.addEventListener('change', () => action('update_block', { blockId: b.id, patch: { enabled: enabled.checked } })); label.append(enabled, document.createTextNode('On')); box.append(icon, body, label); shell.append(box);
+  const label = element('label', 'reminder-enable'); const enabled = element('input'); enabled.type = 'checkbox'; enabled.checked = b.enabled; enabled.disabled = !b.dueAt; enabled.addEventListener('change', () => action('update_block', { blockId: b.id, patch: { enabled: enabled.checked } })); label.append(enabled, document.createTextNode('On')); box.append(reminderIcon, body, label); shell.append(box);
   const note = element('p', 'reminder-note'); note.textContent = 'While open, or when you return. Notification settings ↗'; note.append(button('Settings', 'Reminder settings', () => openSettings(), 'link-button')); shell.append(note);
 }
 function renderKanban(shell, b) {
@@ -207,34 +217,36 @@ export function openPicker(containerId = 'page') {
     const btn = button('', `Add ${name.toLowerCase()}`, () => {
       const input = { type, containerId: pickerTarget }; if (orientation) input.orientation = orientation;
       const r = action('add_block', input); if (r) { $('#picker').close(); requestAnimationFrame(() => document.querySelector(`[data-block-id="${CSS.escape(r.blockId)}"] input,[data-block-id="${CSS.escape(r.blockId)}"] textarea`)?.focus()); }
-    }, 'picker-option'); const icon = element('span', 'glyph'); icon.textContent = glyph; icon.setAttribute('aria-hidden', 'true');
-    const body = element('span'); const strong = element('strong'); strong.textContent = name; const small = element('small'); small.textContent = caption; body.append(strong, small); btn.append(icon, body); grid.append(btn);
+    }, 'picker-option'); const glyphIcon=icon(type==='tabs'&&orientation==='vertical'?'vertical':type);glyphIcon.classList.add('glyph');
+    const body = element('span'); const strong = element('strong'); strong.textContent = name; const small = element('small'); small.textContent = caption; body.append(strong, small); btn.append(glyphIcon, body); grid.append(btn);
   }
   if (!$('#picker').open) $('#picker').showModal();
 }
 function applyTheme(theme) {
   const resolved = theme === 'system' ? themeQuery.matches ? 'dark' : 'light' : theme;
   const changed=document.documentElement.dataset.theme!==resolved;
-  document.documentElement.dataset.theme = resolved; document.querySelector('meta[name=theme-color]').content = resolved === 'dark' ? '#171c1a' : '#f5f4ef';
+  document.documentElement.dataset.theme = resolved; document.querySelector('meta[name=theme-color]').content = resolved === 'dark' ? '#191b1a' : '#ffffff';
   if(changed)diagrams?.themeChanged();
 }
 let renderPageId;
 function render(state, { quiet = false, reminderBlockId, reminderPageId, changedBlockId, changedPageId } = {}) {
   applyTheme(state.theme); $('#theme').value = state.theme; $('#notification-mode').value = state.notificationMode;
-  $('#save-status').replaceChildren(); const dot = element('span', 'status-dot'); $('#save-status').append(dot, document.createTextNode('Saved here'));
+  $('#save-status').replaceChildren(); const dot = element('span', 'status-dot'); $('#save-status').append(dot, document.createTextNode('Saved'));
   $('#undo-button').disabled = !store.canUndo(); $('#redo-button').disabled = !store.canRedo();
   diagrams?.syncHeader(); if (quiet) {
     if(changedBlockId && changedPageId===state.id)renderer.accept(changedBlockId,findBlock(state,changedBlockId).block);
     if(reminderBlockId && reminderPageId===state.id) { const badge=document.querySelector(`[data-block-id="${CSS.escape(reminderBlockId)}"] .reminder-status`);if(badge)badge.textContent='Delivered'; }
     return;
   }
+  if($('#block-actions-dialog').open)$('#block-actions-dialog').close();
+  if($('#page-actions-dialog').open)$('#page-actions-dialog').close();
   // Preserve cursor and scroll when a command updates the rest of the page.
   const focused = document.activeElement; const focusId = focused?.id; const selection = focused?.selectionStart == null ? null : [focused.selectionStart, focused.selectionEnd];
   const scroll = [scrollX, scrollY];
-  $('#page-title').value = state.title; $('#page-subtitle').value = state.subtitle;
+  for(const [selector,value] of [['#page-title',state.title],['#page-subtitle',state.subtitle]]){const el=$(selector);if(el.value!==value){el.value=value;fit(el);}}
   renderPageId=state.id;diagrams?.begin();renderer.begin(state.id);
   reconcile($('#notebook'),[renderer.list(state.blocks,'page')]);renderer.end();diagrams?.end();
-  for(const el of document.querySelectorAll('[data-autofit]'))if(!el.dataset.fitted){fit(el);el.dataset.fitted='true';}
+  for(const el of document.querySelectorAll('[data-autofit],.auto-height'))if(!el.dataset.fitted){fit(el);el.dataset.fitted='true';}
   if (focusId) { const next = document.getElementById(focusId); if (next) { next.focus({ preventScroll: true }); if (selection && next.setSelectionRange) next.setSelectionRange(...selection); } }
   scrollTo(...scroll);
 }
@@ -243,6 +255,7 @@ export function downloadJson(raw, filename = `omd-${new Date().toISOString().sli
   const url = URL.createObjectURL(new Blob([raw], { type: 'application/json' })); const a = element('a'); a.href = url; a.download = filename; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 export function openSettings() {
+  shell?.closeMobile();$('#page-menu').open=false;
   $('#permission-state').textContent = !('Notification' in window) ? 'Notifications unavailable' : `Permission: ${Notification.permission}`;
   $('#enable-notifications').disabled = !('Notification' in window) || Notification.permission === 'granted';
   if (!$('#settings-dialog').open) $('#settings-dialog').showModal();
@@ -265,13 +278,14 @@ function startupError(error) {
 }
 function boot() {
   try { store = createStore(localStorage); } catch (error) { startupError(error); return; }
-  $('#today').textContent = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }).format(new Date());
   for (const close of document.querySelectorAll('[data-close]')) close.addEventListener('click', () => close.closest('dialog').close());
   for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', e => { if (e.target === dialog) { const rect = dialog.getBoundingClientRect(); if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) dialog.close(); } });
   diagrams=createDiagramManager(store,{notify});
   renderer=createRenderCache({makeBlock:renderBlock,makeList:makeBlockList});
+  shell=setupShell(store,{beforeNavigate:()=>diagrams.beforeNavigate(),openPalette,onError:error=>notify(error.message,'error',true)});
   store.subscribe(render); render(store.getState());
-  palette = setupPalette(store, { onError: error => notify(error.message, 'error', true), beforeNavigate:()=>diagrams.beforeNavigate() });
+  palette = setupPalette(store, { onError: error => notify(error.message, 'error', true), beforeOpen:()=>shell.closeMobile(), beforeNavigate:()=>diagrams.beforeNavigate() });
+  let fitFrame;window.addEventListener('resize',()=>{cancelAnimationFrame(fitFrame);fitFrame=requestAnimationFrame(()=>{for(const el of document.querySelectorAll('[data-autofit],.auto-height'))fit(el);});});
   $('#canvas-stage-close').addEventListener('click',closeCanvas);$('#canvas-stage-pages').addEventListener('click',openPalette);
   window.addEventListener('pagehide',flushDiagrams);window.addEventListener('beforeunload',flushDiagrams);
   for (const [selector, key] of [['#page-title', 'title'], ['#page-subtitle', 'subtitle']]) {
@@ -283,15 +297,15 @@ function boot() {
   $('#notification-mode').addEventListener('change', e => action('set_page', { notificationMode: e.target.value }));
   $('#undo-button').addEventListener('click', () => { try { diagrams.flushAll();store.undo(); } catch (e) { notify(e.message, 'error'); } });
   $('#redo-button').addEventListener('click', () => { try { diagrams.flushAll();store.redo(); } catch (e) { notify(e.message, 'error'); } });
-  $('#export-button').addEventListener('click', () => { downloadJson(); notify('Notebook exported. Keep it somewhere safe.'); });
-  $('#import-button').addEventListener('click', () => $('#import-file').click());
+  $('#export-button').addEventListener('click', () => { $('#page-menu').open=false;downloadJson(); notify('Notebook exported.'); });
+  $('#import-button').addEventListener('click', () => {$('#page-menu').open=false;$('#import-file').click();});
   $('#import-file').addEventListener('change', async event => {
     const file = event.target.files[0]; event.target.value = ''; if (!file) return;
     try { const raw = await file.text(); const { parseBook } = await import('./notebook.js'); parseBook(raw);
       if (await confirmAction('Replace this notebook?', 'All current pages will be exported as a backup before importing. Import replaces the entire notebook, page order and settings.', 'Back up & import')) { diagrams.beforeNavigate();downloadJson(store.export(), `omd-before-import-${Date.now()}.json`); store.import(raw); notify('Notebook imported.'); }
     } catch (error) { notify(error.message, 'error', true); }
   });
-  $('#settings-button').addEventListener('click', openSettings); $('#agent-status').addEventListener('click', openSettings);
+  $('#settings-button').addEventListener('click', openSettings); $('#sidebar-settings').addEventListener('click', openSettings); $('#agent-status').addEventListener('click', openSettings);
   $('#enable-notifications').addEventListener('click', async () => { try { if ('Notification' in window) { await Notification.requestPermission(); openSettings(); } } catch (e) { notify(e.message, 'error'); } });
   $('#test-notification').addEventListener('click', () => deliverReminder({ id: 'test', title: 'A little nudge. Your reminders are ready.' }, store.getState().notificationMode));
   $('#persist-storage').addEventListener('click', async () => { try { const kept = await navigator.storage?.persist?.(); $('#storage-state').textContent = kept ? ' Persistent storage granted.' : ' Browser did not grant persistent storage. Keep exports.'; } catch { $('#storage-state').textContent = ' Not supported by this browser.'; } });

@@ -27,7 +27,7 @@ test('malformed and unsafe scenes are rejected atomically',()=>{
 });
 test('diagram WebMCP tools share storage and real fullscreen callbacks',async()=>{
   const store=setup();let open,closed=false;const tools=createTools(store,{openCanvas:(...args)=>{open=args;},closeCanvas:()=>{closed=true;}});
-  assert.equal(tools.length,48);const call=(name,args={})=>tools.find(t=>t.name===`omd_${name}`).execute(args);
+  assert.equal(tools.length,50);const call=(name,args={})=>tools.find(t=>t.name===`omd_${name}`).execute(args);
   const b=(await call('add_block',{type:'excalidraw'})).block;
   await call('excalidraw_set_scene',{blockId:b.id,json:JSON.stringify({elements:[rectangle],appState:{},files:{}})});
   assert.equal(store.getState().blocks[0].scene.elements[0].id,'shape-1');

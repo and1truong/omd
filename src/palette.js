@@ -1,4 +1,4 @@
-export function setupPalette(store, { onError, beforeNavigate = () => {} } = {}) {
+export function setupPalette(store, { onError, beforeOpen = () => {}, beforeNavigate = () => {} } = {}) {
   const dialog = document.getElementById('page-palette'), search = document.getElementById('page-search'), list = document.getElementById('palette-pages'), create = document.getElementById('palette-create');
   let selected = 0, matches = [];
   const run = (action, args) => { try { return store.dispatch(action, args); } catch (error) { onError?.(error); return null; } };
@@ -22,7 +22,7 @@ export function setupPalette(store, { onError, beforeNavigate = () => {} } = {})
     if (matches[selected]) search.setAttribute('aria-activedescendant',`palette-${matches[selected].pageId}`); else search.removeAttribute('aria-activedescendant');
     create.textContent = search.value.trim() ? `+ Create “${search.value.trim()}”` : '+ Create a new page';
   }
-  function open() { search.value = ''; selected = 0; render(); if (!dialog.open) dialog.showModal(); search.focus(); }
+  function open() { beforeOpen();search.value = ''; selected = 0; render(); if (!dialog.open) dialog.showModal(); search.focus(); }
   create.addEventListener('click', () => { beforeNavigate(); if (run('page_add',{ title:search.value.trim() || 'Untitled page' })) dialog.close(); });
   search.addEventListener('input', () => { selected = 0; render(); });
   search.addEventListener('keydown', e => {

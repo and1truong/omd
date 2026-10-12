@@ -12,7 +12,7 @@ const call = (tools, name, input = {}) => tools.find(t => t.name === `omd_${name
 test('registered tools execute shared actions and read back their persistent results', async () => {
   const store = setup(); const registry = new Map();
   const registered = await registerWebMCP(store, {}, { registry: { registerTool(tool, { signal }) { registry.set(tool.name, tool); signal.addEventListener('abort', () => registry.delete(tool.name)); } } });
-  assert.ok(registered.supported); assert.equal(registered.count, 48);
+  assert.ok(registered.supported); assert.equal(registered.count, 50);
   const tools = [...registry.values()];
   const outer = (await call(tools, 'add_block', { type: 'tabs', orientation: 'horizontal' })).block;
   const inner = (await call(tools, 'add_block', { type: 'tabs', orientation: 'vertical', containerId: outer.tabs[0].id })).block;
