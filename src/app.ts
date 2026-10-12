@@ -38,7 +38,7 @@ export async function openCanvas(blockId:string,pageId?:string) {
 }
 export const closeCanvas = async () => {await flushPending();diagrams?.closeFocus();};
 let deferredRender=false;
-const composition=createCompositionGuard({onSettled:()=>{if(deferredRender){deferredRender=false;render(store.getRenderState(),{reset:true});}}});
+const composition=createCompositionGuard({onSettled:()=>{if(deferredRender){deferredRender=false;render(store.getRenderState(),{reset:true});}else textEditors?.end();}});
 const themeQuery = matchMedia('(prefers-color-scheme: dark)');
 export function notify(message:string,kind = '', persistent = false) {
   const el = element('div', `notice ${kind}`); const text = element('span'); text.textContent = message;

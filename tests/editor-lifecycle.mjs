@@ -112,6 +112,9 @@ async function composed(page,input,text) {
 }
 async function compositionBarrier(type) {
   const {context,page}=await fresh(),f=await fixture(page,{type}),input=f.itemId?editor(page,f.itemId):textEditor(page,f.blockId),draft=`Tiếng Việt 漢字 ${type}`;
+  await input.evaluate(el=>{el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));});
+  await page.waitForFunction(({itemId,blockId})=>!document.querySelector(itemId?`[data-checklist-editor="${itemId}"] .markdown-editor`:`[data-text-editor="${blockId}"] .markdown-editor`).editor.view.composing,f);
+  assert.equal(await page.locator('#save-status').innerText(),'Saved');
   await composed(page,input,draft);
   await page.evaluate(()=>{window.exportFinished=false;window.strictExport=lifecycleApp.downloadJson().then(()=>{window.exportFinished=true;});});
   await page.waitForTimeout(100);assert.equal(await page.evaluate(()=>exportFinished),false);
@@ -178,10 +181,20 @@ async function scopedSettlement() {
   });await context.close();
 }
 
+async function composingDeletion() {
+  const {context,page}=await fresh(),f=await fixture(page),input=editor(page,f.itemId),draft='漢字 còn giữ sau khi xóa từ tab khác';
+  await composed(page,input,draft);const peer=await context.newPage();await ready(peer);await call(peer,'page_select',{pageId:f.pageId});await call(peer,'remove_block',{blockId:f.blockId});
+  await page.waitForFunction(blockId=>!lifecycleStore.getState().blocks.some(block=>block.id===blockId),f.blockId);
+  assert.equal(await input.count(),1);await input.evaluate(el=>el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));
+  await input.waitFor({state:'detached'});assert.equal(await page.getByRole('textbox',{name:'Unsaved Markdown draft',exact:true}).inputValue(),draft);
+  await page.getByRole('button',{name:'Recover Markdown draft as a new note',exact:true}).click();await page.getByRole('textbox',{name:'Unsaved Markdown draft',exact:true}).waitFor({state:'detached'});
+  assert.equal(await page.evaluate(draft=>lifecycleStore.getState().blocks.at(-1).text,draft),draft);await context.close();
+}
+
 try {
   await new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.once('error',reject);server.once('exit',code=>reject(new Error(`Server exited: ${code}`)));});
   await mkdir(`${root}/test-results`,{recursive:true});browser=await ({chromium,webkit}[engine]).launch({headless:true});
   await historyBarrier();await retainedDrafts('checklist');await retainedDrafts('text');await deletedDrafts();await deletedDrafts(true);
-  await compositionBarrier('checklist');await compositionBarrier('text');await importedFocus();await scopedSettlement();assert.deepEqual(errors,[]);
+  await compositionBarrier('checklist');await compositionBarrier('text');await importedFocus();await scopedSettlement();await composingDeletion();assert.deepEqual(errors,[]);
   console.log(`${engine} ${basePath||'/'}: history/draft recovery, strict scoped composition/export, original-page navigation and imported focus identity passed.`);
 } finally {await browser?.close();server.kill();}
