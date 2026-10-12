@@ -41,7 +41,7 @@ test('remote theme refresh never imports sidebar state; unrelated writes do not 
 test('WebMCP theme alias changes only global preference and rejects invalid or failed changes',async()=>{
   const saved=storage(),view=createView(saved),store=await createStore(saved,{initial:emptyNotebook}),tools=createTools(store,{getView:view.get,setView:view.set});
   const call=(name,input={})=>tools.find(t=>t.name===`omd_${name}`).execute(input),before=await store.export(),revision=store.getRevision();
-  assert.equal(tools.length,50);await call('set_page',{theme:'dark'});assert.equal(view.get().theme,'dark');assert.equal(await store.export(),before);assert.equal(store.getRevision(),revision);assert.equal(store.canUndo(),false);
+  assert.equal(tools.length,55);await call('set_page',{theme:'dark'});assert.equal(view.get().theme,'dark');assert.equal(await store.export(),before);assert.equal(store.getRevision(),revision);assert.equal(store.canUndo(),false);
   await call('set_view',{theme:'light'});assert.equal((await call('get_view')).theme,'light');assert.equal(await store.export(),before);
   await assert.rejects(()=>call('set_page',{theme:'system',pageId:'missing'}));assert.equal(view.get().theme,'light');
   for(const input of [{theme:'sepia'},{theme:42},{theme:null}]){await assert.rejects(()=>call('set_view',input));await assert.rejects(()=>call('set_page',input));}

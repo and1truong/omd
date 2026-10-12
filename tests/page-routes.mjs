@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 
 export async function verifyPageRoutes({browser,appURL,call,root}) {
   const context=await browser.newContext({viewport:{width:1280,height:900}}),a=await context.newPage(),b=await context.newPage();
-  const ready=target=>target.waitForFunction(()=>document.getElementById('agent-status')?.textContent.includes('50 tools'));
+  const ready=target=>target.waitForFunction(()=>document.getElementById('agent-status')?.textContent.includes('55 tools'));
   const active=async target=>(await call('get_notebook',{},target)).id;
   const path=id=>new URL(`page/${encodeURIComponent(id)}`,appURL).href;
   const synchronized=async(target,revision)=>target.waitForFunction(async revision=>(await import(new URL('./src/app.js',document.baseURI).href)).getStore().getRevision()>=revision,revision);

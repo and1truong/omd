@@ -103,6 +103,33 @@ body[data-content-width=wide] .paper { max-width: none; }
 .block-controls .icon-button { min-width: 27px; min-height: 26px; padding: 4px; }
 .block-controls .ui-icon { width: 16px; height: 16px; }
 .block-drag { cursor: grab; }
+.table-toolbar { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; max-width: 100%; font-size: 11px; margin: 6px 0 10px; }
+.table-options { margin-left: auto; }
+.table-options summary { display: flex; align-items: center; gap: 5px; padding: 5px 7px; border-radius: 4px; color: var(--secondary); cursor: pointer; list-style: none; }
+.table-options summary::-webkit-details-marker { display: none; }
+.table-options summary:hover, .table-options[open] summary { background: var(--wash); color: var(--text); }
+.table-options summary .ui-icon { width: 14px; height: 14px; }
+.table-options-panel { position: absolute; right: 0; top: calc(100% + 4px); z-index: 6; width: 260px; max-width: 100%; padding: 16px; display: flex; flex-direction: column; gap: 14px; font-size: 13px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 4px 16px #0001; }
+.table-options-panel label { display: flex; align-items: center; gap: 8px; }
+.table-options-panel input { accent-color: var(--accent); }
+.table-options-panel select { margin-left: auto; background: var(--paper); border: 1px solid var(--line); border-radius: 4px; padding: 4px 8px; }
+.table-scroll { width: fit-content; max-width: 100%; max-height: 440px; overflow: auto; overscroll-behavior: contain; border: 1px solid var(--line); border-radius: 3px; margin-bottom: 6px; }
+.data-table { --table-divider: color-mix(in srgb, var(--secondary) 45%, var(--paper)); border-spacing: 0; table-layout: fixed; width: calc(var(--table-column-count) * 160px + 32px); font-size: 13px; }
+.data-table th, .data-table td { position: relative; width: 160px; min-width: 160px; max-width: 160px; padding: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--paper); vertical-align: top; text-align: left; }
+.data-table .table-cell { width: 100%; min-width: 0; min-height: 44px; padding: 11px 12px; border-radius: 0; overflow-wrap: anywhere; }
+.data-table .table-top-cell .table-cell { padding-right: 32px; }
+.data-table .table-row-tools { width: 32px; min-width: 32px; max-width: 32px; text-align: center; border-right: 0; }
+.data-table .table-column-action { position: absolute; right: 3px; top: 7px; }
+.data-table .table-column-action, .data-table .table-row-tools button { min-width: 24px; min-height: 28px; padding: 2px; opacity: 0; color: var(--secondary); }
+.data-table th:hover>.table-column-action, .data-table td:hover>.table-column-action, .data-table th:focus-within>.table-column-action, .data-table td:focus-within>.table-column-action, .data-table tr:hover>.table-row-tools button, .data-table tr:focus-within>.table-row-tools button, .data-table button:focus-visible { opacity: 1; }
+.data-table .table-header th, .data-table .table-header-tool { background: var(--wash); }
+.data-table .table-pinned { position: sticky; z-index: 1; }
+.data-table .table-pinned-edge::after { content: ''; position: absolute; top: 0; bottom: 0; right: -1px; width: 1px; background: var(--table-divider); pointer-events: none; }
+.table-scroll[data-scrolled-x=true] .table-pinned-edge::after { box-shadow: 2px 0 4px #0002; }
+.table-scroll[data-scrolled-y=true] .table-header-pinned th, .table-scroll[data-scrolled-y=true] .table-header-tool { box-shadow: 0 1px 0 var(--table-divider), 0 3px 4px #0001; }
+.data-table .table-header-pinned th, .data-table .table-header-tool { position: sticky; top: 0; z-index: 2; }
+.data-table .table-header-pinned .table-pinned { z-index: 3; }
+@media (hover: none) { .data-table .table-column-action, .data-table .table-row-tools button { opacity: 1; } }
 .block-type-heading textarea { font-size: 24px; font-weight: 600; line-height: 1.4; }
 .block-type-text textarea { font-size: 14px; line-height: 1.8; min-height: 25px; }
 .block-type-text>textarea, .block-type-heading>textarea { background: transparent; outline: 0; border-radius: 0; }

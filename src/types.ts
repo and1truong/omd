@@ -10,6 +10,8 @@ export interface SceneFile extends JsonObject {id:ID;dataURL:string}
 export interface Scene {elements:SceneElement[];appState:JsonObject;files:Record<ID,SceneFile>}
 export interface TextBlock {id:ID;type:'text' | 'heading';text:string}
 export interface DividerBlock {id:ID;type:'divider'}
+export interface TableRow {id:ID;cells:string[]}
+export interface TableBlock {id:ID;type:'table';title:string;headerRow:boolean;pinnedHeader:boolean;pinnedColumns:number;columns:{id:ID}[];rows:TableRow[]}
 export interface ChecklistItem {id:ID;text:string;done:boolean;children?:ChecklistItem[]}
 export interface ChecklistBlock {id:ID;type:'checklist';title:string;items:ChecklistItem[]}
 export interface Tab {id:ID;title:string;blocks:Block[]}
@@ -23,7 +25,7 @@ export interface Column {id:ID;title:string;cards:Card[]}
 export interface KanbanBlock {id:ID;type:'kanban';title:string;columns:Column[]}
 export interface MermaidBlock {id:ID;type:'mermaid';title:string;source:string}
 export interface ExcalidrawBlock {id:ID;type:'excalidraw';title:string;scene:Scene}
-export type Block = TextBlock | DividerBlock | ChecklistBlock | TabsBlock | ToggleBlock | AccordionBlock | ReminderBlock | KanbanBlock | MermaidBlock | ExcalidrawBlock;
+export type Block = TextBlock | DividerBlock | TableBlock | ChecklistBlock | TabsBlock | ToggleBlock | AccordionBlock | ReminderBlock | KanbanBlock | MermaidBlock | ExcalidrawBlock;
 export type BlockType = Block['type'];
 export type BlockOf<T extends BlockType> = Extract<Block,{type:T}> | (T extends 'text' | 'heading' ? TextBlock : never);
 export interface Page {format:'omd';version:1;id:ID;revision:number;title:string;subtitle:string;theme:Theme;notificationMode:NotificationMode;updatedAt:string;blocks:Block[]}
@@ -33,13 +35,16 @@ export interface PageRow {pageId:ID;title:string;subtitle:string;index:number;ac
 export type PartialView = Partial<View>;
 export interface View {sidebarOpen:boolean;contentWidth:'reading'|'wide';collapsedPageIds:ID[];theme:Theme}
 export interface StorageLike {getItem(key:string):string|null;setItem(key:string,value:string):unknown}
-export interface BlockOptions {text?:string;title?:string;orientation?:Orientation;dueAt?:string;source?:string;scene?:Scene}
+export interface BlockOptions {text?:string;title?:string;orientation?:Orientation;dueAt?:string;source?:string;scene?:Scene;rowCount?:number;columnCount?:number;headerRow?:boolean;pinnedHeader?:boolean;pinnedColumns?:number}
 export interface BlockPatch extends BlockOptions {open?:boolean;enabled?:boolean}
 export interface CommandInputs {
   set_page:Partial<Pick<Page,'title'|'subtitle'|'theme'|'notificationMode'>>;
   add_block:BlockOptions & {type:BlockType;containerId?:ID;index?:number};
   update_block:{blockId:ID;patch:BlockPatch};
   remove_block:{blockId:ID};move_block:{blockId:ID;containerId:ID;index?:number};
+  table_cell_update:{blockId:ID;rowId:ID;columnId:ID;text:string};
+  table_row_add:{blockId:ID;index?:number};table_row_remove:{blockId:ID;rowId:ID};
+  table_column_add:{blockId:ID;index?:number};table_column_remove:{blockId:ID;columnId:ID};
   checklist_add:{blockId:ID;text?:string;parentId?:ID;index?:number};checklist_update:{blockId:ID;itemId:ID;patch:Partial<Pick<ChecklistItem,'text'|'done'>>};checklist_remove:{blockId:ID;itemId:ID};checklist_move:{blockId:ID;itemId:ID;parentId?:ID;index:number};
   tab_add:{blockId:ID;title?:string;index?:number};tab_update:{blockId:ID;tabId:ID;title:string};tab_select:{blockId:ID;tabId:ID};tab_move:{blockId:ID;tabId:ID;index:number};tab_remove:{blockId:ID;tabId:ID};
   accordion_add:{blockId:ID;title?:string;index?:number};accordion_update:{blockId:ID;itemId:ID;patch:Partial<Pick<AccordionItem,'title'|'open'>>};accordion_remove:{blockId:ID;itemId:ID};accordion_move:{blockId:ID;itemId:ID;index:number};
@@ -51,11 +56,11 @@ export interface CommandInputs {
 }
 export type CommandName = keyof CommandInputs;
 export type CommandInput<K extends CommandName> = CommandInputs[K] & {pageId?:ID};
-export type CommandResult<K extends CommandName> = K extends 'add_block' ? {blockId:ID;block:Block} : K extends 'update_block' ? {blockId:ID} : K extends 'checklist_add'|'accordion_add' ? {itemId:ID} : K extends 'tab_add' ? {tabId:ID} : K extends 'column_add' ? {columnId:ID} : K extends 'card_add' ? {cardId:ID} : K extends 'page_add' ? {pageId:ID} : K extends 'page_remove' ? {removedPageIds:ID[]} : K extends 'import_notebook' ? {imported:true} : Record<never,never>;
+export type CommandResult<K extends CommandName> = K extends 'add_block' ? {blockId:ID;block:Block} : K extends 'update_block' ? {blockId:ID} : K extends 'table_row_add' ? {rowId:ID} : K extends 'checklist_add'|'accordion_add' ? {itemId:ID} : K extends 'tab_add' ? {tabId:ID} : K extends 'column_add'|'table_column_add' ? {columnId:ID} : K extends 'card_add' ? {cardId:ID} : K extends 'page_add' ? {pageId:ID} : K extends 'page_remove' ? {removedPageIds:ID[]} : K extends 'import_notebook' ? {imported:true} : Record<never,never>;
 export type MutationResult<K extends CommandName> = CommandResult<K> & {revision:number};
 // Internal switch handlers retain runtime validation at the untrusted-input boundary.
-export type InternalInput = Partial<BlockOptions & {type:BlockType;theme:Theme;notificationMode:NotificationMode;subtitle:string;description:string;containerId:ID;index:number;blockId:ID;itemId:ID;tabId:ID;columnId:ID;cardId:ID;pageId:ID;parentId:ID;firedAt:string;notebook:Notebook|Page;patch:BlockPatch & {text?:string;done?:boolean;description?:string}}>;
-export type ActionResult = Partial<{blockId:ID;block:Block;itemId:ID;tabId:ID;columnId:ID;cardId:ID;pageId:ID;removedPageIds:ID[];imported:boolean}>;
+export type InternalInput = Partial<BlockOptions & {type:BlockType;theme:Theme;notificationMode:NotificationMode;subtitle:string;description:string;containerId:ID;index:number;blockId:ID;itemId:ID;tabId:ID;rowId:ID;columnId:ID;cardId:ID;pageId:ID;parentId:ID;firedAt:string;notebook:Notebook|Page;patch:BlockPatch & {text?:string;done?:boolean;description?:string}}>;
+export type ActionResult = Partial<{blockId:ID;block:Block;itemId:ID;tabId:ID;rowId:ID;columnId:ID;cardId:ID;pageId:ID;removedPageIds:ID[];imported:boolean}>;
 export interface ChangeEvent {actionName?:CommandName;changedBlockId?:ID;changedPageId?:ID;quiet?:boolean;reset?:boolean;reminderBlockId?:ID;reminderPageId?:ID;history?:boolean}
 export interface SaveStatus {pending:number;navigating:boolean;error:Error|null}
 export interface NotebookStore {
