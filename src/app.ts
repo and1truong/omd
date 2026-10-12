@@ -387,6 +387,19 @@ async function boot() {
     const el=$<HTMLInputElement|HTMLTextAreaElement>(selector);
     const write = (pageId:string) => {const saved=action('set_page', {pageId,[key]:el.value}, {quiet:true});fit(el);return saved;};
     composition.track(el,write,()=>store.getActivePageId());el.addEventListener('input',()=>{if(!composition.isComposing(el))write(store.getActivePageId());});
+    if(key==='title') {
+      let finishing=false;
+      el.addEventListener('keydown',async event=>{
+        if(event.key!=='Enter'||event.isComposing||event.keyCode===229||composition.isComposing(el))return;
+        event.preventDefault();if(event.repeat||finishing)return;
+        finishing=true;const pageId=store.getActivePageId(),title=el.value;
+        try {
+          await store.idle();
+          if(store.getPageMetadata(pageId)?.title!==title&&!await action('set_page',{pageId,title},{quiet:true}))return;
+          if(store.getActivePageId()===pageId&&el.value===title&&!composition.isComposing(el))el.blur();
+        } finally {finishing=false;}
+      });
+    }
   }
   domId('theme').addEventListener('change', e => action('set_page', { theme: (e.target as HTMLSelectElement).value as Page['theme'] })); themeQuery.addEventListener('change', () => applyTheme(store.getRenderState().theme));
   domId('notification-mode').addEventListener('change', e => action('set_page', { notificationMode: (e.target as HTMLSelectElement).value as NotificationMode }));
