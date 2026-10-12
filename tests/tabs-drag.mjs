@@ -135,6 +135,31 @@ async function staleTabControls(orientation) {
   console.log(`${engine} ${basePath||'/'}: ${orientation} stale controls scoped to original page despite shared IDs and composition passed.`);
 }
 
+async function failedRenameRecovery(orientation,nested=false) {
+  const sourcePage=(await call('page_add',{title:`Recovery ${orientation} ${nested?'nested':'root'}`})).pageId;
+  const outer=await group(nested?(orientation==='horizontal'?'vertical':'horizontal'):orientation,null,'Recovery');
+  const tabs=nested?await group(orientation,outer.ids[0],'Nested recovery'):outer,id=tabs.ids[1];
+  const destination=(await call('page_add',{title:'Recovery destination'})).pageId;await call('page_select',{pageId:sourcePage});
+  const fail=()=>page.evaluate(()=>{window.savedPut=IDBObjectStore.prototype.put;const name=window.tabsApp.getStore().databaseName();IDBObjectStore.prototype.put=function(...args){if(this.transaction.db.name===name)throw new DOMException('Injected tab quota exceeded','QuotaExceededError');return window.savedPut.apply(this,args);};});
+  const restore=()=>page.evaluate(()=>{IDBObjectStore.prototype.put=window.savedPut;});
+  const start=async value=>{await header(id).press('F2');await titleInput().evaluate((el,value)=>{window.failedIME=el;el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.value=value;},value);};
+  const end=async()=>{await fail();await page.evaluate(()=>window.failedIME.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));await page.getByRole('button',{name:'Retry tab rename',exact:true}).waitFor();await page.waitForFunction(()=>window.failedIME.isConnected&&!window.failedIME.disabled);await page.evaluate(()=>window.tabsApp.getStore().idle());};
+  const draft='Tiếng Việt 世界 — retry';await start(draft);await reorder(tabs.id,tabs.ids[2],tabs.ids[3],true,orientation);
+  const before=await revision(),history=await page.evaluate(()=>window.tabsApp.getStore().residency().undoEntries);await end();
+  assert.equal(await titleInput().inputValue(),draft);assert.equal(await titleInput().isVisible(),true);assert.equal(await revision(),before);
+  await screenshot(`${orientation}-${nested?'nested':'root'}-recovery`);
+  await call('page_select',{pageId:destination});assert.equal(await titleInput().isVisible(),true);assert.equal(await titleInput().inputValue(),draft);assert.equal(await page.locator('#notices .tab-title-input').count(),1);
+  await page.evaluate(()=>{window.savedCopy=navigator.clipboard.writeText; navigator.clipboard.writeText=value=>{window.copiedTabDraft=value;return Promise.resolve();};});
+  await page.getByRole('button',{name:'Copy tab title draft',exact:true}).click();assert.equal(await page.evaluate(()=>window.copiedTabDraft),draft);assert.equal(await revision(),before);
+  await call('page_select',{pageId:sourcePage});assert.equal(await header(id).locator('..').locator('.tab-title-input').count(),1);assert.equal(await titleInput().inputValue(),draft);
+  await restore();await page.getByRole('button',{name:'Retry tab rename',exact:true}).click();await settled();assert.equal(await titleOf(tabs,id),draft);assert.equal(await revision(),before+1);assert.equal(await page.evaluate(()=>window.tabsApp.getStore().residency().undoEntries),history+1);assert.equal(await page.locator('.tab-title-recovery').count(),0);
+  await start('Cancel this composed draft');const ids=(await block(tabs.id)).tabs.map(t=>t.id);await reorder(tabs.id,ids.at(-1),ids[0],false,orientation);const cancelBefore=await revision();await end();
+  await page.getByRole('button',{name:'Cancel tab rename',exact:true}).click();assert.equal(await titleInput().count(),0);assert.equal(await revision(),cancelBefore);await restore();assert.equal(await titleOf(tabs,id),draft);
+  await page.evaluate(()=>{navigator.clipboard.writeText=window.savedCopy;});await page.getByRole('button',{name:'Dismiss message'}).evaluateAll(buttons=>buttons.forEach(button=>button.click()));
+  await page.reload();await ready();assert.equal(await titleOf(tabs,id),draft);
+  console.log(`${engine} ${basePath||'/'}: ${orientation} ${nested?'nested':'root'} IME quota failure retains inline draft across redraw/navigation, copy, retry and cancel passed.`);
+}
+
 try {
   await new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.once('error',reject);server.once('exit',code=>reject(new Error(`Server exited: ${code}`)));});
   browser=await ({chromium,webkit}[engine]).launch({headless:true});
@@ -144,6 +169,7 @@ try {
   await mkdir(`${root}/test-results`,{recursive:true});
 
   for(const orientation of ['horizontal','vertical'])await staleTabControls(orientation);
+  for(const orientation of ['horizontal','vertical'])for(const nested of [false,true])await failedRenameRecovery(orientation,nested);
 
   for(const orientation of ['horizontal','vertical']) {
     await call('page_add',{title:`Drag ${orientation} tabs without losing your work`});

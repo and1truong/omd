@@ -296,11 +296,28 @@ function renderTabs(shell:HTMLElement,b:BlockOf<'tabs'>) {
       if(!header.isConnected||header.querySelector('input')||store.getActivePageId()!==pageId)return;
       let value:string;try{value=findBlock(store.getRenderState(),b.id,'tabs').block.tabs.find(tab=>tab.id===t.id)!.title;}catch{return;}
       const input=element('input','tab-title-input');input.type='text';input.value=value;input.id=`${t.id}-label`;input.setAttribute('aria-label','Rename tab');input.size=Math.max(5,input.value.length);
-      const original=input.value;let finished=false,requested=false,pending:Promise<void>|undefined;
+      const original=input.value;let finished=false,requested=false,failed=false,pending:Promise<void>|undefined;
+      let editHeader:HTMLElement=header;let editTab=tab,editRename=rename,recovery:HTMLElement|undefined,notice:HTMLElement|undefined;
       const session={flush:()=>finish()};
       function close(focus=false) {
         finished=true;observer.disconnect();if(tabTitleEdit===session)tabTitleEdit=undefined;
-        input.remove();header.removeAttribute('role');for(const name of ['aria-label','aria-selected','aria-controls'])header.removeAttribute(name);tab.hidden=rename.hidden=false;if(focus&&tab.isConnected)tab.focus();
+        input.remove();recovery?.remove();notice?.remove();editHeader.style.removeProperty('flex-wrap');editHeader.removeAttribute('role');for(const name of ['aria-label','aria-selected','aria-controls'])editHeader.removeAttribute(name);editTab.hidden=editRename.hidden=false;if(focus&&editTab.isConnected)editTab.focus();
+      }
+      function recover() {
+        if(!recovery){
+          recovery=element('span','tab-title-recovery');
+          recovery.append(button('Retry','Retry tab rename',()=>void finish(true).catch(()=>{})),button('Copy','Copy tab title draft',()=>void navigator.clipboard.writeText(input.value).catch(error=>notify(errorOf(error).message,'error',true))),button('Cancel','Cancel tab rename',()=>close(true)));
+        }
+        const live=store.getActivePageId()===pageId?document.getElementById(`${t.id}-button`):null;
+        if(live?.closest('[data-block-id]')?.getAttribute('data-block-id')===b.id){
+          notice?.remove();editTab=live as HTMLButtonElement;editHeader=editTab.parentElement!;editRename=editHeader.querySelector<HTMLButtonElement>('.tab-rename')!;
+          editTab.hidden=editRename.hidden=true;editHeader.style.flexWrap='wrap';editHeader.setAttribute('role','tab');for(const name of ['aria-label','aria-selected','aria-controls'])editHeader.setAttribute(name,editTab.getAttribute(name)!);
+          if(input.parentElement!==editHeader||recovery.parentElement!==editHeader)editHeader.append(input,recovery);
+        }else{
+          if(!notice){notice=element('div','notice error');notice.style.flexWrap='wrap';const label=element('span');label.textContent=`Unsaved tab title — ${store.getPageMetadata(pageId)?.title||'Untitled page'} / ${original||'Untitled tab'}`;notice.append(label);}
+          if(!notice.isConnected)domId('notices').append(notice);
+          if(input.parentElement!==notice||recovery.parentElement!==notice)notice.append(input,recovery);
+        }
       }
       function finish(focus=false,finalComposition=false):Promise<void> {
         if(finished)return Promise.resolve();requested=true;
@@ -310,12 +327,12 @@ function renderTabs(shell:HTMLElement,b:BlockOf<'tabs'>) {
         pending=Promise.resolve().then(async()=>{
           input.disabled=true;
           if(value!==original)await store.dispatch('tab_update',{pageId,blockId:b.id,tabId:t.id,title:value},{quiet:true});
-          tab.textContent=value||'Untitled';tab.setAttribute('aria-label',`Open ${value||'tab'}`);rename.setAttribute('aria-label',`Rename ${value||'Untitled'} tab`);close(focus);
-        }).catch(error=>{input.disabled=false;notify(errorOf(error).message,'error',true);throw error;}).finally(()=>{pending=undefined;});return pending;
+          editTab.textContent=value||'Untitled';editTab.setAttribute('aria-label',`Open ${value||'tab'}`);editRename.setAttribute('aria-label',`Rename ${value||'Untitled'} tab`);close(focus);
+        }).catch(error=>{input.disabled=false;failed=true;recover();notify(errorOf(error).message,'error',true);throw error;}).finally(()=>{pending=undefined;});return pending;
       }
-      const observer=new MutationObserver(()=>{if(!input.isConnected){observer.disconnect();void finish().catch(()=>{});}});observer.observe(document.body,{childList:true,subtree:true});
+      const observer=new MutationObserver(()=>{if(failed&&!finished)recover();else if(!input.isConnected){observer.disconnect();void finish().catch(()=>{});}});observer.observe(document.body,{childList:true,subtree:true});
       composition.track(input,()=>requested?finish(false,true).catch(()=>{}):undefined,()=>pageId);
-      input.addEventListener('blur',()=>void finish().catch(()=>{}));
+      input.addEventListener('blur',()=>{if(!failed)void finish().catch(()=>{});});
       input.addEventListener('keydown',event=>{
         event.stopPropagation();if(event.isComposing||event.keyCode===229||composition.isComposing(input))return;
         if(event.key==='Enter'){event.preventDefault();void finish(true).catch(()=>{});}
