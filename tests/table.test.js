@@ -23,6 +23,7 @@ test('table defaults, stable identities and positional dimension edits',()=>{
 
 test('model and import reject oversized, malformed, duplicate ID and non-text grids',()=>{
   for(const option of ['rowCount','columnCount'])for(const value of [0,-1,1.5,NaN,Infinity,'3',100000])assert.throws(()=>makeBlock('table',{[option]:value}));
+  for(const value of [-1,1.5,4,'1'])assert.throws(()=>makeBlock('table',{pinnedColumns:value}));
   assert.throws(()=>makeBlock('table',{headerRow:'yes'}));
   const base=emptyNotebook();base.blocks.push(makeBlock('table'));
   for(const corrupt of [b=>b.rows=[],b=>b.columns=[],b=>b.rows[0].cells.pop(),b=>b.rows[0].cells.push('x'),b=>b.rows[0].cells[0]=false,b=>b.rows[0].cells[0]='x'.repeat(10001),b=>b.rows[0].id=b.columns[0].id,b=>b.columns[0].id='',b=>b.columns[0].id=2,b=>b.columns[0].extra=true,b=>b.rows=Array.from({length:101},()=>({id:crypto.randomUUID(),cells:['','','']})),b=>b.headerRow=null]){
@@ -32,6 +33,13 @@ test('model and import reject oversized, malformed, duplicate ID and non-text gr
     const page=emptyNotebook(),b=makeBlock('table',{rowCount:1,columnCount:1});page.blocks.push(b);
     assert.throws(()=>applyAction(page,action,{blockId:b.id,...(action==='table_row_remove'?{rowId:b.rows[0].id}:{columnId:b.columns[0].id})}),/at least one/);
   }
+});
+
+test('table snapshots stay immutable and dimension limits and pins stay valid',()=>{
+  let page=emptyNotebook();const table=makeBlock('table',{rowCount:100,columnCount:20,pinnedColumns:20});table.rows[0].cells[0]='copy me';page.blocks.push(table);
+  for(const action of ['table_row_add','table_column_add'])assert.throws(()=>applyAction(page,action,{blockId:table.id}),/limit/);
+  page=applyAction(page,'table_column_remove',{blockId:table.id,columnId:table.columns[0].id}).state;assert.equal(page.blocks[0].pinnedColumns,19);validateNotebook(page);
+  assert.equal(table.columns.length,20);assert.equal(table.pinnedColumns,20);assert.equal(table.rows[0].cells[0],'copy me');assert.notEqual(page.blocks[0],table);
 });
 
 test('nested tables persist, import/export, immutable snapshots, undo/redo and failed writes',async()=>{

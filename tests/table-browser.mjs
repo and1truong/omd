@@ -48,6 +48,7 @@ try{
   await cell(2,1).fill('Bản nháp còn nguyên');await page.locator('.notice.error').filter({hasText:'Table quota test'}).first().waitFor();
   await page.evaluate(async()=>{try{await tableApp.setView({sidebarOpen:true});}catch{}});assert.equal(await cell(2,1).inputValue(),'Bản nháp còn nguyên');assert.equal(await page.evaluate(()=>tableApp.getStore().getActivePageId()),current);assert.notEqual((await grid()).rows[1].cells[0],'Bản nháp còn nguyên');
   await page.evaluate(()=>{IDBObjectStore.prototype.put=tablePut;});await settled();assert.equal((await grid()).rows[1].cells[0],'Bản nháp còn nguyên');
+  for(const notice of await page.locator('.notice.error button').all())await notice.click();
   // Navigation through the real palette waits for the final composing cell and its captured page.
   await page.evaluate(()=>tableApp.openPalette());await page.locator('#page-search').fill('Other page');
   await cell(2,1).evaluate(el=>{el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.value='最後の文字';});
