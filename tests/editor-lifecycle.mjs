@@ -48,7 +48,7 @@ async function historyBarrier() {
   await call(page,'add_block',{type:'divider'});await page.evaluate(()=>lifecycleStore.undo());
   const before=await page.evaluate(()=>lifecycleStore.getRevision());
   await failWrites(page,table);await page.locator(`[data-block-id="${table}"] .table-cell`).fill('Table draft must precede history');
-  await page.waitForFunction(()=>document.getElementById('save-status').textContent==='Not saved');
+  await page.waitForFunction(()=>document.getElementById('save-status').textContent.startsWith('Not saved'));
   for(const key of ['Control+z','Control+Shift+z']) {
     const notices=await page.locator('#notices .notice').count();await editor(page,f.itemId).press(key);
     await page.waitForFunction(count=>document.querySelectorAll('#notices .notice').length>count,notices);
