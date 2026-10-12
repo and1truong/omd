@@ -12,7 +12,8 @@ import { setupShell, showMenu } from './shell.js';
 import { icon, labelIcon } from './icons.js';
 
 function $<T extends HTMLElement=HTMLElement>(selector:string):T {if(selector.startsWith('#'))return domId<T>(selector.slice(1));const node=document.querySelector<T>(selector);if(!node)throw new Error(`Missing element: ${selector}`);return node;}
-let store:NotebookStore,palette:ReturnType<typeof setupPalette>|undefined,diagrams:ReturnType<typeof createDiagramManager>|undefined,renderer:ReturnType<typeof createRenderCache>,shell:ReturnType<typeof setupShell>|undefined,dragData:DragData|null|undefined,pickerTarget='page';
+let store:NotebookStore,palette:ReturnType<typeof setupPalette>|undefined,diagrams:ReturnType<typeof createDiagramManager>|undefined,renderer:ReturnType<typeof createRenderCache>,shell:ReturnType<typeof setupShell>|undefined,dragData:DragData|null|undefined;
+interface InsertionAnchor {blockId:string;side:'before'|'after'}
 interface DragData {containerId?:string;kind:'block'|'card'|'column';blockId:string;cardId?:string;columnId?:string}
 export const openPalette = () => {shell?.closeMobile();palette?.open();};
 export const getView = () => shell!.getView();
@@ -85,7 +86,13 @@ function dropTarget(el:HTMLElement,canDrop:(data:DragData)=>boolean,drop:(data:D
 function makeBlockList(blocks:Block[],containerId:string,nodes:HTMLElement[]) {
   const list = element('div', 'block-list'); list.dataset.container = containerId;
   function slot(index:number) {
-    const el = element('div', 'drop-slot'); el.setAttribute('aria-hidden', 'true');
+    const el = element('div', 'drop-slot');
+    if (index < blocks.length) {
+      const blockId=blocks[index].id;
+      el.classList.add('insert-slot');
+      const insert=button('Add block','Insert block here',()=>openPicker(containerId,{blockId,side:'before'}),'block-insert-button');
+      insert.prepend(icon('plus'));insert.dataset.beforeBlock=blockId;el.append(insert);
+    } else el.setAttribute('aria-hidden', 'true');
     dropTarget(el, data => data.kind === 'block', data => {
       const source = findBlock(store.getRenderState(), data.blockId); let targetIndex = index;
       if (source.siblings.some(b => b.id === data.blockId) && data.containerId === containerId && source.siblings.findIndex(b => b.id === data.blockId) < index) targetIndex--;
@@ -102,6 +109,8 @@ function renderBlock(b:Block,containerId:string,index:number,count:number) {
   const more=button('…','Block actions',()=>{
     const current=findBlock(store.getRenderState(),b.id),position=current.siblings.findIndex(block=>block.id===b.id);
     showMenu('block-actions-dialog','Block actions',[
+      {label:'Insert block before',icon:'plus',run:()=>openPicker(containerId,{blockId:b.id,side:'before'})},
+      {label:'Insert block after',icon:'plus',run:()=>openPicker(containerId,{blockId:b.id,side:'after'})},
       {label:'Move block up',icon:'up',disabled:position===0,run:()=>action('move_block',{blockId:b.id,containerId,index:position-1},{focus:`${b.id}-menu`})},
       {label:'Move block down',icon:'down',disabled:position===current.siblings.length-1,run:()=>action('move_block',{blockId:b.id,containerId,index:position+1},{focus:`${b.id}-menu`})},
       {label:'Delete block',icon:'trash',danger:true,run:async()=>{if(await confirmAction('Remove this block?','This removes the block and everything inside it. You can undo this change.','Remove'))action('remove_block',{blockId:b.id});}},
@@ -215,13 +224,30 @@ const options: [BlockType,'horizontal'|'vertical'|null,string,string,string][] =
   ['kanban', null, '▦', 'Kanban board', 'Keep things moving'], ['divider', null, '—', 'Divider', 'A little breathing room'],
   ['mermaid',null,'◇','Mermaid','Markdown to a diagram'],['excalidraw',null,'✎','Excalidraw','A canvas for your thoughts']
 ];
-export function openPicker(containerId = 'page') {
-  pickerTarget = containerId; const allowed = allowedTypes(store.getRenderState(), containerId); const grid = domId('picker-options'); grid.replaceChildren();
+export function openPicker(containerId = 'page',anchor?:InsertionAnchor) {
+  const pageId=store.getActivePageId(),allowed = allowedTypes(store.getRenderState(), containerId);
+  const grid = domId('picker-options'); grid.replaceChildren();let adding=false;
   for (const [type, orientation, glyph, name, caption] of options) {
     if (!allowed.types.includes(type) || type === 'tabs' && allowed.tabOrientation && allowed.tabOrientation !== orientation) continue;
     const btn = button('', `Add ${name.toLowerCase()}`, async () => {
-      const input:CommandInput<'add_block'> = {type,containerId:pickerTarget}; if (orientation) input.orientation = orientation;
-      const r = await action('add_block', input); if (r) { domId('picker').close(); requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(r.blockId)}"] input,[data-block-id="${CSS.escape(r.blockId)}"] textarea`)?.focus()); }
+      if(adding)return;adding=true;for(const option of grid.querySelectorAll<HTMLButtonElement>('button'))option.disabled=true;
+      try {
+        const input:CommandInput<'add_block'> = {type,containerId,pageId}; if (orientation) input.orientation = orientation;
+        if(anchor){
+          const page=store.getRenderState();
+          if(page.id!==pageId)throw new Error('The page changed. Close the picker and choose a new position.');
+          const blocks=findContainer(page,containerId).blocks;
+          const index=blocks.findIndex(block=>block.id===anchor.blockId);
+          if(index<0)throw new Error('The block moved or was removed. Close the picker and choose a new position.');
+          input.index=index+(anchor.side==='after'?1:0);
+        }
+        const r = await action('add_block', input);
+        if (r) { domId('picker').close(); requestAnimationFrame(() => {
+          const block=document.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(r.blockId)}"]`);
+          (block?.querySelector<HTMLElement>('input,textarea')??block?.querySelector<HTMLElement>('.block-controls button:not(.block-drag)'))?.focus();
+        }); }
+      } catch(error) {notify(errorOf(error).message,'error',true);}
+      finally{adding=false;for(const option of grid.querySelectorAll<HTMLButtonElement>('button'))option.disabled=false;}
     }, 'picker-option'); const glyphIcon=icon(type==='tabs'&&orientation==='vertical'?'vertical':type);glyphIcon.classList.add('glyph');
     const body = element('span'); const strong = element('strong'); strong.textContent = name; const small = element('small'); small.textContent = caption; body.append(strong, small); btn.append(glyphIcon, body); grid.append(btn);
   }
@@ -237,6 +263,7 @@ let renderPageId:string;
 function render(state:Page, { quiet = false, reminderBlockId, reminderPageId, changedBlockId, changedPageId, reset=false }:ChangeEvent={}) {
   if(composition.hasActive()){deferredRender=true;return;}
   applyTheme(state.theme); domId('theme').value = state.theme; domId('notification-mode').value = state.notificationMode;
+  if(renderPageId!==state.id&&domId('picker').open)domId('picker').close();
 
   domId('undo-button').disabled = !store.canUndo(); domId('redo-button').disabled = !store.canRedo();
   diagrams?.syncHeader(); if (quiet) {
