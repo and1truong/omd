@@ -31,8 +31,28 @@ const order=containerId=>page.evaluate(async containerId=>{
   const app=await import('./src/app.js'),{findContainer}=await import('./src/model.js');return findContainer(app.getStore().getState(),containerId).blocks.map(b=>b.id);
 },containerId);
 async function ready() {
+  await page.context().route('https://example.com/**',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><title>Hyperlink destination</title><h1>Link opened in a new tab</h1><p>This example.com destination is a deterministic test fixture.</p><p id="url"></p><p id="opener"></p><script>document.getElementById("url").textContent=location.href;document.getElementById("opener").textContent="window.opener: "+window.opener;</script>'}));
   page.on('pageerror',error=>errors.push(error.message));await page.goto(`http://localhost:4322${basePath}/`);
   await page.evaluate(async()=>await (await import('./src/app.js')).ready);
+}
+async function openLink(id,{tap=false,evidence=false}={}) {
+  const link=box(id).locator('a[href]').first(),href=await link.getAttribute('href'),before=await state(),url=page.url();
+  assert.equal(await link.getAttribute('target'),'_blank');assert.match(await link.getAttribute('rel'),/noopener/);
+  await box(id).evaluate(el=>{window.omdLinkUpdates=0;window.omdLinkListener=()=>window.omdLinkUpdates++;el.editor.on('update',window.omdLinkListener);});
+  // Separate navigation gestures from ProseMirror's 500ms double-click selection window.
+  await page.waitForTimeout(550);
+  const [destination]=await Promise.all([page.waitForEvent('popup'),tap?link.tap():link.click()]);
+  await destination.waitForLoadState();assert.equal(destination.url(),new URL(href).href);
+  assert.deepEqual(await destination.evaluate(()=>[window.opener,document.referrer]),[null,'']);
+  assert.equal(page.url(),url);assert.deepEqual(await state(),before,'Opening a link must not write Markdown or notebook history.');
+  assert.equal(await page.evaluate(()=>window.omdLinkUpdates),0,'Opening a link must not emit editor updates.');
+  await box(id).evaluate(el=>el.editor.off('update',window.omdLinkListener));
+  if(evidence) {
+    await mkdir(`${root}/test-results`,{recursive:true});
+    await page.screenshot({path:`${root}/test-results/text-link-${engine}-${tap?'mobile':'desktop'}.png`});
+    await destination.screenshot({path:`${root}/test-results/text-link-${engine}-destination.png`});
+  }
+  await destination.close();
 }
 async function nextBlock(id,containerId='page') {
   const before=await order(containerId);await box(id).press('Shift+Enter');
@@ -76,6 +96,28 @@ try {
   assert.equal(await box(first).locator('blockquote').innerText(),'A quote');assert.match(await box(first).locator('pre').innerText(),/const idea = 1/);
   assert.equal(await box(first).locator('a').getAttribute('href'),'https://example.com');
   assert.equal((await state()).blocks[0].text,markdown,'Loading Markdown must not rewrite the saved source.');
+  await openLink(first,{evidence:true});
+
+  // A drag starting in a link selects text instead of opening a tab. Shift+click also selects.
+  const pagesBefore=page.context().pages().length,selectionBefore=await state(),link=box(first).locator('a');await link.scrollIntoViewIfNeeded();
+  const rect=await link.boundingBox();await page.mouse.move(rect.x+2,rect.y+rect.height/2);await page.mouse.down();
+  await page.mouse.move(rect.x+rect.width-2,rect.y+rect.height/2,{steps:12});await page.mouse.up();
+  assert.ok(await page.evaluate(()=>getSelection().toString().length>0));
+  await link.click({modifiers:['Shift']});await page.waitForTimeout(100);
+  assert.equal(page.context().pages().length,pagesBefore);assert.deepEqual(await state(),selectionBefore);
+
+  // Arrow keys can enter a linked label for ordinary editing and notebook history.
+  await box(first).focus();await box(first).press('Control+End');await box(first).press('ArrowLeft');await page.keyboard.type('!');
+  const editedMarkdown=markdown.replace('[Docs]','[Doc!s]');await saved(first,editedMarkdown);
+  await box(first).press('Control+z');await saved(first,markdown);
+  await box(first).press('Control+Shift+z');await saved(first,editedMarkdown);
+  await box(first).press('Control+z');await saved(first,markdown);
+
+  // Typed autolinks open just like Markdown links, including through nested formatting.
+  await box(following).fill('Visit ');await box(following).press('End');await page.keyboard.type('https://example.com/auto ');
+  await box(following).locator('a[href="https://example.com/auto"]').waitFor();await openLink(following);
+  await box(following).press('Control+a');await host(following).getByRole('button',{name:'Bold',exact:true}).click();
+  await box(following).locator('a strong, strong a').waitFor();await openLink(following);
 
   await box(next).fill('Format this');await saved(next,'Format this');await box(next).press('Control+a');
   await host(next).getByRole('button',{name:'Bold',exact:true}).click();await saved(next,'**Format this**');
@@ -121,7 +163,8 @@ try {
 
   for(const type of ['tabs','toggle','accordion']) {
     const parent=(await call('add_block',{type})).block,containerId=type==='tabs'?parent.tabs[0].id:type==='toggle'?parent.id:parent.items[0].id;
-    const child=(await call('add_block',{type:'text',containerId,text:'Nested text'})).blockId;
+    const child=(await call('add_block',{type:'text',containerId,text:'Nested [Docs](https://example.com/nested)'})).blockId;
+    await openLink(child);
     const after=(await call('add_block',{type:'divider',containerId})).blockId;
     const created=await nextBlock(child,containerId);assert.deepEqual(await order(containerId),[child,created,after]);
     await box(created).fill('In the same section');await saved(created,'In the same section');
@@ -134,13 +177,17 @@ try {
 
   await call('update_block',{blockId:following,patch:{text:'<script>window.omdUnsafe=true</script>\n\n[unsafe](javascript:alert(1))'}});
   assert.equal(await page.evaluate(()=>window.omdUnsafe),undefined);assert.equal(await box(following).locator('script,a[href^="javascript:"]').count(),0);
-  await call('update_block',{blockId:following,patch:{text:'A safe final note'}});
+  const unsafePages=page.context().pages().length;
+  await box(following).locator('a').click();await page.waitForTimeout(100);
+  assert.equal(page.context().pages().length,unsafePages);
+  await call('update_block',{blockId:following,patch:{text:'A safe [final note](https://example.com/reloaded)'}});
   await mkdir(`${root}/test-results`,{recursive:true});await page.screenshot({path:`${root}/test-results/text-editor-${engine}-desktop.png`});
   const exported=await page.evaluate(async()=>(await import('./src/app.js')).getStore().export());
   await call('page_add',{title:'Another page'});await call('page_select',{pageId});
   assert.equal(await box(next).innerText(),'Đang gõ tiếng Việt');
   await page.reload();await page.evaluate(async()=>await (await import('./src/app.js')).ready);
   assert.equal(await box(first).locator('h1').innerText(),'A heading');assert.equal(await box(next).innerText(),'Đang gõ tiếng Việt');
+  await openLink(following);
   assert.equal(JSON.parse(exported).pages.find(p=>p.id===pageId).blocks[0].text,markdown);
 
   // All editor dependencies must be cached for actual offline editing.
@@ -159,9 +206,10 @@ try {
   await box(mobileNext).evaluate(el=>{el.editor.commands.selectAll();el.editor.view.focus();});
   assert.equal(await page.evaluate(()=>getSelection().toString().trimEnd()),'Mobile text');
   await host(mobileNext).getByRole('button',{name:'Italic',exact:true}).tap();await saved(mobileNext,'*Mobile text*');
+  await call('update_block',{blockId:small,patch:{text:'Tap [Docs](https://example.com/mobile)'}});await openLink(small,{tap:true,evidence:true});
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'The formatting toolbar must fit at 320px.');
   await page.screenshot({path:`${root}/test-results/text-editor-${engine}-mobile.png`});await mobile.close();assert.deepEqual(errors,[]);
-  console.log(`${engine} ${basePath||'/'}: Tiptap Markdown, next-block focus/order, nested insertion, history, composition, security, persistence, offline and mobile passed.`);
+  console.log(`${engine} ${basePath||'/'}: Tiptap Markdown, safe hyperlink click/tap, autolinks, drag selection, next-block focus/order, nested insertion, history, composition, security, persistence, offline and mobile passed.`);
 } catch(error) {
   if(page&&!page.isClosed())console.error(await page.evaluate(()=>({active:document.activeElement?.id,editors:[...document.querySelectorAll('[contenteditable=true]')].map(el=>el.id),notices:document.getElementById('notices')?.textContent})));
   throw error;

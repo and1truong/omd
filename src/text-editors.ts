@@ -41,6 +41,13 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
     const surface=document.createElement('div');surface.className='markdown-surface';host.append(toolbar,surface);
     const editor=new Editor({element:surface,injectCSS:false,extensions:[StarterKit.configure({undoRedo:false,underline:false,trailingNode:false,link:{openOnClick:false}}),Markdown],content:block.text,contentType:'markdown',
       editorProps:{attributes:{id:`${block.id}-text`,class:'markdown-editor',role:'textbox','aria-label':'text content','aria-multiline':'true','aria-keyshortcuts':'Shift+Enter','data-placeholder':'Write something…'},
+        handleClick:(view,_pos,event)=>{
+          if(event.button!==0||event.shiftKey||event.altKey||view.composing||composition.isComposing(view.dom))return false;
+          const link=event.target instanceof Element?event.target.closest<HTMLAnchorElement>('a[href]'):null;
+          if(!link||!view.dom.contains(link)||!link.getAttribute('href'))return false;
+          // Tiptap's built-in opener does not pass security features to window.open.
+          window.open(link.href,'_blank','noopener,noreferrer');return true;
+        },
         handlePaste:(view,event)=>{
           const clipboard=event.clipboardData,text=clipboard?.getData('text/plain');
           if(!text||clipboard?.getData('text/html')||view.state.selection.$from.parent.type.name==='codeBlock')return false;

@@ -327,11 +327,12 @@ function applyTheme(theme:Page['theme']) {
   const changed=document.documentElement.dataset.theme!==resolved;
   document.documentElement.dataset.theme = resolved; document.querySelector<HTMLMetaElement>('meta[name=theme-color]')!.content = resolved === 'dark' ? '#191b1a' : '#ffffff';
   if(changed)diagrams?.themeChanged();
+  domId('theme').value=theme;
 }
 let renderPageId:string;
 function render(state:Page, { quiet = false, reminderBlockId, reminderPageId, changedBlockId, changedPageId, reset=false }:ChangeEvent={}) {
   if(composition.hasActive()){deferredRender=true;return;}
-  applyTheme(state.theme); domId('theme').value = state.theme; domId('notification-mode').value = state.notificationMode;
+  applyTheme(shell!.getView().theme); domId('notification-mode').value = state.notificationMode;
   if(renderPageId!==state.id&&domId('picker').open)domId('picker').close();
 
   domId('undo-button').disabled = !store.canUndo(); domId('redo-button').disabled = !store.canRedo();
@@ -404,7 +405,7 @@ async function boot() {
     if(focusId){const next=document.getElementById(focusId) as HTMLInputElement|HTMLTextAreaElement|null;if(next){next.focus({preventScroll:true});if(selection&&next.setSelectionRange)next.setSelectionRange(...selection);}}scrollTo(...scroll);
     textEditors!.restoreFocus(editorFocus);
   });
-  shell=setupShell(store,{beforeNavigate,openPalette,confirm:confirmAction,onError:error=>notify(errorOf(error).message,'error',true)});
+  shell=setupShell(store,{beforeNavigate,openPalette,confirm:confirmAction,onError:error=>notify(errorOf(error).message,'error',true),onThemeChange:applyTheme});
   store.subscribe(render); render(store.getRenderState());
   store.subscribeStatus(({pending,navigating,error})=>{domId('page-title').disabled=navigating&&!composition.isComposing(domId('page-title'));domId('page-subtitle').disabled=navigating&&!composition.isComposing(domId('page-subtitle'));domId('notebook').inert=navigating&&!composition.hasActive();const status=domId('save-status');status.replaceChildren();const dot=element('span','status-dot');status.append(dot,document.createTextNode(pending?'Saving…':error?'Not saved':'Saved'));});
   palette = setupPalette(store, { onError: error => notify(errorOf(error).message, 'error', true), beforeOpen:()=>shell!.closeMobile(), beforeNavigate });
@@ -415,8 +416,22 @@ async function boot() {
     const el=$<HTMLInputElement|HTMLTextAreaElement>(selector);
     const write = (pageId:string) => {const saved=action('set_page', {pageId,[key]:el.value}, {quiet:true});fit(el);return saved;};
     composition.track(el,write,()=>store.getActivePageId());el.addEventListener('input',()=>{if(!composition.isComposing(el))write(store.getActivePageId());});
+    if(key==='title') {
+      let finishing=false;
+      el.addEventListener('keydown',async event=>{
+        const key=event as KeyboardEvent;
+        if(key.key!=='Enter'||key.isComposing||key.keyCode===229||composition.isComposing(el))return;
+        key.preventDefault();if(key.repeat||finishing)return;
+        finishing=true;const pageId=store.getActivePageId(),title=el.value;
+        try {
+          await store.idle();
+          if(store.getPageMetadata(pageId)?.title!==title&&!await action('set_page',{pageId,title},{quiet:true}))return;
+          if(store.getActivePageId()===pageId&&el.value===title&&!composition.isComposing(el))el.blur();
+        } finally {finishing=false;}
+      });
+    }
   }
-  domId('theme').addEventListener('change', e => action('set_page', { theme: (e.target as HTMLSelectElement).value as Page['theme'] })); themeQuery.addEventListener('change', () => applyTheme(store.getRenderState().theme));
+  domId('theme').addEventListener('change', e => {try{shell!.setView({theme:(e.target as HTMLSelectElement).value as Page['theme']});}catch(error){applyTheme(shell!.getView().theme);notify(errorOf(error).message,'error',true);}}); themeQuery.addEventListener('change', () => applyTheme(shell!.getView().theme));
   domId('notification-mode').addEventListener('change', e => action('set_page', { notificationMode: (e.target as HTMLSelectElement).value as NotificationMode }));
   domId('undo-button').addEventListener('click', async () => { try { await flushPending();await store.undo(); } catch (e) { notify(errorOf(e).message, 'error'); } });
   domId('redo-button').addEventListener('click', async () => { try { await flushPending();await store.redo(); } catch (e) { notify(errorOf(e).message, 'error'); } });
