@@ -171,14 +171,17 @@ async function overlappingCompositions(type,mode='preedit') {
   const {context,page}=await fresh(),f=await fixture(page,{type}),input=f.itemId?editor(page,f.itemId):textEditor(page,f.blockId),first='Final first',second='Confirmed second';
   await holdFinalTransaction(page,f,first);await composed(page,input,first);
   await input.evaluate(el=>el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));await page.waitForFunction(()=>window.finalHeld);
-  await composed(page,input,mode==='same'?first:'候補 second preedit');
-  if(mode==='finishing') {
-    await input.evaluate((el,second)=>{el.editor.commands.setContent(second);el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));},second);
+  if(mode==='ordinary')await input.evaluate((el,second)=>{
+    el.replaceChildren(Object.assign(document.createElement('p'),{textContent:second}));el.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:false}));
+  },second);
+  else await composed(page,input,mode==='same'?first:'候補 second preedit');
+  if(mode==='finishing'||mode==='ordinary') {
+    if(mode==='finishing')await input.evaluate((el,second)=>{el.editor.commands.setContent(second);el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));},second);
     await page.evaluate(()=>{window.finalFlushDone=false;window.finalFlush=lifecycleApp.flushPending().then(()=>{window.finalFlushDone=true;});});
     await page.waitForTimeout(100);assert.equal(await page.evaluate(()=>window.finalFlushDone),false);
   }
   await page.evaluate(mode=>{restoreFinalPut();releaseFinal(mode==='failure');},mode);
-  if(mode==='finishing') {
+  if(mode==='finishing'||mode==='ordinary') {
     await page.evaluate(()=>window.finalFlush);assert.equal(await text(page,f),second);
   } else {
     if(mode==='failure')await page.waitForFunction(()=>document.getElementById('save-status').textContent.startsWith('Not saved'));
@@ -358,7 +361,7 @@ try {
   await historyBarrier();await retainedDrafts('checklist');await retainedDrafts('text');await deletedDrafts();await deletedDrafts(true);
   await compositionBarrier('checklist');await compositionBarrier('text');
   await richToolAndSidebarBarriers('text');await richToolAndSidebarBarriers('checklist');
-  for(const type of ['checklist','text']){for(const mode of ['preedit','same','finishing','failure'])await overlappingCompositions(type,mode);await immediateCompositionRestart(type);}
+  for(const type of ['checklist','text']){for(const mode of ['preedit','same','finishing','ordinary','failure'])await overlappingCompositions(type,mode);await immediateCompositionRestart(type);}
   await importedFocus();await deferredChecklistFocus();await activeRestoreFocus();await scopedSettlement();await composingDeletion();assert.deepEqual(errors,[]);
-  console.log(`${engine} ${basePath||'/'}: history/draft recovery, strict scoped composition/export, original-page navigation and imported focus identity passed.`);
+  console.log(`${engine} ${basePath||'/'}: history/draft recovery, strict scoped composition/export, held-IDB confirmed snapshots, overlapping generations, active native caret and imported focus identity passed.`);
 } finally {await browser?.close();server.kill();}
