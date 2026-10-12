@@ -91,7 +91,7 @@ function endDrag() {
   setTimeout(()=>{suppressTabClick=false;},0);
 }
 function draggable(handle:HTMLElement,data:DragData) {
-  handle.draggable = true; handle.addEventListener('dragstart', event => { event.stopPropagation(); dragData = data; event.dataTransfer!.effectAllowed = 'move'; event.dataTransfer!.setData('application/x-omd', JSON.stringify(data)); (data.kind==='tab'?handle:handle.closest('.block,.kanban-card,.kanban-column'))?.classList.add('dragging'); if (data.kind === 'block') document.body.classList.add('dragging-block'); if(data.kind==='tab')suppressTabClick=true; });
+  handle.draggable = true; handle.addEventListener('dragstart', event => { event.stopPropagation(); dragData = data; event.dataTransfer!.effectAllowed = 'move'; event.dataTransfer!.setData('application/x-omd', JSON.stringify(data)); (data.kind==='tab'?handle:handle.closest('.block,.kanban-card,.kanban-column'))?.classList.add('dragging'); if (data.kind === 'block') requestAnimationFrame(()=>{if(dragData===data)document.body.classList.add('dragging-block');}); if(data.kind==='tab')suppressTabClick=true; });
   handle.addEventListener('dragend', endDrag);
 }
 function dropTarget(el:HTMLElement,canDrop:(data:DragData)=>boolean,drop:(data:DragData)=>unknown) {
