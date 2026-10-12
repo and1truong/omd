@@ -1,5 +1,5 @@
 import {errorOf} from './dom.js';
-import type {NotebookStore,Block,BlockType,BlockOf,CommandName,CommandInput,MutationResult,Page,ChangeEvent,PartialView,Notify,NotificationMode,ReminderBlock,BlockOptions,ChecklistItem} from './types.js';
+import type {NotebookStore,Block,BlockType,BlockOf,CommandName,CommandInput,MutationResult,Page,ChangeEvent,PartialView,Notify,NotificationMode,ReminderBlock,BlockOptions,ChecklistItem,SaveStatus} from './types.js';
 import {byId as domId} from './dom.js';
 import { createCompositionGuard } from './composition.js';
 import { createStore } from './store.js';
@@ -11,13 +11,18 @@ import { createRenderCache, reconcile, revealActions } from './render-cache.js';
 import { setupShell, showMenu } from './shell.js';
 import { icon, labelIcon } from './icons.js';
 import {createTextEditors} from './text-editors.js';
-import {createTableEdits} from './table-edits.js';
+import {createNativeEdits} from './table-edits.js';
+import type {NativeTarget} from './table-edits.js';
 import {MAX_TABLE_ROWS,MAX_TABLE_COLUMNS} from './model.js';
 import {appBase,routePageId,setupRoutes} from './routes.js';
 
 function $<T extends HTMLElement=HTMLElement>(selector:string):T {if(selector.startsWith('#'))return domId<T>(selector.slice(1));const node=document.querySelector<T>(selector);if(!node)throw new Error(`Missing element: ${selector}`);return node;}
 let store:NotebookStore,palette:ReturnType<typeof setupPalette>|undefined,diagrams:ReturnType<typeof createDiagramManager>|undefined,renderer:ReturnType<typeof createRenderCache>,shell:ReturnType<typeof setupShell>|undefined,dragData:DragData|null|undefined;
 let textEditors:ReturnType<typeof createTextEditors>|undefined;
+let nativeEdits:ReturnType<typeof createNativeEdits>|undefined;
+let saveState:SaveStatus={pending:0,navigating:false,error:null},dismissedSaveError:Error|null=null;
+let recovery:HTMLElement|undefined;
+const recoveryNodes=new Map<string,HTMLElement>();
 const collapsedChecklistItems=new Set<string>();
 const checklistViewKey=(pageId:string,blockId:string,itemId:string)=>JSON.stringify([pageId,blockId,itemId]);
 const checklistControlId=(viewKey:string,part:'fold'|'children'|'menu')=>`checklist-${encodeURIComponent(viewKey)}-${part}`;
@@ -37,7 +42,6 @@ function revealChecklistItem(target:HTMLElement) {
   }
   const block=target.closest('.block');if(block)syncChecklistFolds(block);
 }
-let tableEdits:ReturnType<typeof createTableEdits>|undefined;
 interface InsertionAnchor {blockId:string;side:'before'|'after'}
 interface DragData {containerId?:string;kind:'block'|'card'|'column'|'tab';blockId:string;cardId?:string;columnId?:string;tabId?:string;pageId?:string}
 let suppressTabClick=false;
@@ -45,9 +49,9 @@ let tabTitleEdit:{flush:()=>Promise<unknown>}|undefined;
 export const openPalette = () => {shell?.closeMobile();palette?.open();};
 export const getView = () => shell!.getView();
 export const setView = async (patch:PartialView) => {if(patch.sidebarOpen)await beforeNavigate();return shell!.setView(patch);};
-export async function flushPending(){await tabTitleEdit?.flush();await tableEdits?.flushAll();await textEditors?.flushAll();await diagrams?.flushAll();}
+export async function flushPending(options:{settle?:boolean}={}){await tabTitleEdit?.flush();await nativeEdits?.flushAll(options);await textEditors?.flushAll(options);await diagrams?.flushAll();await nativeEdits?.flushAll(options);}
 export const flushDiagrams=flushPending;
-async function beforeNavigate(){await tabTitleEdit?.flush();await tableEdits?.flushAll();await textEditors?.flushAll({settle:false});await diagrams?.beforeNavigate();}
+async function beforeNavigate(){await tabTitleEdit?.flush();await nativeEdits?.flushAll();await textEditors?.flushAll();await diagrams?.beforeNavigate();await nativeEdits?.flushAll();}
 export async function openCanvas(blockId:string,pageId?:string) {
   const page=await store.getPage(pageId);findBlock(page,blockId,'excalidraw');await flushPending();
   shell?.closeMobile();
@@ -65,10 +69,6 @@ export function notify(message:string,kind = '', persistent = false) {
   if (!persistent) setTimeout(() => el.remove(), kind === 'error' ? 12000 : 5000);
 }
 const editorDraftNotices=new Map<string,HTMLElement>();
-let savePending=0,saveError:Error|null=null;
-function updateSaveStatus() {
-  const status=domId('save-status'),dot=element('span','status-dot');status.replaceChildren(dot,document.createTextNode(savePending?'Saving…':saveError||textEditors?.hasPending()?'Not saved':'Saved'));
-}
 function editorDraftsChanged() {
   const drafts=textEditors?.drafts()??[],ids=new Set(drafts.map(draft=>draft.id));
   for(const [id,notice] of editorDraftNotices)if(!ids.has(id)){notice.remove();editorDraftNotices.delete(id);}
@@ -96,17 +96,57 @@ function button(label:string,aria:string,fn:(event:MouseEvent)=>unknown,classNam
   const b = element('button', className); b.type = 'button'; if(labelIcon[label])b.append(icon(labelIcon[label]));else b.textContent=label; b.title = aria; b.setAttribute('aria-label', aria); b.addEventListener('click', fn); return b;
 }
 async function action<K extends CommandName>(name:K,input:CommandInput<K>,{quiet=false,focus}: {quiet?:boolean;focus?:string|(()=>void)}={}):Promise<MutationResult<K>|null> {
-  try { input={...input,pageId:input.pageId??store.getActivePageId()}; domId('save-status').textContent='Saving…'; if(!quiet)await flushPending(); const result = await store.dispatch(name, input, { quiet }); if (focus) requestAnimationFrame(()=>typeof focus==='function'?focus():document.getElementById(focus)?.focus()); return result; }
-  catch (error) { domId('save-status').textContent = 'Not saved'; notify(errorOf(error).message, 'error', true); return null; }
+  try { input={...input,pageId:input.pageId??store.getActivePageId()}; if(!quiet)await flushPending(); const result = await store.dispatch(name, input, { quiet }); if (focus) requestAnimationFrame(()=>typeof focus==='function'?focus():document.getElementById(focus)?.focus()); return result; }
+  catch (error) { updateSaveStatus(); notify(errorOf(error).message, 'error', true); return null; }
 }
-function editable(value:string,aria:string,fn:(value:string,pageId:string)=>unknown,{multiline=false,className='',placeholder='',id}: {multiline?:boolean;className?:string;placeholder?:string;id?:string}={}) {
+function editable(value:string,aria:string,fn:(value:string,pageId:string)=>unknown,{multiline=false,className='',placeholder='',id,draft}: {multiline?:boolean;className?:string;placeholder?:string;id?:string;draft?:NativeTarget}={}) {
   const input=multiline?element('textarea',className):element('input',className);if(input instanceof HTMLInputElement)input.type='text';else input.rows=1;
-  input.value = value; input.placeholder = placeholder; input.setAttribute('aria-label', aria); if (id) input.id = id;
+  input.value = draft?nativeEdits!.value(draft,value):value; input.placeholder = placeholder; input.setAttribute('aria-label', aria); if (id) input.id = id;
+  if(draft)input.dataset.nativeDraft=nativeEdits!.id(draft);
   const pageId=store.getActivePageId();
-  function write() { const result=fn(input.value,pageId); if(multiline)fit(input);return result; }
+  function write() { const result=draft?writeNative(draft,input.value,aria):fn(input.value,pageId); if(multiline)fit(input);return result; }
   composition.track(input,write,()=>pageId);
-  input.addEventListener('input',()=>{if(!composition.isComposing(input))write();});
+  input.addEventListener('input',event=>{if(draft)nativeEdits!.stage(draft,input.value,aria);if(!(event instanceof InputEvent&&event.isComposing)&&!composition.isPreediting(input))write();});
   if (multiline) input.dataset.autofit = 'true'; return input;
+}
+function writeNative(target:NativeTarget,value:string,label:string) {
+  return nativeEdits!.write(target,value,label).catch(error=>notify(errorOf(error).message,'error',true));
+}
+function updateSaveStatus() {
+  const drafts=nativeEdits?.list()??[],failed=drafts.filter(draft=>draft.error),status=domId('save-status'),dot=element('span','status-dot');
+  const label=failed.length?'Not saved':saveState.pending||drafts.length?'Saving…':(saveState.error&&saveState.error!==dismissedSaveError)||textEditors?.hasPending()?'Not saved':'Saved';
+  status.dataset.state=label==='Not saved'?'error':label==='Saved'?'saved':'pending';
+  status.replaceChildren(dot,document.createTextNode(label));
+  if(!recovery){recovery=element('section','draft-recovery');recovery.setAttribute('aria-label','Unsaved edits');document.querySelector('.page-heading')!.after(recovery);}
+  recovery.hidden=!failed.length;
+  for(const [id,node] of recoveryNodes)if(!failed.some(draft=>draft.id===id)){node.remove();recoveryNodes.delete(id);}
+  for(const draft of failed){
+    let node=recoveryNodes.get(draft.id);
+    if(!node){
+      node=element('div','draft-recovery-item');const heading=element('strong'),reason=element('p'),value=element('textarea'),tools=element('div','draft-recovery-tools');
+      heading.textContent=`Unsaved ${draft.label} — ${store.getPageMetadata(draft.target.pageId)?.title||draft.target.pageId}`;
+      value.readOnly=true;value.rows=2;value.setAttribute('aria-label',`Unsaved ${draft.label}`);
+      const retry=button('Retry','Retry unsaved edit',()=>nativeEdits!.retry(draft.id).catch(error=>notify(errorOf(error).message,'error',true)),'secondary-button');
+      const copy=button('Copy','Copy unsaved edit',async()=>{try{await navigator.clipboard.writeText(value.value);notify('Draft copied.');}catch{value.focus();value.select();notify('Draft selected. Press Ctrl/Cmd+C to copy.');}},'secondary-button');
+      const download=button('Download','Download unsaved edit',()=>{const url=URL.createObjectURL(new Blob([JSON.stringify({target:draft.target,value:value.value},null,2)],{type:'application/json'})),link=element('a');link.href=url;link.download='omd-unsaved-edit.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);},'secondary-button');
+      const discard=button('Discard','Discard unsaved edit',async()=>{
+        if(!await confirmAction('Discard this unsaved edit?','Copy or download it first. This draft has not been saved and cannot be restored after discarding.','Discard draft'))return;
+        try{
+          if(saveState.error===nativeEdits!.list().find(entry=>entry.id===draft.id)?.error)dismissedSaveError=saveState.error;
+          nativeEdits!.discard(draft.id);const target=draft.target,page=store.getRenderState();if(page.id!==target.pageId)return;
+          let saved:string;
+          if(target.kind==='page')saved=page[target.field];
+          else {const b=findBlock(page,target.blockId).block;if(target.kind==='title'&&'title' in b)saved=b.title;else if(target.kind==='cell'&&b.type==='table'){const row=b.rows.find(row=>row.id===target.rowId),column=b.columns.findIndex(column=>column.id===target.columnId);if(!row||column<0)return;saved=row.cells[column];}else return;}
+          const input=document.querySelector<HTMLInputElement|HTMLTextAreaElement>(`[data-native-draft="${CSS.escape(draft.id)}"]`);if(input){input.value=saved;fit(input);}
+        }catch(error){notify(errorOf(error).message,'error',true);}
+      },'quiet-button');
+      tools.append(retry,copy,download,discard);node.append(heading,reason,value,tools);recoveryNodes.set(draft.id,node);recovery.append(node);
+    }
+    node.querySelector('p')!.textContent=`${draft.error!.message} Copy or download this draft before discarding it. Retry saves only to its original page and item.`;
+    const value=node.querySelector('textarea')!;if(value.value!==draft.value)value.value=draft.value;
+    for(const button of node.querySelectorAll('button'))button.disabled=draft.saving;
+  }
+  if(failed.length)status.append(button(`Review ${failed.length} unsaved ${failed.length===1?'edit':'edits'}`,'Review unsaved edits',()=>{recovery!.scrollIntoView({block:'center'});recovery!.querySelector('textarea')?.focus();},'link-button'));
 }
 function fit(el:HTMLElement) { el.style.height = 'auto'; el.style.height = `${el.scrollHeight}px`; }
 async function createTextAfter(blockId:string,pageId:string) {
@@ -119,7 +159,7 @@ async function createTextAfter(blockId:string,pageId:string) {
 }
 function title(b:Extract<Block,{title:string}>,glyph:string) {
   const head = element('div', 'block-heading'); const glyphIcon=icon(b.type);glyphIcon.classList.add('type-glyph');
-  head.append(glyphIcon, editable(b.title, `${b.type} title`, (value,pageId) => action('update_block', { pageId, blockId: b.id, patch: { title: value } }, { quiet: true }), { className: 'block-title', placeholder: 'Untitled' })); return head;
+  head.append(glyphIcon, editable(b.title, `${b.type} title`, ()=>{}, { className: 'block-title', placeholder: 'Untitled',id:`native-title-${encodeURIComponent(JSON.stringify([store.getActivePageId(),b.id]))}`,draft:{kind:'title',pageId:store.getActivePageId(),blockId:b.id} })); return head;
 }
 function rowsControls(onUp:()=>unknown,onDown:()=>unknown,onRemove:()=>unknown,upDisabled:boolean,downDisabled:boolean,label:string) {
   const tools = element('div', 'row-controls');
@@ -326,8 +366,7 @@ function renderTable(shell:HTMLElement,b:BlockOf<'table'>) {
     if(r===0&&b.headerRow){tr.className=b.pinnedHeader?'table-header table-header-pinned':'table-header';}
     b.columns.forEach((column,c)=>{
       const cell=element(r===0&&b.headerRow?'th':'td');if(cell instanceof HTMLTableCellElement&&cell.tagName==='TH')cell.scope='col';if(r===0)cell.classList.add('table-top-cell');pin(cell,c);
-      const saved=tableEdits!.value(pageId,b.id,row.id,column.id,row.cells[c]);
-      const input=editable(saved,`Table row ${r+1}, column ${c+1}`,(value,capturedPageId)=>tableEdits!.write(capturedPageId,b.id,row.id,column.id,value).catch(error=>{notify(errorOf(error).message,'error',true);}),{multiline:true,className:'table-cell',id:cellId(r,c)});
+      const input=editable(row.cells[c],`Table row ${r+1}, column ${c+1}`,()=>{},{multiline:true,className:'table-cell',id:cellId(r,c),draft:{kind:'cell',pageId,blockId:b.id,rowId:row.id,columnId:column.id}});
       input.addEventListener('keydown',event=>{
         const key=event as KeyboardEvent;if(key.isComposing||key.keyCode===229||composition.isComposing(input)||key.altKey)return;
         let nextR=r,nextC=c;
@@ -566,7 +605,7 @@ function render(state:Page, { quiet = false, reminderBlockId, reminderPageId, ch
   const focused=document.activeElement as HTMLInputElement|HTMLTextAreaElement|null; const focusId = focused?.id; const selection = focused?.selectionStart == null ? null : [focused.selectionStart, focused.selectionEnd!] as const;
   const editorFocus=textEditors?.captureFocus()??null;
   const scroll=[scrollX,scrollY] as const;
-  for(const [selector,value] of [['#page-title',state.title],['#page-subtitle',state.subtitle]]){const el=$<HTMLInputElement|HTMLTextAreaElement>(selector);if(el.value!==value){el.value=value;fit(el);}}
+  for(const field of ['title','subtitle'] as const){const el=domId(field==='title'?'page-title':'page-subtitle'),target:NativeTarget={kind:'page',pageId:state.id,field},value=nativeEdits!.value(target,state[field]);el.dataset.nativeDraft=nativeEdits!.id(target);if(el.value!==value){el.value=value;fit(el);}}
   if(renderPageId===state.id&&!reset)return;
   renderPageId=state.id;diagrams?.begin();renderer.begin(state.id);
   reconcile(domId('notebook'),[renderer.list(state.blocks,'page')]);renderer.end();diagrams?.end();textEditors?.end();
@@ -607,7 +646,10 @@ async function boot() {
   for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', e => { if (e.target === dialog) { const rect = dialog.getBoundingClientRect(); if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) dialog.close(); } });
   diagrams=createDiagramManager(store,{notify});
   textEditors=createTextEditors(store,{composition,notify,createNext:createTextAfter,flushPending,onDraftsChange:editorDraftsChanged});
-  tableEdits=createTableEdits(store,{settled:()=>composition.settled(input=>input instanceof Element&&input.classList.contains('table-cell'))});
+  nativeEdits=createNativeEdits(store,{
+    settled:()=>composition.settled(input=>input instanceof Element&&(input.hasAttribute('data-native-draft')||input.id==='page-title'||input.id==='page-subtitle')),
+    isComposingTarget:target=>{const input=document.querySelector(`[data-native-draft="${CSS.escape(nativeEdits!.id(target))}"]`);return !!input&&composition.isComposing(input);}
+  },updateSaveStatus);
   const dirtyContainers=new Set<string>();
   renderer=createRenderCache({makeBlock:renderBlock,makeList:makeBlockList,
     observeBlock:(id,fn)=>store.subscribeBlock(id,fn),observeList:(id,fn)=>store.subscribeContainer(id,fn),
@@ -627,28 +669,29 @@ async function boot() {
   });
   shell=setupShell(store,{beforeNavigate,openPalette,confirm:confirmAction,onError:error=>notify(errorOf(error).message,'error',true),onThemeChange:applyTheme});
   store.subscribe(render); render(store.getRenderState());
-  store.subscribeStatus(({pending,navigating,error})=>{domId('page-title').disabled=navigating&&!composition.isComposing(domId('page-title'));domId('page-subtitle').disabled=navigating&&!composition.isComposing(domId('page-subtitle'));domId('notebook').inert=navigating&&!composition.hasActive();savePending=pending;saveError=error;updateSaveStatus();});
+  store.subscribeStatus(status=>{saveState=status;domId('page-title').disabled=status.navigating&&!composition.isComposing(domId('page-title'));domId('page-subtitle').disabled=status.navigating&&!composition.isComposing(domId('page-subtitle'));domId('notebook').inert=status.navigating&&!composition.hasActive();updateSaveStatus();});
   palette = setupPalette(store, { onError: error => notify(errorOf(error).message, 'error', true), beforeOpen:()=>shell!.closeMobile(), beforeNavigate });
   setupRoutes(store,{beforeNavigate,onError:error=>notify(error.message,'error',true)});
   let fitFrame=0;window.addEventListener('resize',()=>{cancelAnimationFrame(fitFrame);fitFrame=requestAnimationFrame(()=>{for(const el of document.querySelectorAll<HTMLElement>('[data-autofit],.auto-height'))fit(el);});});
   domId('canvas-stage-close').addEventListener('click',closeCanvas);domId('canvas-stage-pages').addEventListener('click',openPalette);
-  window.addEventListener('pagehide',event=>{flushPending().then(()=>{if(!event.persisted){textEditors!.destroy();return store.close();}}).catch(error=>notify(errorOf(error).message,'error',true));});window.addEventListener('beforeunload',flushPending);
-  for (const [selector, key] of [['#page-title', 'title'], ['#page-subtitle', 'subtitle']]) {
-    const el=$<HTMLInputElement|HTMLTextAreaElement>(selector);
-    const write = (pageId:string) => {const saved=action('set_page', {pageId,[key]:el.value}, {quiet:true});fit(el);return saved;};
-    composition.track(el,write,()=>store.getActivePageId());el.addEventListener('input',()=>{if(!composition.isComposing(el))write(store.getActivePageId());});
+  window.addEventListener('pagehide',event=>{flushPending().then(()=>{if(!event.persisted){textEditors!.destroy();return store.close();}}).catch(error=>notify(errorOf(error).message,'error',true));});window.addEventListener('beforeunload',event=>{if(nativeEdits!.list().length||textEditors!.hasPending()||composition.hasActive()){event.preventDefault();event.returnValue='';}flushPending().catch(error=>notify(errorOf(error).message,'error',true));});
+  for (const key of ['title','subtitle'] as const) {
+    const el=domId(key==='title'?'page-title':'page-subtitle');
+    const target=(pageId:string):NativeTarget=>({kind:'page',pageId,field:key}),label=key==='title'?'Page title':'Page description';
+    const write = (pageId:string) => {const saved=writeNative(target(pageId),el.value,label);fit(el);return saved;};
+    composition.track(el,write,()=>renderPageId);el.addEventListener('input',event=>{const pageId=renderPageId;nativeEdits!.stage(target(pageId),el.value,label);if(!(event instanceof InputEvent&&event.isComposing)&&!composition.isPreediting(el))write(pageId);});
     if(key==='title') {
       let finishing=false;
       el.addEventListener('keydown',async event=>{
         const key=event as KeyboardEvent;
         if(key.key!=='Enter'||key.isComposing||key.keyCode===229||composition.isComposing(el))return;
         key.preventDefault();if(key.repeat||finishing)return;
-        finishing=true;const pageId=store.getActivePageId(),title=el.value;
+        finishing=true;const pageId=renderPageId,title=el.value;
         try {
-          await store.idle();
-          if(store.getPageMetadata(pageId)?.title!==title&&!await action('set_page',{pageId,title},{quiet:true}))return;
+          if(store.getPageMetadata(pageId)?.title!==title)nativeEdits!.stage(target(pageId),title,label);
+          await nativeEdits!.flushAll();
           if(store.getActivePageId()===pageId&&el.value===title&&!composition.isComposing(el))el.blur();
-        } finally {finishing=false;}
+        } catch(error){notify(errorOf(error).message,'error',true);} finally {finishing=false;}
       });
     }
   }
@@ -656,7 +699,7 @@ async function boot() {
   domId('notification-mode').addEventListener('change', e => action('set_page', { notificationMode: (e.target as HTMLSelectElement).value as NotificationMode }));
   domId('undo-button').addEventListener('click', async () => { try { await flushPending();await store.undo(); } catch (e) { notify(errorOf(e).message, 'error'); } });
   domId('redo-button').addEventListener('click', async () => { try { await flushPending();await store.redo(); } catch (e) { notify(errorOf(e).message, 'error'); } });
-  domId('export-button').addEventListener('click', async () => { domId('page-menu').open=false;await downloadJson(); notify('Notebook exported.'); });
+  domId('export-button').addEventListener('click', async () => { domId('page-menu').open=false;try{await downloadJson(); notify('Notebook exported.');}catch(error){notify(errorOf(error).message,'error',true);} });
   domId('import-button').addEventListener('click', () => {domId('page-menu').open=false;domId('import-file').click();});
   domId('import-file').addEventListener('change', async event => {
     const file=(event.target as HTMLInputElement).files?.[0];(event.target as HTMLInputElement).value = ''; if (!file) return;

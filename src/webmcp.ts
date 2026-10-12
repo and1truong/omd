@@ -8,7 +8,7 @@ export interface JSONSchema {type?:'object'|'array'|'string'|'boolean'|'integer'
 export interface ToolExecutionOptions {signal?:AbortSignal}
 export interface WebMCPTool {name:string;title:string;description:string;inputSchema:JSONSchema;annotations:{readOnlyHint:boolean;untrustedContentHint:boolean};execute(input?:unknown,options?:ToolExecutionOptions):Promise<unknown>}
 export interface WebMCPRegistry {registerTool?:(tool:WebMCPTool,options:{signal:AbortSignal})=>unknown}
-export interface WebMCPUI {flushPending?:()=>unknown;getView?:()=>View;setView?:(patch:PartialView)=>unknown;openPalette?:()=>unknown;openCanvas?:(id:string,pageId?:string)=>unknown;closeCanvas?:()=>unknown;download?:(json:string,filename?:string)=>unknown;confirmImport?:(signal?:AbortSignal)=>Promise<boolean>;openSettings?:()=>unknown;notificationPermission?:()=>string;testReminder?:()=>unknown}
+export interface WebMCPUI {flushPending?:(options?:{settle?:boolean})=>unknown;getView?:()=>View;setView?:(patch:PartialView)=>unknown;openPalette?:()=>unknown;openCanvas?:(id:string,pageId?:string)=>unknown;closeCanvas?:()=>unknown;download?:(json:string,filename?:string)=>unknown;confirmImport?:(signal?:AbortSignal)=>Promise<boolean>;openSettings?:()=>unknown;notificationPermission?:()=>string;testReminder?:()=>unknown}
 type ToolInput=InternalInput & PartialView & {json?:string;download?:boolean};
 const text = (description?:string):JSONSchema => ({ type: 'string', ...(description ? { description } : {}) });
 const index:JSONSchema = { type: 'integer', minimum: 0, description: 'Zero-based final position. Omit to append.' };
@@ -43,6 +43,7 @@ export function validateToolInput(value:unknown,definition:JSONSchema,path='inpu
 
 export function createTools(store:NotebookStore,ui:WebMCPUI = {}):WebMCPTool[] {
   const tools:WebMCPTool[] = [];
+  const scalarTools=new Set(['set_page','page_update','table_cell_update','checklist_update','tab_update','column_update','card_update','excalidraw_set_scene','set_view','open_palette','open_settings','prepare_notification_permission','test_reminder','prepare_install','prepare_persistent_storage']);
   const snapshot=(page:Page)=>({...page,pageRevision:page.revision,revision:store.getRevision()});
   function add(name:string,description:string,inputSchema:JSONSchema,run:(input:ToolInput,options:ToolExecutionOptions)=>unknown,readOnly=false,untrusted=false) {
     tools.push({ name: `omd_${name}`, title: name.replaceAll('_', ' '), description, inputSchema,
@@ -50,7 +51,8 @@ export function createTools(store:NotebookStore,ui:WebMCPUI = {}):WebMCPTool[] {
       async execute(raw:unknown = {},options:ToolExecutionOptions = {}) {
         if (options.signal?.aborted) throw new Error('Tool cancelled.');
         validateToolInput(raw,inputSchema);const input=raw as ToolInput;
-        await ui.flushPending?.();
+        const scalarPatch=(name==='update_block'||name==='accordion_update')&&Object.keys(input.patch??{}).every(key=>['text','title','source','dueAt','enabled'].includes(key));
+        await ui.flushPending?.({settle:!readOnly&&!scalarTools.has(name)&&!scalarPatch});
         await store.idle();
         // Subscribers synchronously update the DOM before the shared command returns.
         return await run(input, options);

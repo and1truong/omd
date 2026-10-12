@@ -85,6 +85,7 @@ try{
   await subtitle.fill('Dòng một');await subtitle.press('End');await subtitle.press('Enter');await page.keyboard.insertText('Dòng hai');
   assert.equal(await subtitle.inputValue(),'Dòng một\nDòng hai');
   assert.ok(await subtitle.evaluate(el=>document.activeElement===el));
+  await page.evaluate(()=>window.omdStartupApp.flushPending());
   assert.equal((await snapshot()).page.subtitle,'Dòng một\nDòng hai');
 
   // Both native IME signals and the composition guard leave confirmation Enter untouched.
@@ -117,7 +118,7 @@ try{
     store.dispatch=(name,input,options)=>name==='set_page'&&input.title===value?Promise.reject(new Error('Injected title save failure')):dispatch(name,input,options);
   },retryTitle);
   await title.fill(retryTitle);await title.press('Enter');
-  await page.waitForFunction(()=>document.getElementById('save-status').textContent==='Not saved');
+  await page.waitForFunction(()=>document.getElementById('save-status').textContent.startsWith('Not saved'));
   assert.equal(await title.inputValue(),retryTitle);assert.ok(await titleFocused());assert.deepEqual(await snapshot(),beforeFailure);
   assert.match(await page.locator('#notices').innerText(),/Injected title save failure/);
   await page.screenshot({path:new URL(`../test-results/title-enter-failure-${engine}-${basePath?'omd':'root'}.png`,import.meta.url).pathname,fullPage:true});

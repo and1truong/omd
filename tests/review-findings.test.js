@@ -40,3 +40,12 @@ test('composition holds render deferral through final persistence and retains it
   const guard=createCompositionGuard({onSettled:()=>settled++});guard.track(input,async origin=>{writes.push(origin);await new Promise(resolve=>{release=resolve;});},()=>pageId);
   input.dispatchEvent(new Event('compositionstart'));pageId='other';input.dispatchEvent(new Event('compositionend'));await Promise.resolve();assert.deepEqual(writes,['original']);assert.equal(guard.isComposing(input),true);assert.equal(settled,0);release();await new Promise(resolve=>setImmediate(resolve));assert.equal(guard.hasActive(),false);assert.equal(settled,1);
 });
+test('preedit ends before final acknowledgement and a new composition remains active after the old acknowledgement',async()=>{
+  const input=new EventTarget(),releases=[];let settled=0;
+  const guard=createCompositionGuard({onSettled:()=>settled++});guard.track(input,()=>new Promise(resolve=>releases.push(resolve)),()=> 'original');
+  input.dispatchEvent(new Event('compositionstart'));assert.equal(guard.isPreediting(input),true);
+  input.dispatchEvent(new Event('compositionend'));assert.equal(guard.isPreediting(input),false);assert.equal(guard.isComposing(input),true);
+  await Promise.resolve();input.dispatchEvent(new Event('compositionstart'));assert.equal(guard.isPreediting(input),true);
+  releases.shift()();await new Promise(resolve=>setImmediate(resolve));assert.equal(guard.isComposing(input),true);assert.equal(guard.isPreediting(input),true);assert.equal(settled,0);
+  input.dispatchEvent(new Event('compositionend'));assert.equal(guard.isPreediting(input),false);await Promise.resolve();releases.shift()();await guard.settled();assert.equal(guard.hasActive(),false);assert.equal(settled,1);
+});
