@@ -214,6 +214,7 @@ function renderTable(shell:HTMLElement,b:BlockOf<'table'>) {
   for(let i=0;i<=b.columns.length;i++){const option=element('option');option.value=String(i);option.textContent=String(i);select.append(option);}select.value=String(b.pinnedColumns);
   select.addEventListener('change',async()=>{if(!await action('update_block',{pageId,blockId:b.id,patch:{pinnedColumns:Number(select.value)}}))select.value=String(b.pinnedColumns);});pins.append(document.createTextNode('Pin first columns '),select);
   const options=element('details','table-options'),summary=element('summary'),panel=element('div','table-options-panel');options.open=document.querySelector<HTMLDetailsElement>(`[data-block-id="${CSS.escape(b.id)}"] .table-options`)?.open??false;summary.setAttribute('aria-label','Table options');summary.append(icon('settings'),document.createTextNode('Table options'));
+  options.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();options.open=false;summary.focus();}});
   const pinHeader=checkbox('Pin header',b.pinnedHeader,'pinnedHeader');pinHeader.querySelector('input')!.disabled=!b.headerRow;
   const help=element('small','muted');help.textContent='Keep headings and leading columns visible while scrolling.';
   panel.append(checkbox('Header row',b.headerRow,'headerRow'),pinHeader,pins,help);options.append(summary,panel);toolbar.append(size,rowButton,columnButton,options);
