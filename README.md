@@ -60,6 +60,8 @@ Local verification: 32 model, multi-page migration, scene, reminder, asset and W
 - #1: `codex/omd-01-state` → main: validated data model and local storage.
 - #2: `codex/omd-02-notebook` → `codex/omd-01-state`: notebook UI and embedded blocks.
 - #3: `codex/omd-03-pwa-webmcp` → `codex/omd-02-notebook`: PWA, WebMCP and CI.
+- #5: `codex/omd-04-pages` → `codex/omd-03-pwa-webmcp`: multiple pages and command palette.
+- #6: `codex/omd-05-diagrams` → `codex/omd-04-pages`: Mermaid and Excalidraw, including full-page canvas.
 
 The final branch contains the complete app. Review the incremental diffs; merge bottom to top and retarget each remaining PR after its predecessor merges.
 

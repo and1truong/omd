@@ -94,9 +94,12 @@ try {
   await call('open_canvas',{blockId:drawing.id});
   assert.equal(await page.locator('#canvas-stage-title').textContent(),'Written by a person');
   await page.locator('#canvas-stage .excalidraw label[title*="Rectangle"]').first().click();
-  const canvas=page.locator('#canvas-stage .excalidraw canvas').last(),bounds=await canvas.boundingBox();
-  await page.mouse.move(bounds.x+170,bounds.y+170);await page.mouse.down();await page.mouse.move(bounds.x+330,bounds.y+270,{steps:6});await page.mouse.up();
+  const canvas=page.locator('#canvas-stage .excalidraw canvas.interactive'),bounds=await canvas.boundingBox();
+  // The left 200px is Excalidraw's shape-properties panel, not the drawing area.
+  const drawX=bounds.x+bounds.width*.55,drawY=bounds.y+bounds.height*.45;
+  await page.mouse.move(drawX,drawY);await page.mouse.down();await page.mouse.move(drawX+160,drawY+100,{steps:6});await page.mouse.up();
   await page.waitForFunction(id=>JSON.parse(localStorage.getItem('omd.notebook.v1')).pages.some(p=>p.blocks.some(b=>b.id===id&&b.scene?.elements.length>0)),drawing.id);
+  await mkdir(`${root}/test-results`,{recursive:true});await page.screenshot({path:`${root}/test-results/full-canvas.png`,fullPage:true});
   await page.getByRole('button',{name:'Back to notebook',exact:true}).click();
   assert.ok((await call('get_notebook')).blocks.find(b=>b.id===drawing.id).scene.elements.length>0);
   await call('open_canvas',{blockId:drawing.id});await page.keyboard.press('Control+k');
