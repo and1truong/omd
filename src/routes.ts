@@ -16,8 +16,9 @@ export function routePageId(path=location.pathname,base=appBase.pathname):string
   try{
     const id=decodeURIComponent(encoded);
     if(id.startsWith('~u')){
-      if(!/^~u(?:[0-9a-f]{4})+$/i.test(id))return null;
-      return id.slice(2).match(/.{4}/g)!.map(unit=>String.fromCharCode(parseInt(unit,16))).join('');
+      const units=id.slice(2);
+      if(!units||units.length%4!==0||/[^0-9a-f]/i.test(units))return null;
+      return units.match(/.{4}/g)!.map(unit=>String.fromCharCode(parseInt(unit,16))).join('');
     }
     return id.startsWith('~')?id.slice(1):id;
   }catch{return null;}
