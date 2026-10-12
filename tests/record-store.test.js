@@ -41,7 +41,7 @@ test('undo reads touched records and preserves the unrelated block instance',asy
 test('transaction abort publishes no selector updates, does not advance history and can be retried',async()=>{
   const data=memory(),store=await createStore(data,{initial:emptyNotebook}),before=await store.export(),events=[];store.subscribe(()=>events.push(true));const statuses=[];store.subscribeStatus(s=>statuses.push(s));const recover=failWrites(store);
   try{await assert.rejects(()=>store.dispatch('set_page',{title:'lost'}),/Could not save/);}finally{recover();}
-  assert.equal(await store.export(),before);assert.equal(store.canUndo(),false);assert.deepEqual(events,[]);assert.ok(statuses.some(s=>s.pending>0));assert.ok(statuses.some(s=>s.error));
+  assert.equal(await store.export(),before);assert.equal(store.canUndo(),false);assert.deepEqual(events,[]);assert.ok(statuses.some(s=>s.pending>0));assert.ok(statuses.some(s=>s.error));await store.reload();assert.ok(statuses.at(-1).error,'Unchanged reminder polling must not erase a failed-save status.');
   await store.dispatch('set_page',{title:'saved'});assert.equal((await createStore(data)).getState().title,'saved');store.close();
 });
 test('queued events are ordered and a stale transaction cannot overwrite a concurrent commit',async()=>{

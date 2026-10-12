@@ -20,7 +20,7 @@ export async function createStore(storage, options = {}) {
   const undoStack=[],redoStack=[],afterChange=new Set();let queue=Promise.resolve(),closed=false,pending=0,navigations=0,lastError=null;const statusListeners=new Set();
   function status(){return {pending,navigating:navigations>0,error:lastError};}
   function notifyStatus(){for(const fn of statusListeners)fn(status());}
-  function enqueue(fn,navigate=false){pending++;if(navigate)navigations++;lastError=null;notifyStatus();const task=queue.then(fn).catch(error=>{lastError=error;throw error;}).finally(()=>{pending--;if(navigate)navigations--;notifyStatus();});queue=task.catch(()=>{});return task;}
+  function enqueue(fn,navigate=false){pending++;if(navigate)navigations++;notifyStatus();const task=queue.then(fn).catch(error=>{lastError=error;throw error;}).finally(()=>{pending--;if(navigate)navigations--;notifyStatus();});queue=task.catch(()=>{});return task;}
   function publish(meta,records,event={}) {
     if(meta.activePageId!==state.getState().meta.activePageId)materialize=makeMaterializer();
     state.setState({meta:freeze(meta,true),records,options:event,page:freeze(materialize(records,meta.activePageId),true)});
@@ -35,6 +35,7 @@ export async function createStore(storage, options = {}) {
     const current=state.getState();const id=history?crypto.randomUUID():null;
     const entry=history?{owner,before:current.meta,after:next,changes:patchChanges(changes)}:journal;
     const hydrated=await repository.commit(current.meta,next,changes,{journal:history?entry:null,journalId:id,deleteHistory:history?[...redoStack]:[]});
+    lastError=null;
     if(history){undoStack.push(id);redoStack.length=0;}
     let records;
     if(next.activePageId===current.meta.activePageId){records=new Map(current.records);for(const c of changes)if((c.after??c.before)?.pageId===next.activePageId){if(c.after)records.set(c.key,c.after);else records.delete(c.key);}}
@@ -84,7 +85,7 @@ export async function createStore(storage, options = {}) {
     subscribeContainer(id,fn){return state.subscribe(s=>s.records.get(recordKey(s.meta.activePageId,`$container:${id}`))?.data.blockIds,()=>fn(state.getState().page,state.getState().options));},
     export:async()=>JSON.stringify(await api.getNotebook(),null,2),
     import(raw,options){return api.dispatch('import_notebook',{notebook:parseBook(raw)},options);},
-    reload(){return enqueue(async()=>{const current=state.getState(),loaded=await repository.read(current.meta);if(!loaded)throw new Error('Saved notebook is missing.');if(loaded.meta.id===current.meta.id&&loaded.meta.revision===current.meta.revision)return;await repository.pruneHistory([...undoStack,...redoStack]);undoStack.length=redoStack.length=0;materialize=makeMaterializer();publish(loaded.meta,loaded.records,{reset:true});});},
+    reload(){return enqueue(async()=>{const current=state.getState(),loaded=await repository.read(current.meta);if(!loaded)throw new Error('Saved notebook is missing.');if(loaded.meta.id===current.meta.id&&loaded.meta.revision===current.meta.revision)return;await repository.pruneHistory([...undoStack,...redoStack]);undoStack.length=redoStack.length=0;materialize=makeMaterializer();lastError=null;publish(loaded.meta,loaded.records,{reset:true});});},
     dueReminders:now=>repository.due(now),
     canUndo:()=>undoStack.length>0,canRedo:()=>redoStack.length>0,
     undo:()=>restore(undoStack,redoStack,'inverse'),redo:()=>restore(redoStack,undoStack,'forward'),
@@ -98,7 +99,7 @@ export async function createStore(storage, options = {}) {
     const current=state.getState(),entry=await repository.history(from.at(-1));
     const records=await repository.records(entry.changes.map(p=>p.key)),changes=entry.changes.map(p=>({key:p.key,before:records.get(p.key)??null,after:applyPatches({value:records.get(p.key)??null},p[direction]).value}));
     let next=structuredClone(direction==='inverse'?entry.before:entry.after);next.revision=current.meta.revision+1;next.updatedAt=new Date().toISOString();if(next.pages.some(p=>p.id===current.meta.activePageId))next.activePageId=current.meta.activePageId;
-    validateBook(next);const hydrated=await repository.commit(current.meta,next,changes);const id=from.pop();to.push(id);let resident;
+    validateBook(next);const hydrated=await repository.commit(current.meta,next,changes);lastError=null;const id=from.pop();to.push(id);let resident;
     if(next.activePageId===current.meta.activePageId){resident=new Map(current.records);for(const c of changes)if((c.after??c.before)?.pageId===next.activePageId){if(c.after)resident.set(c.key,c.after);else resident.delete(c.key);}}
     else resident=hydrated;
     publish(next,resident);channel?.postMessage(next.revision);return true;
