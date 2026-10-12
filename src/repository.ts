@@ -108,7 +108,8 @@ export async function openRepository(storage:StorageLike,{key=STORAGE_KEY,name='
   }
   async function read(expected?:Notebook,preferredPageId?:string) {
     const {tx,done}=transaction();const meta=await request<Notebook|undefined>(tx.objectStore('meta').get('book'));
-    if(!meta){await done;return null;}
+    if(meta===undefined){await done;return null;}
+    try{validateBook(meta);}catch(error){await done;throw new Error(`Saved notebook metadata is invalid. Your saved database and localStorage recovery sources are intact. Recover from a backup or repair the saved data, then reload. ${errorOf(error).message}`);}
     if(expected&&expected.id===meta.id&&expected.revision===meta.revision){await done;return {meta};}
     const activePageId=meta.pages.some(p=>p.id===preferredPageId)?preferredPageId!:meta.activePageId;
     const pages=await request<StoredRecord[]>(tx.objectStore('records').index('pageId').getAll(activePageId));await done;

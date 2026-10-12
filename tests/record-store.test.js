@@ -4,6 +4,26 @@ import {createStore,failWrites} from './store-helper.js';
 import {emptyNotebook,makeBlock,STORAGE_KEY} from '../src/model.ts';
 import {wrapPage} from '../src/notebook.ts';
 const memory=()=>{const values=new Map();return {getItem:k=>values.get(k)??null,setItem:(k,v)=>values.set(k,v)};};
+test('v4 startup and same-revision reload reject inactive invalid IDs before hydration or history leases',async()=>{
+  const root={...emptyNotebook(),id:'p:á/"一'},child={...emptyNotebook(),id:'__proto__'},book=wrapPage(root);
+  book.pages.push(child);book.parents={...book.parents,[child.id]:root.id};
+  const data=memory(),live=await createStore(data,{initial:()=>book});
+  async function metadata(value){await new Promise((resolve,reject)=>{const opening=indexedDB.open(live.databaseName());opening.onerror=()=>reject(opening.error);opening.onsuccess=()=>{const db=opening.result,tx=db.transaction('meta','readwrite');tx.objectStore('meta').put(value,'book');tx.oncomplete=()=>{db.close();resolve();};tx.onabort=()=>reject(tx.error);};});}
+  try{
+    for(const id of ['',null,42,{},[]]){
+      const bad=structuredClone(book);bad.pages[1].id=id;bad.parents=Object.fromEntries([[root.id,''],[id,root.id]]);await metadata(bad);
+      const writes=trace(live);let leases=0;
+      try{
+        const locks={request(){leases++;throw new Error('Validation must precede history leases.');}};
+        await assert.rejects(()=>createStore(data,{locks,activePageId:root.id}),/metadata is invalid.*intact.*Recover.*reload.*Notebook ID/);
+        await assert.rejects(()=>live.reload(),/metadata is invalid.*intact/);
+        assert.equal(leases,0);assert.deepEqual(writes.reads,[]);assert.deepEqual(writes.puts,[]);
+        assert.deepEqual(live.listPages().map(row=>row.pageId),[root.id,child.id]);
+      }finally{writes.stop();}
+      await metadata(book);const retry=await createStore(data,{activePageId:child.id});assert.equal(retry.getActivePageId(),child.id);assert.deepEqual(retry.listPages().map(row=>row.pageId),[root.id,child.id]);await retry.close();
+    }
+  }finally{await metadata(book);await live.close();}
+});
 test('selection is tab-local, writes no revision/history and reload hydrates the same tab page',async()=>{
   const data=memory(),a=await createStore(data,{initial:emptyNotebook}),first=a.getActivePageId();
   const second=(await a.dispatch('page_add',{title:'Second'})).pageId;
