@@ -10,11 +10,16 @@ export async function verifyPageRoutes({browser,appURL,call,root}) {
     await target.waitForFunction(revision=>window.omdRouteStore.getRevision()>=revision,revision);
   };
   try {
+    if(process.env.OMD_ROUTE_CPU_SLOWDOWN){const session=await context.newCDPSession(b);await session.send('Emulation.setCPUThrottlingRate',{rate:Number(process.env.OMD_ROUTE_CPU_SLOWDOWN)});}
     await a.goto(appURL);await ready(a);const first=await active(a);
     for(const block of (await call('get_notebook',{},a)).blocks)await call('remove_block',{blockId:block.id},a);
     await call('set_page',{title:'Compare — left page'},a);
     const second=(await call('page_add',{title:'Compare — right page'},a)).pageId;
     await b.goto(path(first));await ready(b);
+    // Establish control before creating browser-history/BFCache entries. A
+    // restored document created before activation can otherwise retain its
+    // original null controller even though serviceWorker.ready has resolved.
+    for(const target of [a,b]){await target.evaluate(()=>navigator.serviceWorker.ready);await target.waitForFunction(()=>!!navigator.serviceWorker.controller);}
     assert.equal(await active(a),second);assert.equal(await active(b),first);
     assert.equal(a.url(),path(second));assert.equal(b.url(),path(first));
     const revision=(await call('get_notebook',{},a)).revision;
@@ -43,11 +48,12 @@ export async function verifyPageRoutes({browser,appURL,call,root}) {
     try {
       [third]=await Promise.all([context.waitForEvent('page'),link.click({modifiers:['ControlOrMeta'],delay:50})]);
     } catch(error) {
-      error.message+=`\nNative link diagnostics: ${JSON.stringify(await b.evaluate(()=>({url:location.href,click:window.omdRouteClick})))}`;throw error;
+      const source=await b.evaluate(()=>({url:location.href,click:window.omdRouteClick}));
+      throw new Error(`Native link diagnostics: ${JSON.stringify({source,pages:context.pages().map(page=>page.url())})}`,{cause:error});
     } finally {await b.keyboard.up('ControlOrMeta');}
     assert.deepEqual(await b.evaluate(()=>window.omdRouteClick),{ctrl:process.platform!=='darwin',meta:process.platform==='darwin',button:0,trusted:true,prevented:false,href:new URL(path(second)).pathname,focused:true,active:true});
     await ready(third);
-    assert.equal(await active(third),second);assert.equal(third.url(),path(second));assert.equal(await active(b),first);await third.close();
+    assert.equal(await active(third),second);assert.equal(third.url(),path(second));assert.equal(await active(b),first);assert.equal(b.url(),path(first));await third.close();
     await link.click();await b.waitForURL(path(second));
     const text=(await call('add_block',{type:'text',text:'Before browser history'},b)).block;
     await b.getByRole('textbox',{name:'text content',exact:true}).fill('Saved before navigating back');

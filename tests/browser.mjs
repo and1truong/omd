@@ -336,7 +336,9 @@ try {
   await edgePage.evaluate(()=>{const input=document.getElementById('page-title');input.focus();input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));input.value='Original-page IME edit';});
   await call('page_select',{pageId:'a'},edgePage);await edgePage.locator('#page-title').dispatchEvent('compositionend');await settle(edgePage);assert.equal((await call('get_page',{pageId:'quoted-page'},edgePage)).title,'Original-page IME edit');assert.equal((await call('get_notebook',{},edgePage)).id,'a');
   await edgeContext.close();
-  await verifyPageRoutes({browser,appURL,call,root});
+  const routeRepeats=Number(process.env.OMD_ROUTE_REPEATS??1);
+  assert.ok(Number.isSafeInteger(routeRepeats)&&routeRepeats>0&&routeRepeats<=100);
+  for(let attempt=0;attempt<routeRepeats;attempt++)await verifyPageRoutes({browser,appURL,call,root});
   assert.deepEqual(errors.filter(error => error !== 'Tabs are limited to two levels.'), []);
   console.log(`Static base ${basePath||'/'} passed.`);
   console.log('Native WebMCP, app shell/sidebar, view persistence, mobile drawer/focus/menu, lazy engine loading/teardown, block identity, theme, reminders, import/export, and offline reload passed.');
