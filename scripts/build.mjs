@@ -6,6 +6,7 @@ const root = resolve(new URL('..', import.meta.url).pathname);
 const output = resolve(root, 'dist');
 await rm(output, { recursive: true, force: true }); await mkdir(output, { recursive: true });
 for (const name of ['index.html', 'icon.svg', 'manifest.webmanifest', 'icons']) await cp(resolve(root, name), resolve(output, name), { recursive: true });
+await cp(resolve(output,'index.html'),resolve(output,'404.html'));
 await build({entryPoints:[resolve(root,'service-worker.ts')],outfile:resolve(output,'service-worker.js'),format:'iife',target:'es2022'});
 await mkdir(resolve(output,'src'),{recursive:true});await cp(resolve(root,'src/styles.css'),resolve(output,'src/styles.css'));
 const modules=(await readdir(resolve(root,'src'))).filter(name=>name.endsWith('.ts')&&!name.endsWith('.d.ts')&&name!=='types.ts').map(name=>'src/'+name);

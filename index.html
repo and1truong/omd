@@ -7,6 +7,11 @@
   <meta name="theme-color" content="#ffffff">
   <meta name="description" content="oh my day — a local-first notebook for notes, plans and diagrams.">
   <title>omd — oh my day</title>
+  <script>
+    const base=document.createElement('base'),path=location.pathname,route=path.search(/\/page(?:\/|$)/);
+    base.href=route>=0?path.slice(0,route+1):path.replace(/(?:index|404)\.html$/,'').replace(/\/?$/,'/');
+    document.head.append(base);
+  </script>
   <link rel="icon" href="./icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
   <link rel="manifest" href="./manifest.webmanifest">

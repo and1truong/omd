@@ -11,7 +11,9 @@ http.createServer(async (req, res) => {
   try {
     const requested=new URL(req.url,'http://localhost');let path=decodeURIComponent(requested.pathname);
     if(basePath){if(path===basePath){res.writeHead(302,{Location:basePath+'/'+requested.search});res.end();return;}if(!path.startsWith(basePath+'/')){res.writeHead(404);res.end('Not found');return;}path=path.slice(basePath.length);}
-    const file = resolve(root, `.${path.endsWith('/') ? path + 'index.html' : path}`);
+    const destination=req.headers['sec-fetch-dest'];
+    const route=(!destination||destination==='document'||destination==='empty')&&/^\/page(?:\/[^/]*)?\/?$/.test(requested.pathname.slice(basePath.length));
+    const file = resolve(root, route?'index.html':`.${path.endsWith('/') ? path + 'index.html' : path}`);
     if (!file.startsWith(root + sep)) { res.writeHead(403); res.end(); return; }
     if (!(await stat(file)).isFile()) throw new Error('Not a file');
     const data = await readFile(file); res.writeHead(200, { 'Content-Type': `${mime[extname(file)] ?? 'application/octet-stream'}; charset=utf-8`, 'Cache-Control': 'no-cache' }); res.end(data);

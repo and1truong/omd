@@ -11,16 +11,16 @@ let server=startServer();
 const listening=()=>new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.once('error',reject);server.once('exit',code=>reject(new Error(`Server exited: ${code}`)));});
 let browser,page;const errors=[];
 const call=(name,input={})=>page.evaluate(async({name,input})=>{
-  const app=await import('./src/app.js');await app.flushPending();const store=app.getStore();
+  const app=await import(new URL('./src/app.js',document.baseURI).href);await app.flushPending();const store=app.getStore();
   return name==='undo'?store.undo():name==='redo'?store.redo():store.dispatch(name,input);
 },{name,input});
-const state=()=>page.evaluate(async()=>{const app=await import('./src/app.js');await app.flushPending();return app.getStore().getState();});
+const state=()=>page.evaluate(async()=>{const app=await import(new URL('./src/app.js',document.baseURI).href);await app.flushPending();return app.getStore().getState();});
 const box=id=>page.locator(`[id="${id}-text"]`);
 const host=id=>page.locator(`[data-text-editor="${id}"]`);
 const focused=id=>page.waitForFunction(id=>document.activeElement?.id===`${id}-text`&&document.activeElement.isContentEditable,id);
 // Playwright polls synchronous return values; a Promise would pass immediately.
 const readers=()=>page.evaluate(async()=>{
-  const app=await import('./src/app.js'),model=await import('./src/model.js');
+  const app=await import(new URL('./src/app.js',document.baseURI).href),model=await import(new URL('./src/model.js',document.baseURI).href);
   window.omdEditorTest={text:id=>model.findBlock(app.getStore().getState(),id).block.text,order:id=>model.findContainer(app.getStore().getState(),id).blocks.map(b=>b.id)};
 });
 const saved=async(id,text)=>{
@@ -28,12 +28,12 @@ const saved=async(id,text)=>{
   catch(error){console.error({expected:text,actual:await page.evaluate(id=>window.omdEditorTest.text(id),id)});throw error;}
 };
 const order=containerId=>page.evaluate(async containerId=>{
-  const app=await import('./src/app.js'),{findContainer}=await import('./src/model.js');return findContainer(app.getStore().getState(),containerId).blocks.map(b=>b.id);
+  const app=await import(new URL('./src/app.js',document.baseURI).href),{findContainer}=await import(new URL('./src/model.js',document.baseURI).href);return findContainer(app.getStore().getState(),containerId).blocks.map(b=>b.id);
 },containerId);
 async function ready() {
   await page.context().route('https://example.com/**',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><title>Hyperlink destination</title><h1>Link opened in a new tab</h1><p>This example.com destination is a deterministic test fixture.</p><p id="url"></p><p id="opener"></p><script>document.getElementById("url").textContent=location.href;document.getElementById("opener").textContent="window.opener: "+window.opener;</script>'}));
   page.on('pageerror',error=>errors.push(error.message));await page.goto(`http://localhost:4322${basePath}/`);
-  await page.evaluate(async()=>await (await import('./src/app.js')).ready);
+  await page.evaluate(async()=>await (await import(new URL('./src/app.js',document.baseURI).href)).ready);
 }
 async function openLink(id,{tap=false,evidence=false}={}) {
   const link=box(id).locator('a[href]').first(),href=await link.getAttribute('href'),before=await state(),url=page.url();
@@ -182,10 +182,10 @@ try {
   assert.equal(page.context().pages().length,unsafePages);
   await call('update_block',{blockId:following,patch:{text:'A safe [final note](https://example.com/reloaded)'}});
   await mkdir(`${root}/test-results`,{recursive:true});await page.screenshot({path:`${root}/test-results/text-editor-${engine}-desktop.png`});
-  const exported=await page.evaluate(async()=>(await import('./src/app.js')).getStore().export());
+  const exported=await page.evaluate(async()=>(await import(new URL('./src/app.js',document.baseURI).href)).getStore().export());
   await call('page_add',{title:'Another page'});await call('page_select',{pageId});
   assert.equal(await box(next).innerText(),'Đang gõ tiếng Việt');
-  await page.reload();await page.evaluate(async()=>await (await import('./src/app.js')).ready);
+  await page.reload();await page.evaluate(async()=>await (await import(new URL('./src/app.js',document.baseURI).href)).ready);
   assert.equal(await box(first).locator('h1').innerText(),'A heading');assert.equal(await box(next).innerText(),'Đang gõ tiếng Việt');
   await openLink(following);
   assert.equal(JSON.parse(exported).pages.find(p=>p.id===pageId).blocks[0].text,markdown);
@@ -195,7 +195,7 @@ try {
   // Stop the real server: WebKit's emulated offline mode can reject navigation
   // before dispatching the service-worker fetch event.
   const stopped=new Promise(resolve=>server.once('exit',resolve));server.kill();await stopped;
-  await page.reload();await page.evaluate(async()=>await (await import('./src/app.js')).ready);
+  await page.reload();await page.evaluate(async()=>await (await import(new URL('./src/app.js',document.baseURI).href)).ready);
   await box(next).fill('Edited offline');await saved(next,'Edited offline');await context.close();
   server=startServer();await listening();
 

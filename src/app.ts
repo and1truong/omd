@@ -11,6 +11,7 @@ import { createRenderCache, reconcile, revealActions } from './render-cache.js';
 import { setupShell, showMenu } from './shell.js';
 import { icon, labelIcon } from './icons.js';
 import {createTextEditors} from './text-editors.js';
+import {appBase,routePageId,setupRoutes} from './routes.js';
 
 function $<T extends HTMLElement=HTMLElement>(selector:string):T {if(selector.startsWith('#'))return domId<T>(selector.slice(1));const node=document.querySelector<T>(selector);if(!node)throw new Error(`Missing element: ${selector}`);return node;}
 let store:NotebookStore,palette:ReturnType<typeof setupPalette>|undefined,diagrams:ReturnType<typeof createDiagramManager>|undefined,renderer:ReturnType<typeof createRenderCache>,shell:ReturnType<typeof setupShell>|undefined,dragData:DragData|null|undefined;
@@ -373,8 +374,8 @@ export async function deliverReminder(reminder:Pick<ReminderBlock,'id'|'title'>,
   if (!('Notification' in window) || Notification.permission !== 'granted') { notify('Enable browser notifications in Settings for system reminders.', '', true); return; }
   try {
     const registration = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistration() : null;
-    if (registration) await registration.showNotification('omd · a gentle nudge', { body: reminder.title, icon: './icon.svg', tag: `omd-${reminder.id}`, data: { url: new URL('./', location.href).href } });
-    else new Notification('omd · a gentle nudge', { body: reminder.title, icon: './icon.svg', tag: `omd-${reminder.id}` });
+    if (registration) await registration.showNotification('omd · a gentle nudge', { body: reminder.title, icon: new URL('icon.svg',appBase).href, tag: `omd-${reminder.id}`, data: { url: appBase.href } });
+    else new Notification('omd · a gentle nudge', { body: reminder.title, icon: new URL('icon.svg',appBase).href, tag: `omd-${reminder.id}` });
   } catch { notify('System notification unavailable. Your reminder is shown here.', '', true); }
 }
 function startupError(error:Error) {
@@ -383,7 +384,7 @@ function startupError(error:Error) {
   box.append(h, p, backup, button('Try again', 'Reload app', () => location.reload(), 'secondary-button')); document.body.append(box);
 }
 async function boot() {
-  try { store = await createStore(localStorage); } catch (error) { startupError(errorOf(error)); return; }
+  try { store = await createStore(localStorage,{activePageId:routePageId()??undefined}); } catch (error) { startupError(errorOf(error)); return; }
   for (const close of document.querySelectorAll('[data-close]')) close.addEventListener('click', () => close.closest('dialog')!.close());
   for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', e => { if (e.target === dialog) { const rect = dialog.getBoundingClientRect(); if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) dialog.close(); } });
   diagrams=createDiagramManager(store,{notify});
@@ -409,6 +410,7 @@ async function boot() {
   store.subscribe(render); render(store.getRenderState());
   store.subscribeStatus(({pending,navigating,error})=>{domId('page-title').disabled=navigating&&!composition.isComposing(domId('page-title'));domId('page-subtitle').disabled=navigating&&!composition.isComposing(domId('page-subtitle'));domId('notebook').inert=navigating&&!composition.hasActive();const status=domId('save-status');status.replaceChildren();const dot=element('span','status-dot');status.append(dot,document.createTextNode(pending?'Saving…':error?'Not saved':'Saved'));});
   palette = setupPalette(store, { onError: error => notify(errorOf(error).message, 'error', true), beforeOpen:()=>shell!.closeMobile(), beforeNavigate });
+  setupRoutes(store,{beforeNavigate,onError:error=>notify(error.message,'error',true)});
   let fitFrame=0;window.addEventListener('resize',()=>{cancelAnimationFrame(fitFrame);fitFrame=requestAnimationFrame(()=>{for(const el of document.querySelectorAll<HTMLElement>('[data-autofit],.auto-height'))fit(el);});});
   domId('canvas-stage-close').addEventListener('click',closeCanvas);domId('canvas-stage-pages').addEventListener('click',openPalette);
   window.addEventListener('pagehide',event=>{flushPending().then(()=>{if(!event.persisted){textEditors!.destroy();return store.close();}}).catch(error=>notify(errorOf(error).message,'error',true));});window.addEventListener('beforeunload',flushPending);
