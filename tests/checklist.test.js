@@ -89,3 +89,17 @@ test('nested checklist persistence, exports and undo/redo preserve subtrees and 
   await imported.import(json);assert.deepEqual(imported.getState().blocks[0].items,expected);
   await reopened.close();await imported.close();
 });
+
+test('checklist Markdown remains an exact plain string through nested CRUD, import/export and history',async()=>{
+  const f=fixture(),sources=['Plain **bold** _italic_ `code` [Docs](https://example.com)','__Different spelling__ & <literal>','- first\n- second\n\n1. numbered','Tiếng Việt *ở cấp bốn*'],ids=[];
+  for(const text of sources)ids.push(f.add(text,ids.at(-1)));
+  assert.deepEqual(parseImport(JSON.stringify(f.page)),f.page);
+  const store=await createStore({getItem:()=>null,setItem:()=>{}},{initial:()=>f.page});
+  const original=store.getState().blocks[0].items;
+  await store.dispatch('checklist_update',{blockId:f.blockId,itemId:ids[3],patch:{done:true}});
+  await store.dispatch('checklist_move',{blockId:f.blockId,itemId:ids[3],parentId:'',index:1});
+  await store.undo();await store.undo();assert.deepEqual(store.getState().blocks[0].items,original);
+  for(const [index,id] of ids.entries())assert.equal(findChecklistItem(original,id).item.text,sources[index]);
+  const json=await store.export();assert.deepEqual(parseBook(json).pages[0].blocks[0].items,original);
+  await store.import(json);assert.deepEqual(store.getState().blocks[0].items,original);await store.close();
+});
