@@ -65,10 +65,8 @@ export async function createStore(storage:StorageLike,options:StoreOptions = {})
         const current=state.getState();let next:Notebook,changes:RecordChange[],result:ActionResult;
         if(action==='page_select') {
           const out=applyBookAction(current.meta,action,payload);
-          if(out.state.activePageId!==current.meta.activePageId){
-            const records=await repository.page(out.state.activePageId);
-            lastError=null;publish({...current.meta,activePageId:out.state.activePageId},records,{actionName:action,...options});
-          }
+          const records=out.state.activePageId!==current.meta.activePageId?await repository.page(out.state.activePageId):current.records;
+          lastError=null;publish({...current.meta,activePageId:out.state.activePageId},records,{actionName:action,...options});
           return {revision:current.meta.revision} as MutationResult<K>;
         }
         if(action==='import_notebook') {

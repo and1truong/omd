@@ -9,11 +9,11 @@ assert.ok(['chromium','webkit'].includes(engine));
 const server=spawn(process.execPath,['scripts/serve.mjs'],{cwd:root,env:{...process.env,OMD_PORT:'4321',OMD_STATIC_DIR:'dist'},stdio:['ignore','pipe','pipe']});
 let browser,page,blockId;const errors=[];
 const call=(name,input={})=>page.evaluate(async({name,input})=>{
-  const store=(await import('./src/app.js')).getStore();return name==='undo'?store.undo():name==='redo'?store.redo():store.dispatch(name,input);
+  const store=(await import(new URL('./src/app.js',document.baseURI).href)).getStore();return name==='undo'?store.undo():name==='redo'?store.redo():store.dispatch(name,input);
 },{name,input});
 const items=()=>page.evaluate(async blockId=>{
-  const store=(await import('./src/app.js')).getStore();await store.idle();
-  const {findBlock}=await import('./src/model.js');return findBlock(store.getState(),blockId,'checklist').block.items;
+  const store=(await import(new URL('./src/app.js',document.baseURI).href)).getStore();await store.idle();
+  const {findBlock}=await import(new URL('./src/model.js',document.baseURI).href);return findBlock(store.getState(),blockId,'checklist').block.items;
 },blockId);
 const input=id=>page.locator(`[id="${id}"]`);
 const row=id=>page.locator(`[data-item-id="${id}"] > .check-row`);
@@ -34,7 +34,7 @@ const addChild=async id=>{
 };
 async function ready() {
   page.on('pageerror',error=>errors.push(error.message));await page.goto(`http://localhost:4321${basePath}/`);
-  await page.evaluate(async()=>await (await import('./src/app.js')).ready);
+  await page.evaluate(async()=>await (await import(new URL('./src/app.js',document.baseURI).href)).ready);
 }
 async function fixture() {
   await call('page_add',{title:'Nested checklist'});
@@ -91,7 +91,7 @@ try {
   await mkdir(`${root}/test-results`,{recursive:true});await page.screenshot({path:`${root}/test-results/checklist-${engine}-desktop.png`});
   await row(second).getByRole('button',{name:'Delete checklist item',exact:true}).click();await input(second).waitFor({state:'detached'});assert.equal((await items()).length,1);
   await call('undo');assert.deepEqual(await items(),before);await call('redo');assert.equal((await items()).length,1);await call('undo');
-  await page.reload();await page.evaluate(async()=>await (await import('./src/app.js')).ready);assert.deepEqual(await items(),before);
+  await page.reload();await page.evaluate(async()=>await (await import(new URL('./src/app.js',document.baseURI).href)).ready);assert.deepEqual(await items(),before);
   await context.close();
 
   // Touch controls and four levels fit even the smallest supported viewport.

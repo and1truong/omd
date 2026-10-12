@@ -14,7 +14,7 @@ let browser,page;
 const errors=[];
 const ready=async target=>{
   await target.evaluate(async()=>{
-    const app=await import('./src/app.js');await app.ready;
+    const app=await import(new URL('./src/app.js',document.baseURI).href);await app.ready;
     if(!app.getStore())throw new Error(document.body.innerText);
   });
   await target.locator('#page-title').waitFor();
@@ -28,7 +28,7 @@ try{
   await page.goto(url);await ready(page);
   await page.locator('#page-title').fill('Saved before reopening');
   const saved=await page.evaluate(async()=>{
-    const store=(await import('./src/app.js')).getStore();await store.idle();return store.export();
+    const store=(await import(new URL('./src/app.js',document.baseURI).href)).getStore();await store.idle();return store.export();
   });
   // The visible width toggle must resize the actual page and persist without editing content.
   const widthToggle=page.getByRole('button',{name:'Fluid page width',exact:true});
@@ -39,7 +39,7 @@ try{
   await page.reload();await ready(page);
   assert.equal(await widthToggle.innerText(),'Fluid');assert.equal(await widthToggle.getAttribute('aria-pressed'),'true');assert.equal(await paperWidth(),1360);
   assert.equal(await page.locator('#page-title').inputValue(),'Saved before reopening');
-  assert.equal(await page.evaluate(async()=>(await import('./src/app.js')).getStore().export()),saved);
+  assert.equal(await page.evaluate(async()=>(await import(new URL('./src/app.js',document.baseURI).href)).getStore().export()),saved);
   // Keep both choices reachable and within the viewport on the smallest supported screen.
   await page.setViewportSize({width:320,height:700});
   assert.equal(await paperWidth(),320);await widthToggle.click();assert.equal(await widthToggle.innerText(),'Fixed');assert.equal(await paperWidth(),320);
@@ -49,14 +49,14 @@ try{
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),320);
   await page.setViewportSize({width:1440,height:1000});
   await widthToggle.click();assert.equal(await paperWidth(),900);
-  assert.equal(await page.evaluate(async()=>(await import('./src/app.js')).getStore().export()),saved);
+  assert.equal(await page.evaluate(async()=>(await import(new URL('./src/app.js',document.baseURI).href)).getStore().export()),saved);
 
   // Exercise empty and populated owner indexes, duplicate journal owners, and
   // reclamation without touching the history of another live store.
   const history=await page.evaluate(async()=>{
-    const {createStore}=await import('./src/store.js');
-    const {openRepository}=await import('./src/repository.js');
-    const {initialNotebook}=await import('./src/notebook.js');
+    const {createStore}=await import(new URL('./src/store.js',document.baseURI).href);
+    const {openRepository}=await import(new URL('./src/repository.js',document.baseURI).href);
+    const {initialNotebook}=await import(new URL('./src/notebook.js',document.baseURI).href);
     const name=`startup-${crypto.randomUUID()}`,storage={getItem:()=>null,setItem:()=>{}};
     const repository=await openRepository(storage,{name,initial:initialNotebook});
     const empty=await repository.historyOwners();repository.close();
@@ -88,7 +88,7 @@ try{
   const legacy=await browser.newContext();legacy.setDefaultTimeout(10000);const migrated=await legacy.newPage();watch(migrated);
   await migrated.addInitScript(raw=>localStorage.setItem('omd.notebook.v1',raw),saved);
   await migrated.goto(url);await ready(migrated);
-  assert.equal(await migrated.evaluate(async()=>(await import('./src/app.js')).getStore().export()),saved);
+  assert.equal(await migrated.evaluate(async()=>(await import(new URL('./src/app.js',document.baseURI).href)).getStore().export()),saved);
   assert.equal(await migrated.evaluate(()=>localStorage.getItem('omd.notebook.v1')),saved);
   await legacy.close();await context.close();
   assert.deepEqual(errors,[]);

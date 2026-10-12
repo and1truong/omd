@@ -13,7 +13,7 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
-  const pageNavigation=event.request.mode==='navigate'&&url.pathname.startsWith(`${basePath}page/`)&&/^\/?[^/]*\/?$/.test(url.pathname.slice(`${basePath}page/`.length));
+  const pageNavigation=event.request.mode==='navigate'&&url.pathname.startsWith(basePath)&&/^page(?:\/[^/]*)?\/?$/.test(url.pathname.slice(basePath.length));
   if (url.origin !== self.location.origin || !paths.has(url.pathname)&&!pageNavigation) return;
   event.respondWith((async () => {
     const cache = await caches.open(CACHE);

@@ -2,13 +2,13 @@ import type {NotebookStore,ErrorHandler} from './types.js';
 import {errorOf} from './dom.js';
 
 export const appBase=new URL('../',import.meta.url);
-export const pagePath=(id:string)=>`${appBase.pathname}page/${encodeURIComponent(id)}`;
+export const pagePath=(id:string)=>`${appBase.pathname}page/${encodeURIComponent(id==='.'||id==='..'||id.startsWith('~')?'~'+id:id)}`;
 export function routePageId(path=location.pathname,base=appBase.pathname):string|undefined|null {
   if(path===base||path===`${base}index.html`)return undefined;
   if(!path.startsWith(`${base}page/`))return null;
   const encoded=path.slice(`${base}page/`.length).replace(/\/$/,'');
   if(!encoded||encoded.includes('/'))return null;
-  try{return decodeURIComponent(encoded);}catch{return null;}
+  try{const id=decodeURIComponent(encoded);return id.startsWith('~')?id.slice(1):id;}catch{return null;}
 }
 export function followPageLink(event:MouseEvent,navigate:()=>unknown) {
   if(event.defaultPrevented||event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;

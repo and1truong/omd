@@ -31,7 +31,7 @@ try {
     const value = await registry.executeTool(tool, major < 155 ? JSON.stringify(input) : input);
     if (typeof value === 'string') { try { return JSON.parse(value); } catch { return value; } } return value;
   }, { name, input });
-  const settle=(target=page)=>target.evaluate(async()=>{const app=await import(new URL('./src/app.js',location.href).href);await app.flushDiagrams();await app.getStore().idle();});
+  const settle=(target=page)=>target.evaluate(async()=>{const app=await import(new URL('./src/app.js',document.baseURI).href);await app.flushDiagrams();await app.getStore().idle();});
   let notebook = await call('get_notebook');
   for (const b of notebook.blocks) await call('remove_block', { blockId: b.id });
   await call('set_page', { title: 'My verified day', notificationMode: 'toast' });
@@ -60,9 +60,9 @@ try {
   await page.getByRole('button',{name:'Page actions for A second page',exact:true}).click();await settle();
   await page.locator('#page-actions-dialog').getByRole('button',{name:'Move page down',exact:true}).click();await settle();
   assert.equal((await call('list_pages'))[1].pageId,createdPage);
-  await page.getByRole('button',{name:'Switch to A second page',exact:true}).click();await settle();
+  await page.getByRole('link',{name:'Switch to A second page',exact:true}).click();await settle();
   await page.waitForFunction(()=>document.getElementById('app-page-title').textContent==='A second page');
-  await page.getByRole('button',{name:'Switch to My verified day',exact:true}).click();await settle();
+  await page.getByRole('link',{name:'Switch to My verified day',exact:true}).click();await settle();
   // Create parent/child/grandchild pages through both sidebar and page menus.
   const treeRoot=(await call('page_add',{title:'Tree root'})).pageId;
   await page.getByRole('button',{name:'Page actions for Tree root',exact:true}).click();await settle();await page.locator('#page-actions-dialog').getByRole('button',{name:'Add subpage',exact:true}).click();await settle();
@@ -70,13 +70,13 @@ try {
   await page.locator('#page-menu > summary').click();await settle();await page.getByRole('button',{name:'New subpage',exact:true}).click();await settle();await page.locator('#page-title').fill('Milestone');const treeLeaf=(await call('get_notebook')).id;
   await call('add_block',{type:'text',text:'Nested page content'});
   assert.equal((await call('list_pages')).find(p=>p.pageId===treeLeaf).depth,2);
-  assert.ok(await page.getByRole('button',{name:'Open parent page Tree root',exact:true}).isVisible());assert.ok(await page.getByRole('button',{name:'Open parent page Project branch',exact:true}).isVisible());
+  assert.ok(await page.getByRole('link',{name:'Open parent page Tree root',exact:true}).isVisible());assert.ok(await page.getByRole('link',{name:'Open parent page Project branch',exact:true}).isVisible());
   await mkdir(`${root}/test-results`,{recursive:true});await page.screenshot({path:`${root}/test-results/page-tree.png`});
   await page.getByRole('button',{name:'Collapse subpages of Tree root',exact:true}).click();await settle();assert.equal(await page.locator(`.sidebar-page[data-page-id="${treeLeaf}"]`).count(),0);
   await page.reload();await page.waitForFunction(()=>document.getElementById('agent-status').textContent.includes('50 tools'));
   assert.equal((await call('get_notebook')).id,treeLeaf);assert.equal(await page.locator(`.sidebar-page[data-page-id="${treeLeaf}"]`).count(),0);
   await page.keyboard.press('Control+k');await page.locator('#page-search').fill('Milestone');await page.locator('#page-search').press('Enter');await settle();
-  assert.ok(await page.getByRole('button',{name:'Switch to Milestone',exact:true}).isVisible());assert.equal(await page.getByRole('textbox',{name:'text content',exact:true}).innerText(),'Nested page content');
+  assert.ok(await page.getByRole('link',{name:'Switch to Milestone',exact:true}).isVisible());assert.equal(await page.getByRole('textbox',{name:'text content',exact:true}).innerText(),'Nested page content');
   await call('page_move',{pageId:treeRoot,parentId:createdPage});assert.equal((await call('list_pages')).find(p=>p.pageId===treeLeaf).depth,3);
   await page.getByRole('button',{name:'Page actions for Tree root',exact:true}).click();await settle();await page.locator('#page-actions-dialog').getByRole('button',{name:'Move to…',exact:true}).click();await settle();
   assert.equal(await page.locator(`#page-parent-target option[value="${treeLeaf}"]`).count(),0,'Move picker must exclude descendant destinations.');
@@ -205,7 +205,7 @@ try {
   // The left 200px is Excalidraw's shape-properties panel, not the drawing area.
   const drawX=bounds.x+bounds.width*.55,drawY=bounds.y+bounds.height*.45;
   await page.mouse.move(drawX,drawY);await page.mouse.down();await page.mouse.move(drawX+160,drawY+100,{steps:6});await page.mouse.up();
-  await page.waitForFunction(async id=>(await import(new URL('./src/app.js',location.href).href)).getStore().getRenderState().blocks.some(b=>b.id===id&&b.scene?.elements.length>0),drawing.id);
+  await page.waitForFunction(async id=>(await import(new URL('./src/app.js',document.baseURI).href)).getStore().getRenderState().blocks.some(b=>b.id===id&&b.scene?.elements.length>0),drawing.id);
   await mkdir(`${root}/test-results`,{recursive:true});await page.screenshot({path:`${root}/test-results/full-canvas.png`,fullPage:true});
   await page.getByRole('button',{name:'Back to notebook',exact:true}).click();await settle();
   assert.ok((await call('get_notebook')).blocks.find(b=>b.id===drawing.id).scene.elements.length>0);
@@ -248,7 +248,7 @@ try {
   await page.screenshot({path:`${root}/test-results/mobile-drawer.png`});
   await page.keyboard.press('Shift+Tab');assert.ok(await page.evaluate(()=>document.getElementById('sidebar').contains(document.activeElement)),'Native modal must trap focus.');
   await page.keyboard.press('Tab');assert.ok(await page.evaluate(()=>document.activeElement===document.getElementById('sidebar-close')),'Drawer focus must wrap in both directions.');
-  await page.getByRole('button',{name:'Switch to A second page',exact:true}).click();await settle();assert.ok(await page.locator('#sidebar').isHidden());
+  await page.getByRole('link',{name:'Switch to A second page',exact:true}).click();await settle();assert.ok(await page.locator('#sidebar').isHidden());
   assert.equal(await page.locator('#page-title').inputValue(),'A second page');await call('page_select',{pageId:firstPage});
   await page.keyboard.press('Control+k');await page.locator('#page-search').fill('Mobile subpage');await page.locator('#page-create-parent').selectOption(createdPage);await settle();await page.getByRole('button',{name:'+ Create “Mobile subpage”',exact:true}).click();await settle();const mobileChild=(await call('get_notebook')).id;
   assert.equal((await call('list_pages')).find(p=>p.pageId===mobileChild).parentId,createdPage);
@@ -256,7 +256,7 @@ try {
   await call('set_view',{sidebarOpen:true});await page.keyboard.press('Escape');assert.ok(await page.locator('#sidebar').isHidden());
   await page.locator('#page-width').click();await settle();assert.equal((await call('get_view')).contentWidth,'wide');await page.locator('#page-width').click();await settle();
   // A failed localStorage preference write must leave the visible layout unchanged.
-  await page.evaluate(async()=>{const {VIEW_KEY}=await import(new URL('./src/view.js',location.href).href);window.omdOriginalSet=Storage.prototype.setItem;Storage.prototype.setItem=function(key,value){if(key===VIEW_KEY)throw new DOMException('quota','QuotaExceededError');return window.omdOriginalSet.call(this,key,value);};});
+  await page.evaluate(async()=>{const {VIEW_KEY}=await import(new URL('./src/view.js',document.baseURI).href);window.omdOriginalSet=Storage.prototype.setItem;Storage.prototype.setItem=function(key,value){if(key===VIEW_KEY)throw new DOMException('quota','QuotaExceededError');return window.omdOriginalSet.call(this,key,value);};});
   await page.locator('#page-width').click();await settle();assert.equal(await page.locator('#page-width').getAttribute('aria-pressed'),'false');assert.equal(await page.locator('#page-width').innerText(),'Fixed');assert.equal(await page.locator('body').getAttribute('data-content-width'),'reading');
   await page.evaluate(()=>{Storage.prototype.setItem=window.omdOriginalSet;delete window.omdOriginalSet;});
   const menuBlock=(await call('add_block',{type:'text',text:'Context menu fixture'})).block;
@@ -295,15 +295,17 @@ try {
   releaseEngine();await racePage.locator('.excalidraw canvas').first().waitFor();
   // A rendered initial scene is normalized and saved by onChange. The normalized
   // data must still be the agent's newest shape, never the old empty snapshot.
-  await racePage.waitForFunction(async id=>{const b=(await import(new URL('./src/app.js',location.href).href)).getStore().getRenderState().blocks.find(b=>b.id===id);return b.scene.elements[0]?.id==='edited-during-download'&&b.scene.elements[0]?.version!==undefined;},drawing.id);
+  await racePage.waitForFunction(async id=>{const b=(await import(new URL('./src/app.js',document.baseURI).href)).getStore().getRenderState().blocks.find(b=>b.id===id);return b.scene.elements[0]?.id==='edited-during-download'&&b.scene.elements[0]?.version!==undefined;},drawing.id);
   // Other native tabs reload committed data through BroadcastChannel and keep only the destination page resident.
   const peer=await raceContext.newPage();peer.on('pageerror',error=>errors.push(error.message));await peer.goto(appURL);await peer.waitForFunction(()=>document.getElementById('agent-status').textContent.includes('50 tools'));
   await call('set_page',{title:'Shared IndexedDB edit'},racePage);await peer.waitForFunction(()=>document.getElementById('page-title').value==='Shared IndexedDB edit');
   const residentFirst=(await call('get_notebook',{},racePage)).id;
   const residentSecond=(await call('page_add',{title:'Hydrated destination'},racePage)).pageId;
-  await peer.waitForFunction(()=>document.getElementById('page-title').value==='Hydrated destination');
-  assert.deepEqual(await peer.evaluate(async()=>{const store=(await import(new URL('./src/app.js',location.href).href)).getStore();const {pageId,recordCount}=store.residency();return {pageId,recordCount};}),{pageId:residentSecond,recordCount:2});
-  await call('page_select',{pageId:residentFirst},racePage);await peer.waitForFunction(()=>document.getElementById('page-title').value==='Shared IndexedDB edit');
+  await peer.waitForFunction(async()=> (await import(new URL('./src/app.js',document.baseURI).href)).getStore().listPages().some(p=>p.title==='Hydrated destination'));
+  assert.equal(await peer.locator('#page-title').inputValue(),'Shared IndexedDB edit');
+  await call('page_select',{pageId:residentSecond},peer);
+  assert.deepEqual(await peer.evaluate(async()=>{const store=(await import(new URL('./src/app.js',document.baseURI).href)).getStore();const {pageId,recordCount}=store.residency();return {pageId,recordCount};}),{pageId:residentSecond,recordCount:2});
+  await call('page_select',{pageId:residentFirst},racePage);assert.equal(await peer.locator('#page-title').inputValue(),'Hydrated destination');await call('page_select',{pageId:residentFirst},peer);
   assert.ok((await call('get_notebook',{},peer)).blocks[0].scene.elements.length>0);
   await peer.close();
   // Large palettes reveal the highlighted keyboard option without moving focus away from search.
