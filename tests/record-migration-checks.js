@@ -12,10 +12,10 @@ export async function migrationChecks({sourceRoot,extension='ts',startupVersion}
   const storage=()=>{const data=new Map();return {getItem:k=>data.get(k)??null,setItem:(k,v)=>data.set(k,v),entries:()=>[...data]};};
   const name=()=>`migration-${crypto.randomUUID()}`;
   const evidence=[];
-  async function snapshot(name){
-    const db=await req(indexedDB.open(name)),names=[...db.objectStoreNames],tx=db.transaction(names),completed=done(tx),stores={};
+  async function snapshot(name,existing){
+    const db=existing??await req(indexedDB.open(name)),names=[...db.objectStoreNames],tx=db.transaction(names),completed=done(tx),stores={};
     await Promise.all(names.map(async name=>{const store=tx.objectStore(name);const [keys,values]=await Promise.all([req(store.getAllKeys()),req(store.getAll())]);stores[name]={keyPath:store.keyPath,indexes:[...store.indexNames].map(n=>({name:n,keyPath:store.index(n).keyPath})),keys,values};}));
-    await completed;const result={version:db.version,stores};db.close();return result;
+    await completed;const result={version:db.version,stores};if(!existing)db.close();return result;
   }
   function fixture(){
     const page=emptyNotebook();page.id='p:á/"一';page.title='Giữ nguyên';page.revision=17;
@@ -99,6 +99,16 @@ export async function migrationChecks({sourceRoot,extension='ts',startupVersion}
   }
   for(const version of [1,2,3]){const dbName=name();await seed(dbName,version);const empty=await createStore(storage(),{name:dbName,initial:emptyNotebook});check((await empty.getNotebook()).pages.length===1,'Empty legacy database failed');check((await snapshot(dbName)).version===4,'Empty legacy database did not upgrade');await empty.close();evidence.push({case:`empty v${version} → initialized v4`,passed:true});}
   const data=storage(),fresh=await createStore(data,{name:name(),initial:emptyNotebook});check((await fresh.getNotebook()).pages.length===1,'New install failed');await fresh.close();
+  for(const version of [1,2,3]){
+    const dbName=name(),f=fixture(),data=storage();await seed(dbName,version,f);data.setItem(STORAGE_KEY,JSON.stringify(f.book));const sources=data.entries(),legacy=await req(indexedDB.open(dbName,version)),before=await snapshot(dbName,legacy);let opening;
+    const factory={open:(...args)=>(opening=indexedDB.open(...args))};
+    await rejects(()=>openRepository(data,{name:dbName,indexedDB:factory,initial:emptyNotebook}),/blocked.*Save.*close.*reload.*intact/);
+    equal(await snapshot(dbName,legacy),before,'Blocked upgrade changed legacy data');equal(data.entries(),sources,'Blocked upgrade changed recovery sources');
+    const cancelled=new Promise((resolve,reject)=>{opening.addEventListener('error',resolve,{once:true});opening.addEventListener('success',()=>reject(new Error('Rejected upgrade continued in the background')),{once:true});});legacy.close();await cancelled;
+    equal(await snapshot(dbName),before,'Late blocked upgrade changed schema/data before reload');
+    const retry=await openRepository(data,{name:dbName,initial:emptyNotebook});equal(await retry.export(),f.book,'Blocked upgrade retry lost data');retry.close();
+    evidence.push({case:`v${version} legacy tab without versionchange handler / actionable blocked error / no late upgrade / retry`,passed:true});
+  }
   for(const version of [1,2,3]){
     const dbName=name(),f=fixture();await seed(dbName,version,f);const legacy=await req(indexedDB.open(dbName,version));let changed=false;legacy.onversionchange=()=>{changed=true;legacy.close();};
     const current=await openRepository(storage(),{name:dbName,initial:emptyNotebook});check(changed,'Legacy connection did not receive versionchange');let stale=false;try{legacy.transaction('records','readwrite');}catch{stale=true;}check(stale,'Closed legacy writer can still transact');current.close();

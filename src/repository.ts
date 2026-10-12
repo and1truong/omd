@@ -79,6 +79,7 @@ export async function openRepository(storage:StorageLike,{key=STORAGE_KEY,name='
   const opening=indexedDB.open(name,4);let upgradeError:Error|undefined;
   opening.onupgradeneeded=event=>{
     const db=opening.result,tx=opening.transaction!;
+    if(upgradeError){tx.abort();return;}
     const fail=(error:unknown)=>{upgradeError??=new Error(`Notebook database upgrade failed. The previous database and localStorage recovery sources are intact. ${errorOf(error).message}`);try{tx.abort();}catch{}};
     try{
       if(event.oldVersion===0){
@@ -87,7 +88,11 @@ export async function openRepository(storage:StorageLike,{key=STORAGE_KEY,name='
       }else migrate(db,tx,fail);
     }catch(error){fail(error);}
   };
-  const db=await request(opening).catch(error=>{throw upgradeError??error;});let obsolete=false;db.onversionchange=()=>{obsolete=true;db.close();};
+  const db=await new Promise<IDBDatabase>((resolve,reject)=>{
+    opening.onblocked=()=>{upgradeError=new Error('Notebook database upgrade is blocked by another open window. Save your changes and close all other omd tabs/windows, then reload this window. Your saved database and localStorage recovery sources are intact.');reject(upgradeError);};
+    opening.onsuccess=()=>{if(upgradeError)opening.result.close();else resolve(opening.result);};
+    opening.onerror=()=>reject(upgradeError??opening.error);
+  });let obsolete=false;db.onversionchange=()=>{obsolete=true;db.close();};
   const stores=['meta','records','reminders','history','delivery'];
   function transaction(mode:IDBTransactionMode='readonly'){if(obsolete)throw new Error('The notebook database was upgraded in another window. Reload before editing.');const tx=db.transaction(stores,mode);return {tx,done:completion(tx)};}
   function reminder(tx:IDBTransaction,record:StoredRecord) {
