@@ -49,3 +49,16 @@ test('preedit ends before final acknowledgement and a new composition remains ac
   releases.shift()();await new Promise(resolve=>setImmediate(resolve));assert.equal(guard.isComposing(input),true);assert.equal(guard.isPreediting(input),true);assert.equal(settled,0);
   input.dispatchEvent(new Event('compositionend'));assert.equal(guard.isPreediting(input),false);await Promise.resolve();releases.shift()();await guard.settled();assert.equal(guard.hasActive(),false);assert.equal(settled,1);
 });
+test('superseded composition generations stay in scoped barriers until their final writes finish',async()=>{
+  const guard=createCompositionGuard(),input=new EventTarget(),other=new EventTarget();let release,started,firstCurrent,settlements=0;
+  const began=new Promise(resolve=>started=resolve),pending=new Promise(resolve=>release=resolve);let writes=0;
+  guard.track(input,async(_pageId,{isCurrent})=>{if(++writes===1){firstCurrent=isCurrent;started();await pending;}},()=> 'page');
+  guard.track(other,()=>{},()=> 'other');input.dispatchEvent(new Event('compositionstart'));assert.equal(guard.isPreediting(input),true);
+  input.dispatchEvent(new Event('compositionend'));await began;assert.equal(guard.isPreediting(input),false);assert.equal(firstCurrent(),true);
+  const waiting=guard.settled(target=>target===input).then(()=>settlements++);
+  input.dispatchEvent(new Event('compositionstart'));assert.equal(firstCurrent(),false);assert.equal(guard.isPreediting(input),true);
+  input.dispatchEvent(new Event('compositionend'));await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(guard.isPreediting(input),false);assert.equal(guard.isComposing(input),true);assert.equal(settlements,0);
+  other.dispatchEvent(new Event('compositionstart'));release();await waiting;assert.equal(guard.isComposing(input),false);assert.equal(guard.isPreediting(other),true);
+  other.dispatchEvent(new Event('compositionend'));await guard.settled();assert.equal(guard.hasActive(),false);
+});
