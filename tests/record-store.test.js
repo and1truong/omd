@@ -25,7 +25,7 @@ test('changing pages releases payloads; metadata navigation never reads unrelate
   await store.dispatch('add_block',{type:'excalidraw',scene});await store.dispatch('page_select',{pageId:first});const writes=trace(store);
   try {await store.dispatch('update_block',{blockId:store.getRenderState().blocks[0].id,patch:{text:'edit'}});store.listPages();await store.reload();
     assert.deepEqual(writes.reads,[]);assert.equal(store.residency().pageId,first);assert.equal(store.residency().recordCount,3);
-    writes.clear();await store.dispatch('page_select',{pageId:second});assert.deepEqual(writes.reads,[second]);assert.equal(store.residency().recordCount,4);
+    writes.clear();await store.dispatch('page_select',{pageId:second});assert.deepEqual(writes.reads,[second]);assert.equal(store.residency().recordCount,5);
   }finally{writes.stop();store.close();}
 });
 test('canvas title changes do not read or write scene records',async()=>{
@@ -64,4 +64,28 @@ test('a failed initial record write aborts migration completely and the unchange
   const put=IDBObjectStore.prototype.put;IDBObjectStore.prototype.put=function(...args){if(this.name==='records')throw new DOMException('Could not save: quota.','QuotaExceededError');return put.apply(this,args);};
   try{await assert.rejects(()=>createStore(data),/quota/);}finally{IDBObjectStore.prototype.put=put;}
   assert.equal(data.getItem(STORAGE_KEY),raw);const restored=await createStore(data);assert.equal(restored.getState().blocks[0].text,'original');restored.close();
+});
+async function journalRows(store){return new Promise((resolve,reject)=>{const opening=indexedDB.open(store.databaseName());opening.onerror=()=>reject(opening.error);opening.onsuccess=()=>{const db=opening.result,tx=db.transaction('history'),get=tx.objectStore('history').getAll();get.onsuccess=()=>resolve(get.result);get.onerror=()=>reject(get.error);tx.oncomplete=()=>db.close();};});}
+test('redo branches, reload and close prune unreachable journals without deleting another open store history',async()=>{
+  const data=memory(),a=await createStore(data,{initial:emptyNotebook});await a.dispatch('set_page',{title:'one'});await a.dispatch('set_page',{title:'two'});assert.equal((await journalRows(a)).length,2);
+  await a.undo();await a.dispatch('set_page',{title:'three'});assert.equal((await journalRows(a)).length,2,'Abandoned redo journal must be deleted in the new commit.');
+  const b=await createStore(data);await b.dispatch('set_page',{title:'four'});await a.reload();assert.equal((await journalRows(b)).length,1);await a.close();assert.equal((await journalRows(b)).length,1);
+  await b.undo();assert.equal(b.getState().title,'three');await b.close();assert.equal((await journalRows(b)).length,0);
+});
+test('Web Lock leases preserve live tab journals and reclaim abandoned session journals on reopening',async()=>{
+  const held=new Map();const locks={request(name,options,callback){if(typeof options==='function'){callback=options;options={};}if(held.has(name))return Promise.resolve(callback(null));held.set(name,true);const result=Promise.resolve(callback({name}));result.finally(()=>held.delete(name));return result;}};
+  const data=memory(),a=await createStore(data,{initial:emptyNotebook,locks});await a.dispatch('set_page',{title:'saved'});
+  const b=await createStore(data,{locks});assert.equal((await journalRows(b)).length,1,'A live session keeps its journal.');await b.close();
+  held.clear(); // Simulate a killed document: the browser releases its Web Locks.
+  const c=await createStore(data,{locks});assert.equal((await journalRows(c)).length,0);assert.equal(c.getState().title,'saved');await a.close();await c.close();
+});
+test('drawing edits neither rewrite unchanged image bytes nor duplicate them into the undo journal',async()=>{
+  const store=await createStore(memory(),{initial:emptyNotebook}),scene=makeBlock('excalidraw').scene;scene.files.image={id:'image',dataURL:'data:image/png;base64,'+'A'.repeat(200000)};
+  const id=(await store.dispatch('add_block',{type:'excalidraw',scene})).blockId,changed=structuredClone(store.getRenderState().blocks[0].scene);changed.elements.push({id:'shape',type:'rectangle',x:1,y:1,width:50,height:50});const writes=trace(store);
+  try{await store.dispatch('update_block',{blockId:id,patch:{scene:changed}});assert.ok(!writes.puts.some(p=>p.store==='records'&&p.key.includes('$files:')));assert.ok(!JSON.stringify(writes.puts.find(p=>p.store==='history').value).includes('data:image'));await store.undo();assert.equal(store.getRenderState().blocks[0].scene.elements.length,0);assert.equal(store.getRenderState().blocks[0].scene.files.image.dataURL,scene.files.image.dataURL);}finally{writes.stop();await store.close();}
+});
+test('older IndexedDB scene records upgrade atomically to separate image-file maps',async()=>{
+  const data=memory(),name=`old-preview-${crypto.randomUUID()}`,page=emptyNotebook(),drawing=makeBlock('excalidraw'),book=wrapPage(page);drawing.scene.files.image={id:'image',dataURL:'data:image/png;base64,AA=='};
+  await new Promise((resolve,reject)=>{const opening=indexedDB.open(name,1);opening.onupgradeneeded=()=>{const db=opening.result;db.createObjectStore('meta');db.createObjectStore('records').createIndex('pageId','pageId');db.createObjectStore('reminders').createIndex('due','due');db.createObjectStore('history');db.createObjectStore('delivery');};opening.onerror=()=>reject(opening.error);opening.onsuccess=()=>{const db=opening.result,tx=db.transaction(['meta','records'],'readwrite'),records=tx.objectStore('records');tx.objectStore('meta').put(book,'book');const add=(id,kind,record)=>{const key=JSON.stringify([page.id,id]);records.put({key,kind,pageId:page.id,data:record},key);};const {blocks,...metadata}=page;add('$page','page',metadata);add('$container:page','container',{id:'page',blockIds:[drawing.id]});add(`$block:${drawing.id}`,'block',{id:drawing.id,type:'excalidraw',title:drawing.title});add(`$scene:${drawing.id}`,'scene',drawing.scene);tx.oncomplete=()=>{db.close();resolve();};tx.onabort=()=>reject(tx.error);};});
+  const {createStore:openStore}=await import('../src/store.js'),store=await openStore(data,{name,initial:emptyNotebook});assert.deepEqual(store.getRenderState().blocks[0].scene,drawing.scene);assert.equal(store.residency().recordCount,5);await store.close();
 });

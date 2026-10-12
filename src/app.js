@@ -303,7 +303,7 @@ async function boot() {
   palette = setupPalette(store, { onError: error => notify(error.message, 'error', true), beforeOpen:()=>shell.closeMobile(), beforeNavigate:()=>diagrams.beforeNavigate() });
   let fitFrame;window.addEventListener('resize',()=>{cancelAnimationFrame(fitFrame);fitFrame=requestAnimationFrame(()=>{for(const el of document.querySelectorAll('[data-autofit],.auto-height'))fit(el);});});
   $('#canvas-stage-close').addEventListener('click',closeCanvas);$('#canvas-stage-pages').addEventListener('click',openPalette);
-  window.addEventListener('pagehide',flushDiagrams);window.addEventListener('beforeunload',flushDiagrams);
+  window.addEventListener('pagehide',event=>{flushDiagrams().then(()=>{if(!event.persisted)return store.close();}).catch(error=>notify(error.message,'error',true));});window.addEventListener('beforeunload',flushDiagrams);
   for (const [selector, key] of [['#page-title', 'title'], ['#page-subtitle', 'subtitle']]) {
     const el = $(selector); let composing = false;
     const write = () => { action('set_page', { [key]: el.value }, { quiet: true }); fit(el); };

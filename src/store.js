@@ -7,6 +7,12 @@ enablePatches();
 /** Serialized events, immutable selectors, durable record transactions. Only the active page is resident. */
 export async function createStore(storage, options = {}) {
   const repository=await openRepository(storage,{key:STORAGE_KEY,initial:initialNotebook,...options});
+  const owner=crypto.randomUUID(),locks=options.locks??globalThis.navigator?.locks;let releaseLease;
+  if(locks?.request){
+    let readyLease,rejectLease;const ready=new Promise((resolve,reject)=>{readyLease=resolve;rejectLease=reject;});
+    locks.request(`${repository.name}.history:${owner}`,()=>{readyLease();return new Promise(resolve=>{releaseLease=resolve;});}).catch(rejectLease);await ready;
+    for(const previous of await repository.historyOwners())await locks.request(`${repository.name}.history:${previous}`,{ifAvailable:true},async lock=>{if(lock)await repository.pruneOwner(previous);});
+  }
   let loaded=await repository.read(),materialize=makeMaterializer();
   validateNotebook(materialize(loaded.records,loaded.meta.activePageId));
   const state=createZustandStore(subscribeWithSelector(()=>({meta:null,records:new Map(),options:{},page:null})));
@@ -27,8 +33,8 @@ export async function createStore(storage, options = {}) {
     });return {key,forward,inverse};});}
   async function commit(next,changes,event,{history=true,journal}={}) {
     const current=state.getState();const id=history?crypto.randomUUID():null;
-    const entry=history?{before:current.meta,after:next,changes:patchChanges(changes)}:journal;
-    const hydrated=await repository.commit(current.meta,next,changes,{journal:history?entry:null,journalId:id});
+    const entry=history?{owner,before:current.meta,after:next,changes:patchChanges(changes)}:journal;
+    const hydrated=await repository.commit(current.meta,next,changes,{journal:history?entry:null,journalId:id,deleteHistory:history?[...redoStack]:[]});
     if(history){undoStack.push(id);redoStack.length=0;}
     let records;
     if(next.activePageId===current.meta.activePageId){records=new Map(current.records);for(const c of changes)if((c.after??c.before)?.pageId===next.activePageId){if(c.after)records.set(c.key,c.after);else records.delete(c.key);}}
@@ -74,16 +80,16 @@ export async function createStore(storage, options = {}) {
       },['page_select','page_add','page_remove','import_notebook'].includes(action));
     },
     subscribe(fn){return state.subscribe(s=>s.meta,()=>{const s=state.getState();fn(s.page,s.options);});},
-    subscribeBlock(id,fn){return state.subscribe(s=>[s.records.get(recordKey(s.meta.activePageId,`$block:${id}`))?.data,s.records.get(recordKey(s.meta.activePageId,`$scene:${id}`))?.data],()=>fn(state.getState().page,state.getState().options),{equalityFn:(a,b)=>a[0]===b[0]&&a[1]===b[1]});},
+    subscribeBlock(id,fn){return state.subscribe(s=>[s.records.get(recordKey(s.meta.activePageId,`$block:${id}`))?.data,s.records.get(recordKey(s.meta.activePageId,`$scene:${id}`))?.data,s.records.get(recordKey(s.meta.activePageId,`$files:${id}`))?.data],()=>fn(state.getState().page,state.getState().options),{equalityFn:(a,b)=>a[0]===b[0]&&a[1]===b[1]&&a[2]===b[2]});},
     subscribeContainer(id,fn){return state.subscribe(s=>s.records.get(recordKey(s.meta.activePageId,`$container:${id}`))?.data.blockIds,()=>fn(state.getState().page,state.getState().options));},
     export:async()=>JSON.stringify(await api.getNotebook(),null,2),
     import(raw,options){return api.dispatch('import_notebook',{notebook:parseBook(raw)},options);},
-    reload(){return enqueue(async()=>{const current=state.getState(),loaded=await repository.read(current.meta);if(!loaded)throw new Error('Saved notebook is missing.');if(loaded.meta.id===current.meta.id&&loaded.meta.revision===current.meta.revision)return;undoStack.length=redoStack.length=0;materialize=makeMaterializer();publish(loaded.meta,loaded.records,{reset:true});});},
+    reload(){return enqueue(async()=>{const current=state.getState(),loaded=await repository.read(current.meta);if(!loaded)throw new Error('Saved notebook is missing.');if(loaded.meta.id===current.meta.id&&loaded.meta.revision===current.meta.revision)return;await repository.pruneHistory([...undoStack,...redoStack]);undoStack.length=redoStack.length=0;materialize=makeMaterializer();publish(loaded.meta,loaded.records,{reset:true});});},
     dueReminders:now=>repository.due(now),
     canUndo:()=>undoStack.length>0,canRedo:()=>redoStack.length>0,
     undo:()=>restore(undoStack,redoStack,'inverse'),redo:()=>restore(redoStack,undoStack,'forward'),
     idle:()=>queue,
-    close(){closed=true;channel?.close();channel=null;repository.close();},
+    async close(){closed=true;channel?.close();channel=null;await queue;try{await repository.pruneOwner(owner);}finally{releaseLease?.();repository.close();}},
     // Read-only diagnostic: no page data is retained by this descriptor.
     residency:()=>({pageId:api.getActivePageId(),pageCount:state.getState().meta.pages.length,recordCount:state.getState().records.size,undoEntries:undoStack.length})
   };

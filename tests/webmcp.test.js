@@ -73,3 +73,8 @@ test('agent cancellation does not apply an imported page', async () => {
   const result = await tools.find(t => t.name === 'omd_import_notebook').execute({ json: (await store.export()) }, { signal: signal.signal });
   assert.equal(result.imported, false);
 });
+test('canvas tools wait for async UI completion and propagate rejected operations',async()=>{
+  const store=await setup();let release,finished=false;const gate=new Promise(resolve=>{release=resolve;});const tools=createTools(store,{openCanvas:async()=>{await gate;finished=true;},closeCanvas:async()=>{throw new Error('Could not save canvas.');}});
+  const opening=call(tools,'open_canvas',{blockId:'canvas'});await new Promise(resolve=>setImmediate(resolve));assert.equal(finished,false);release();assert.deepEqual(await opening,{opened:true});assert.equal(finished,true);
+  await assert.rejects(()=>call(tools,'close_canvas'),/Could not save/);await store.close();
+});

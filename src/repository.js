@@ -5,8 +5,17 @@ const request=req=>new Promise((resolve,reject)=>{req.onsuccess=()=>resolve(req.
 const completion=tx=>new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error??new Error('Could not save. The database transaction was aborted; your last saved data is intact.'));tx.onerror=()=>{};});
 export async function openRepository(storage,{key=STORAGE_KEY,name='omd.notebook.records.v1',indexedDB=globalThis.indexedDB,initial}={}) {
   if(!indexedDB)throw new Error('IndexedDB is unavailable. Enable browser storage to use omd.');
-  const opening=indexedDB.open(name,1);
-  opening.onupgradeneeded=()=>{const db=opening.result;db.createObjectStore('meta');const records=db.createObjectStore('records');records.createIndex('pageId','pageId');const reminders=db.createObjectStore('reminders');reminders.createIndex('due','due');db.createObjectStore('history');db.createObjectStore('delivery');};
+  const opening=indexedDB.open(name,3);
+  opening.onupgradeneeded=()=>{
+    const db=opening.result,tx=opening.transaction;
+    if(!db.objectStoreNames.contains('meta')){
+      db.createObjectStore('meta');const records=db.createObjectStore('records');records.createIndex('pageId','pageId');
+      const reminders=db.createObjectStore('reminders');reminders.createIndex('due','due');db.createObjectStore('history');db.createObjectStore('delivery');
+    }
+    const history=tx.objectStore('history');history.clear();if(!history.indexNames.contains('owner'))history.createIndex('owner','owner');
+    // Earlier record-store previews embedded files in scenes. Upgrade those records in the same schema transaction.
+    const records=tx.objectStore('records'),cursor=records.openCursor();cursor.onsuccess=()=>{const row=cursor.result;if(!row)return;const value=row.value;if(value.kind==='scene'&&Object.hasOwn(value.data,'files')){const {files,...data}=value.data,blockId=JSON.parse(row.primaryKey)[1].slice('$scene:'.length),key=recordKey(value.pageId,`$files:${blockId}`);records.put({key,kind:'files',pageId:value.pageId,data:files},key);row.update({...value,data});}row.continue();};
+  };
   const db=await request(opening);db.onversionchange=()=>db.close();
   const stores=['meta','records','reminders','history','delivery'];
   function transaction(mode='readonly'){const tx=db.transaction(stores,mode);return {tx,done:completion(tx)};}
@@ -41,7 +50,7 @@ export async function openRepository(storage,{key=STORAGE_KEY,name='omd.notebook
     async export(){const {tx,done}=transaction();const meta=await request(tx.objectStore('meta').get('book'));const rows=await request(tx.objectStore('records').getAll());await done;const records=new Map(rows.map(r=>[r.key,r]));return {...meta,pages:meta.pages.map(p=>makeMaterializer()(records,p.id))};},
     async due(now){const {tx,done}=transaction();const rows=await request(tx.objectStore('reminders').index('due').getAll(IDBKeyRange.upperBound(now)));await done;return rows;},
     async history(id){const {tx,done}=transaction();const value=await request(tx.objectStore('history').get(id));await done;return value;},
-    async commit(expected,meta,changes,{journal,journalId,fail}={}) {
+    async commit(expected,meta,changes,{journal,journalId,deleteHistory=[],fail}={}) {
       const {tx,done}=transaction('readwrite');let resident;
       try {
         const latest=await request(tx.objectStore('meta').get('book'));
@@ -53,11 +62,15 @@ export async function openRepository(storage,{key=STORAGE_KEY,name='omd.notebook
           change.after=value;
         }put(tx,change.key,value);}
         tx.objectStore('meta').put(meta,'book');
+        for(const id of deleteHistory)tx.objectStore('history').delete(id);
         if(journal)tx.objectStore('history').put(journal,journalId);
         if(fail)throw new Error('Injected transaction failure.');
         if(meta.activePageId!==expected.activePageId){const rows=await request(tx.objectStore('records').index('pageId').getAll(meta.activePageId));resident=new Map(rows.map(r=>[r.key,r]));}
       } catch(error){tx.abort();await done.catch(()=>{});throw error;}await done;return resident;
     },
+    async historyOwners(){const tx=db.transaction('history'),done=completion(tx),owners=[];await new Promise((resolve,reject)=>{const cursor=tx.objectStore('history').index('owner').openKeyCursor(null,'nextunique');cursor.onerror=()=>reject(cursor.error);cursor.onsuccess=()=>{if(!cursor.result)return resolve();owners.push(cursor.result.key);cursor.result.continue();};});await done;return owners;},
+    async pruneHistory(ids){if(!ids.length)return;const tx=db.transaction('history','readwrite'),done=completion(tx);for(const id of ids)tx.objectStore('history').delete(id);await done;},
+    async pruneOwner(owner){const tx=db.transaction('history','readwrite'),done=completion(tx);const ids=await request(tx.objectStore('history').index('owner').getAllKeys(owner));for(const id of ids)tx.objectStore('history').delete(id);await done;},
     close(){db.close();}
   };
 }
