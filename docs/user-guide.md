@@ -24,6 +24,8 @@ Text blocks use Tiptap: type Markdown shortcuts such as `## ` for a heading, `- 
 
 **Enter** creates a paragraph inside the current text block. **Shift+Enter** creates an empty text block immediately after the current text or heading block and moves the cursor to its start. The original block keeps all its content, including text after the cursor. This also works inside tabs, expandable blocks and accordion sections. Undo removes the insertion; redo restores it. While editing a text block, Cmd/Ctrl+Z and Cmd/Ctrl+Shift+Z use notebook undo/redo.
 
+Focus the text or heading editor before using **Shift+Enter**; the shortcut does not create blocks from the formatting toolbar or page title. While an input method is composing text (for example, Vietnamese preedit), block creation is suppressed to protect the unfinished text. Finish composition first, such as by committing the word with Space, then press **Shift+Enter**. With some input methods, the first press only commits composition; press again after it finishes.
+
 Text content is saved as Markdown in JSON backups and WebMCP's `text` field. Existing text loads without a storage migration or automatic rewrite. Editor libraries are bundled and cached for offline writing. Switching pages or hiding a section releases its editor and retains the saved content.
 
 ## Checklists
