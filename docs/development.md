@@ -45,6 +45,10 @@ The checklist browser suite checks four-level nesting, sibling ordering, Enter/T
 
 The editor browser suite covers Tiptap Markdown rendering, formatting, paste, Shift+Enter insertion and cursor transfer, ordinary Enter, nested containers, history, selection, composition, safe rendering, persistence and touch controls. It stops the real server to verify offline reopening and editing with cached libraries. CI runs it on Chromium and WebKit at the origin root and `/omd/`.
 
+`npm run test:migration` checks actual IndexedDB v1/v2/v3 → v4 upgrades, full notebook identity (including hidden containers and image bytes), native keys, failure/rollback/retry, malformed data, reminders, undo/redo and real app startup. Set `OMD_BROWSER=webkit` and/or `OMD_BASE_PATH=/omd` for the other CI combinations. Native schema/key inspection is written to `test-results/record-migration-*.json`.
+
+Schema v4 keeps the same database name. A single versionchange transaction copies legacy records into a native `['pageId','kind','id']` keyPath store, separates embedded scene files, validates the notebook, and replaces the old stores. Reminder keys become `[pageId,id]`, delivery ledger keys become `[pageId,id,dueAt]`, and journals use native record tuples. Only transient legacy undo journals are invalidated, matching earlier schema upgrades; notebook metadata, reminders, fired-delivery payloads and localStorage recovery bytes are retained. Malformed/ambiguous rows or any write failure abort the entire upgrade, including schema changes, so the previous database can be inspected and retried. Existing connections close on versionchange; an obsolete repository rejects further edits until reload.
+
 ## Static hosting and GitHub Pages
 
 Run `npm run build` and serve `dist` from a static HTTPS host. Relative asset, manifest and worker URLs support deployment beneath a subpath.
