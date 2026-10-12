@@ -332,11 +332,12 @@ function renderTabs(shell:HTMLElement,b:BlockOf<'tabs'>) {
         const value=input.value;
         pending=Promise.resolve().then(async()=>{
           input.disabled=true;
+          recovery?.querySelectorAll('button').forEach(button=>button.disabled=true);
           if(value!==original)await store.dispatch('tab_update',{pageId,blockId:b.id,tabId:t.id,title:value},{quiet:true});
           editTab.textContent=value||'Untitled';editTab.setAttribute('aria-label',`Open ${value||'tab'}`);editRename.setAttribute('aria-label',`Rename ${value||'Untitled'} tab`);close(focus);
-        }).catch(error=>{input.disabled=false;failed=true;recover();notify(errorOf(error).message,'error',true);throw error;}).finally(()=>{pending=undefined;});return pending;
+        }).catch(error=>{input.disabled=false;recovery?.querySelectorAll('button').forEach(button=>button.disabled=false);failed=true;recover();notify(errorOf(error).message,'error',true);throw error;}).finally(()=>{pending=undefined;});return pending;
       }
-      const observer=new MutationObserver(()=>{if(failed&&!finished)recover();else if(!input.isConnected){observer.disconnect();void finish().catch(()=>{});}});observer.observe(document.body,{childList:true,subtree:true});
+      const observer=new MutationObserver(()=>{if(failed&&!finished)recover();else if(!input.isConnected)void finish().catch(()=>{});});observer.observe(document.body,{childList:true,subtree:true});
       composition.track(input,()=>requested?finish(false,true).catch(()=>{}):undefined,()=>pageId);
       input.addEventListener('blur',()=>{if(!failed)void finish().catch(()=>{});});
       input.addEventListener('keydown',event=>{
@@ -346,6 +347,7 @@ function renderTabs(shell:HTMLElement,b:BlockOf<'tabs'>) {
       });
       tabTitleEdit=session;tab.hidden=rename.hidden=true;header.setAttribute('role','tab');for(const name of ['aria-label','aria-selected','aria-controls'])header.setAttribute(name,tab.getAttribute(name)!);header.append(input);input.focus();input.select();
     }
+    tab.addEventListener('mousedown',event=>{if(event.button===0&&event.detail===2){event.preventDefault();void beginEdit();}});
     tab.addEventListener('dblclick',()=>void beginEdit());
     tab.addEventListener('keydown', e => { const keys = b.orientation === 'horizontal' ? ['ArrowLeft', 'ArrowRight'] : ['ArrowUp', 'ArrowDown']; let n;
       if(e.key==='F2'){e.preventDefault();void beginEdit();return;}

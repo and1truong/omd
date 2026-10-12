@@ -154,9 +154,15 @@ async function failedRenameRecovery(orientation,nested=false) {
   await page.evaluate(()=>{window.savedCopy=navigator.clipboard.writeText; navigator.clipboard.writeText=value=>{window.copiedTabDraft=value;return Promise.resolve();};});
   await page.getByRole('button',{name:'Copy tab title draft',exact:true}).click();assert.equal(await page.evaluate(()=>window.copiedTabDraft),draft);assert.equal(await revision(),before);
   await call('page_select',{pageId:sourcePage});assert.equal(await header(id).locator('..').locator('.tab-title-input').count(),1);assert.equal(await titleInput().inputValue(),draft);
-  await restore();await page.getByRole('button',{name:'Retry tab rename',exact:true}).click();await settled();assert.equal(await titleOf(tabs,id),draft);assert.equal(await revision(),before+1);assert.equal(await page.evaluate(()=>window.tabsApp.getStore().residency().undoEntries),history+1);assert.equal(await page.locator('.tab-title-recovery').count(),0);
+  await restore();await page.evaluate(()=>{const store=window.tabsApp.getStore();window.retryDispatch=store.dispatch;store.dispatch=(name,...args)=>name==='tab_update'?new Promise(resolve=>{window.completeRetry=()=>resolve(window.retryDispatch(name,...args));}):window.retryDispatch(name,...args);});
+  await page.getByRole('button',{name:'Retry tab rename',exact:true}).click();assert.equal(await titleInput().isEnabled(),false);assert.equal(await page.getByRole('button',{name:'Cancel tab rename',exact:true}).isEnabled(),false);
+  await page.evaluate(()=>{window.tabsApp.getStore().dispatch=window.retryDispatch;window.completeRetry();});await settled();assert.equal(await titleOf(tabs,id),draft);assert.equal(await revision(),before+1);assert.equal(await page.evaluate(()=>window.tabsApp.getStore().residency().undoEntries),history+1);assert.equal(await page.locator('.tab-title-recovery').count(),0);
   await start('Cancel this composed draft');const ids=(await block(tabs.id)).tabs.map(t=>t.id);await reorder(tabs.id,ids.at(-1),ids[0],false,orientation);const cancelBefore=await revision();await end();
   await page.getByRole('button',{name:'Cancel tab rename',exact:true}).click();assert.equal(await titleInput().count(),0);assert.equal(await revision(),cancelBefore);await restore();assert.equal(await titleOf(tabs,id),draft);
+  await header(id).press('F2');await titleInput().fill('Disconnected plain draft');const detachedBefore=await revision();await fail();
+  await call('page_select',{pageId:destination});await page.getByRole('button',{name:'Retry tab rename',exact:true}).waitFor();assert.equal(await titleInput().inputValue(),'Disconnected plain draft');
+  await call('page_select',{pageId:sourcePage});assert.equal(await header(id).locator('..').locator('.tab-title-input').count(),1,'failed plain draft remains observed and reattaches after navigation');
+  await page.getByRole('button',{name:'Cancel tab rename',exact:true}).click();await restore();assert.equal(await revision(),detachedBefore);assert.equal(await titleOf(tabs,id),draft);
   await page.evaluate(()=>{navigator.clipboard.writeText=window.savedCopy;});await page.getByRole('button',{name:'Dismiss message'}).evaluateAll(buttons=>buttons.forEach(button=>button.click()));
   await page.reload();await ready();assert.equal(await titleOf(tabs,id),draft);
   console.log(`${engine} ${basePath||'/'}: ${orientation} ${nested?'nested':'root'} IME quota failure retains inline draft across redraw/navigation, copy, retry and cancel passed.`);
@@ -166,9 +172,10 @@ async function inactiveDoubleClick(orientation,nested=false) {
   await call('page_add',{title:`Double-click ${orientation} ${nested?'nested':'root'}`});
   const outer=await group(nested?(orientation==='horizontal'?'vertical':'horizontal'):orientation,null,'Quick edits');
   const tabs=nested?await group(orientation,outer.ids[0],'Nested quick edits'):outer,id=tabs.ids[1];
-  for(let attempt=0;attempt<3;attempt++){
+  for(let attempt=0;attempt<12;attempt++){
     await header(tabs.ids[0]).click();await settled();const before=await revision(),old=await titleOf(tabs,id);
-    await header(id).dblclick({delay:0});await titleInput().waitFor();await page.evaluate(async()=>{await window.tabsApp.getStore().idle();await new Promise(requestAnimationFrame);});
+    await page.evaluate(()=>{window.tabClickTrace=[];if(!window.traceTabs){window.traceTabs=event=>{window.tabClickTrace.push([event.type,event.detail,event.target.id,event.target.className,performance.now(),document.querySelectorAll('.tab-title-input').length]);};for(const name of ['mousedown','mouseup','click','dblclick'])document.addEventListener(name,window.traceTabs,true);}});
+    await header(id).dblclick({delay:0});try{await titleInput().waitFor();}catch(error){console.log(await page.evaluate(()=>window.tabClickTrace));await screenshot(`${orientation}-${nested?'nested':'root'}-dblclick-failure`);throw error;}await page.evaluate(async()=>{await window.tabsApp.getStore().idle();await new Promise(requestAnimationFrame);});
     assert.equal(await titleInput().isVisible(),true);assert.equal(await titleInput().inputValue(),old);assert.equal(await header(id).locator('..').locator('.tab-title-input').count(),1);assert.equal((await block(tabs.id)).activeTabId,id);assert.equal(await revision(),before+1);
     if(attempt===0)await screenshot(`${orientation}-${nested?'nested':'root'}-inactive-dblclick`);
     await titleInput().fill('Zero-delay inline edit');await titleInput().press('Enter');await settled();assert.equal(await titleOf(tabs,id),'Zero-delay inline edit');assert.equal(await revision(),before+2);
