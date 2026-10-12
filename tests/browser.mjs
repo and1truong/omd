@@ -38,6 +38,13 @@ try {
   await call('set_page', { title: 'My verified day', notificationMode: 'toast' });
   assert.equal(await page.locator('#page-title').inputValue(), 'My verified day');
   assert.ok(await page.locator('#sidebar').isVisible());
+  const table=(await call('add_block',{type:'table',rowCount:2,columnCount:2,pinnedColumns:1})).block;
+  await call('table_cell_update',{blockId:table.id,rowId:table.rows[1].id,columnId:table.columns[1].id,text:'Native WebMCP table'});
+  const tableRow=(await call('table_row_add',{blockId:table.id,index:1})).rowId,tableColumn=(await call('table_column_add',{blockId:table.id,index:1})).columnId;
+  assert.equal((await call('get_notebook')).blocks.find(b=>b.id===table.id).rows[2].cells[2],'Native WebMCP table');
+  await call('table_row_remove',{blockId:table.id,rowId:tableRow});await call('table_column_remove',{blockId:table.id,columnId:tableColumn});
+  assert.equal(await page.locator(`[data-block-id="${table.id}"]`).getByRole('textbox',{name:'Table row 2, column 2',exact:true}).inputValue(),'Native WebMCP table');
+  await call('remove_block',{blockId:table.id});
   const contentRevision=(await call('get_notebook')).revision;
   await page.locator('#sidebar-toggle').click();await settle();assert.deepEqual(await call('get_view'),{sidebarOpen:false,contentWidth:'reading',collapsedPageIds:[],theme:'system'});
   await call('set_view',{sidebarOpen:true,contentWidth:'wide'});assert.ok(await page.locator('#sidebar').isVisible());
