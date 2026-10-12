@@ -69,7 +69,17 @@ export async function openRepository(storage:StorageLike,{key=STORAGE_KEY,name='
         if(meta.activePageId!==expected.activePageId){const rows=await request<StoredRecord[]>(tx.objectStore('records').index('pageId').getAll(meta.activePageId));resident=new Map(rows.map(r=>[r.key!,r]));}
       } catch(error){tx.abort();await done.catch(()=>{});throw error;}await done;return resident;
     },
-    async historyOwners(){const tx=db.transaction('history'),done=completion(tx),owners:string[]=[];await new Promise<void>((resolve,reject)=>{const cursor=tx.objectStore('history').index('owner').openKeyCursor(null,'nextunique');cursor.onerror=()=>reject(cursor.error);cursor.onsuccess=()=>{if(!cursor.result)return resolve();owners.push(cursor.result.key as string);cursor.result.continue();};});await done;return owners;},
+    async historyOwners(){
+      const tx=db.transaction('history'),done=completion(tx),owners=new Set<string>();
+      // WebKit fails to open an index cursor with nextunique. Read keys with the
+      // default next direction and deduplicate without loading journal payloads.
+      const reading=new Promise<void>((resolve,reject)=>{
+        const cursor=tx.objectStore('history').index('owner').openKeyCursor();
+        cursor.onerror=()=>reject(cursor.error);
+        cursor.onsuccess=()=>{if(!cursor.result)return resolve();owners.add(cursor.result.key as string);cursor.result.continue();};
+      });
+      await Promise.all([reading,done]);return [...owners];
+    },
     async pruneHistory(ids:string[]){if(!ids.length)return;const tx=db.transaction('history','readwrite'),done=completion(tx);for(const id of ids)tx.objectStore('history').delete(id);await done;},
     async pruneOwner(owner:string){const tx=db.transaction('history','readwrite'),done=completion(tx);const ids=await request(tx.objectStore('history').index('owner').getAllKeys(owner));for(const id of ids)tx.objectStore('history').delete(id);await done;},
     close(){db.close();}
