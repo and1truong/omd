@@ -9,11 +9,11 @@ enablePatches();
 /** Serialized events, immutable selectors, durable record transactions. Only the active page is resident. */
 export async function createStore(storage:StorageLike,options:StoreOptions = {}):Promise<NotebookStore> {
   const repository=await openRepository(storage,{key:STORAGE_KEY,initial:initialNotebook,...options});
-  const owner=crypto.randomUUID(),locks=options.locks??globalThis.navigator?.locks;let releaseLease:(()=>void)|undefined;
+  const owner=crypto.randomUUID(),locks=options.locks??globalThis.navigator?.locks;let releaseLease:(()=>void)|undefined,channel:BroadcastChannel|null=null;
+  try{
   if(locks?.request){
     let readyLease!:()=>void,rejectLease!:(error:unknown)=>void;const ready=new Promise<void>((resolve,reject)=>{readyLease=resolve;rejectLease=reject;});
     locks.request(`${repository.name}.history:${owner}`,()=>{readyLease();return new Promise<void>(resolve=>{releaseLease=resolve;});}).catch(rejectLease);await ready;
-    for(const previous of await repository.historyOwners())await locks.request(`${repository.name}.history:${previous}`,{ifAvailable:true},async lock=>{if(lock)await repository.pruneOwner(previous);});
   }
   let loaded=await repository.read(undefined,options.activePageId),materialize=makeMaterializer();
   validateNotebook(materialize(loaded!.records!,loaded!.meta.activePageId));
@@ -45,7 +45,7 @@ export async function createStore(storage:StorageLike,options:StoreOptions = {})
     else records=hydrated!;
     publish(next,records,event);channel?.postMessage(next.revision);
   }
-  let channel=typeof window!=='undefined'&&typeof BroadcastChannel!=='undefined'?new BroadcastChannel(`${repository.name}.changes`):null;
+  channel=typeof window!=='undefined'&&typeof BroadcastChannel!=='undefined'?new BroadcastChannel(`${repository.name}.changes`):null;
   const api:NotebookStore={
     databaseName:()=>repository.name,
     getRevision:()=>state.getState().meta.revision,
@@ -115,5 +115,10 @@ export async function createStore(storage:StorageLike,options:StoreOptions = {})
     publish(next,resident);channel?.postMessage(next.revision);return true;
   });}
   if(channel)channel.onmessage=()=>{if(!closed)api.reload().catch(()=>{});};
+  if(locks?.request)for(const previous of await repository.historyOwners())await locks.request(`${repository.name}.history:${previous}`,{ifAvailable:true},async lock=>{if(lock)await repository.pruneOwner(previous);});
   return api;
+  }catch(error){
+    try{channel?.close();}finally{try{releaseLease?.();}finally{repository.close();}}
+    throw error;
+  }
 }
