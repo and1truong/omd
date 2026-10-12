@@ -19,7 +19,7 @@ test('all imported page IDs are validated before listing the hierarchy', () => {
   assert.throws(() => wrapPage({...emptyNotebook(), id: ''}), /nonempty/);
   const book = wrapPage({...emptyNotebook(), id: 'p:á/"一'});
   const child = {...emptyNotebook(), id: '__proto__'};
-  book.pages.push(child); book.parents[child.id] = book.pages[0].id;
+  book.pages.push(child); book.parents = {...book.parents, [child.id]: book.pages[0].id};
   assert.deepEqual(listPages(parseBook(JSON.stringify(book))).map(row => [row.pageId, row.depth]), [[book.pages[0].id, 0], [child.id, 1]]);
 });
 
