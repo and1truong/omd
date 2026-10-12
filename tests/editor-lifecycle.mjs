@@ -116,6 +116,7 @@ async function compositionBarrier(type) {
   const {context,page}=await fresh(),f=await fixture(page,{type}),input=f.itemId?editor(page,f.itemId):textEditor(page,f.blockId),draft=`Tiếng Việt 漢字 ${type}`;
   await input.evaluate(el=>{el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));});
   await page.waitForFunction(({itemId,blockId})=>!document.querySelector(itemId?`[data-checklist-editor="${itemId}"] .markdown-editor`:`[data-text-editor="${blockId}"] .markdown-editor`).editor.view.composing,f);
+  await flush(page);
   assert.equal(await page.locator('#save-status').innerText(),'Saved');
   await composed(page,input,draft);
   await page.evaluate(()=>{window.exportFinished=false;window.strictExport=lifecycleApp.downloadJson().then(()=>{window.exportFinished=true;});});
