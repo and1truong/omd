@@ -48,6 +48,122 @@ async function fixture() {
   const second=(await items())[1].id;await focused(second);await input(second).fill('Build');return [first,second];
 }
 
+async function styleCases() {
+  const pageId=(await call('page_add',{title:'Chuẩn bị phát hành'})).pageId;
+  await call('set_page',{subtitle:'Chia việc lớn thành từng bước nhỏ. Giữ mọi thứ trong cùng một danh sách.'});
+  blockId=(await call('add_block',{type:'checklist',title:'Việc cần hoàn thành'})).blockId;
+  const ids={},add=async(key,text,parent,done=false)=>{const id=(await call('checklist_add',{blockId,text,parentId:ids[parent]})).itemId;ids[key]=id;if(done)await call('checklist_update',{blockId,itemId:id,patch:{done:true}});return id;};
+  await add('experience','Trải nghiệm checklist');
+  await add('markdown','**Markdown và cấu trúc**\n\nNội dung rõ ở mọi cấp, không cần toolbar.','experience');
+  await add('mobile','Đọc lại trên màn hình nhỏ','markdown');
+  await add('long','Kiểm tra dòng dài, [đường dẫn](https://example.com) và `inline code` ở cấp 4.','mobile');
+  await add('toolbar','Không hiển thị toolbar khi gõ','mobile',true);
+  await add('source','Giữ nguyên `Markdown source` khi tải lại','markdown',true);
+  await add('keyboard','Phím `Enter` và `Tab` hoạt động tự nhiên','experience',true);
+  await add('testing','Kiểm thử trước khi phát hành');
+  await add('paths','Kiểm tra cả `root` và `/omd`','testing');
+  await add('engines','Đối chiếu trên Chromium và WebKit','testing',true);
+  await add('themes','Xem *light/dark* và bố cục mobile','testing');
+  await add('publish','Viết ghi chú phát hành ngắn gọn');
+  const block=page.locator(`[data-block-id="${blockId}"]`),fold=()=>row(ids.experience).locator('.checklist-fold'),branch=()=>page.locator(`[data-item-id="${ids.experience}"] > .checklist-items`);
+  const exportNotebook=()=>page.evaluate(async()=>{const app=await import(new URL('./src/app.js',document.baseURI).href);await app.flushPending();return app.getStore().export();});
+  const snapshot=await exportNotebook(),original=await items();
+  assert.equal(await block.locator('.checklist-progress').innerText(),'4 / 12');
+  assert.equal(await row(ids.experience).locator('.checklist-branch-progress').innerText(),'3/7');
+  assert.equal(await block.locator('.checklist-meter').getAttribute('max'),'12');
+  await input(ids.long).evaluate(el=>{window.omdFoldEditor=el;window.omdFoldInstance=el.editor;});
+  await fold().press('Space');await branch().waitFor({state:'hidden'});
+  assert.equal(await fold().getAttribute('aria-expanded'),'false');assert.equal(await exportNotebook(),snapshot,'Folding must not change notebook data/history.');
+  await fold().press('Enter');await input(ids.long).waitFor({state:'visible'});
+  assert.equal(await input(ids.long).evaluate(el=>el===window.omdFoldEditor&&el.editor===window.omdFoldInstance),true);
+  await fold().click();await branch().waitFor({state:'hidden'});
+  await call('checklist_update',{blockId,itemId:ids.long,patch:{done:true}});
+  assert.equal(await fold().getAttribute('aria-expanded'),'false');assert.equal(await row(ids.experience).locator('.checklist-branch-progress').innerText(),'4/7');
+  assert.equal(await block.locator('.checklist-progress').innerText(),'5 / 12');assert.equal(await row(ids.experience).getByRole('checkbox').isChecked(),false);
+  const another=(await call('page_add',{title:'Independent view'})).pageId;await call('page_select',{pageId});assert.equal(await fold().getAttribute('aria-expanded'),'false');
+  const secondTab=await page.context().newPage();await secondTab.goto(page.url());await secondTab.evaluate(async()=>await (await import(new URL('./src/app.js',document.baseURI).href)).ready);
+  assert.equal(await secondTab.locator(`[data-item-id="${ids.experience}"] > .check-row .checklist-fold`).getAttribute('aria-expanded'),'true');await secondTab.close();
+  await fold().click();await branch().waitFor({state:'visible'});
+  await call('checklist_update',{blockId,itemId:ids.long,patch:{done:false}});
+  await block.getByRole('button',{name:'Collapse checklist branches',exact:true}).click();await branch().waitFor({state:'hidden'});
+  assert.equal(await block.locator('.check-row:visible').count(),3);
+  await (await menu(ids.experience)).getByRole('button',{name:'Add child checklist item',exact:true}).click();
+  const added=(await children(ids.experience)).at(-1).id;await focused(added);assert.equal(await fold().getAttribute('aria-expanded'),'true');
+  assert.equal(await block.getByRole('button',{name:'Collapse checklist branches',exact:true}).count(),1);
+  await call('checklist_remove',{blockId,itemId:added});
+  // All-branch toggles are also view-only, and print must expose folded rows.
+  await block.getByRole('button',{name:'Collapse checklist branches',exact:true}).click();await branch().waitFor({state:'hidden'});
+  assert.equal(await block.locator('.check-row:visible').count(),3);
+  await page.emulateMedia({media:'print'});assert.equal(await block.locator('.check-row:visible').count(),12);await page.emulateMedia({media:'screen'});
+  await block.getByRole('button',{name:'Expand checklist branches',exact:true}).click();await input(ids.long).waitFor({state:'visible'});
+  await page.evaluate(async()=>{const app=await import(new URL('./src/app.js',document.baseURI).href);await app.setView({theme:'light',sidebarOpen:false});});
+  await page.setViewportSize({width:1280,height:1100});await page.evaluate(()=>document.activeElement?.blur());await page.mouse.move(0,0);
+  await page.screenshot({path:`${root}/test-results/checklist-style-${engine}-light.png`,fullPage:true});
+  await page.evaluate(async()=>await (await import(new URL('./src/app.js',document.baseURI).href)).setView({theme:'dark'}));
+  await page.screenshot({path:`${root}/test-results/checklist-style-${engine}-dark.png`,fullPage:true});
+  await page.setViewportSize({width:375,height:1000});
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await page.screenshot({path:`${root}/test-results/checklist-style-${engine}-mobile.png`,fullPage:true});
+  await page.setViewportSize({width:320,height:844});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  // Checkbox persistence rebuilds rows before the pending fold can resume.
+  await fold().evaluate(el=>{window.omdBeforeFoldRender=el;});
+  await page.evaluate(()=>{
+    const descriptor=Object.getOwnPropertyDescriptor(IDBTransaction.prototype,'oncomplete');window.omdHoldFoldTransaction=true;
+    Object.defineProperty(IDBTransaction.prototype,'oncomplete',{...descriptor,set(listener){descriptor.set.call(this,function(event){if(this.mode==='readwrite'&&window.omdHoldFoldTransaction){window.omdHoldFoldTransaction=false;window.omdFoldTransactionReady=true;window.omdReleaseFoldTransaction=()=>listener.call(this,event);}else listener.call(this,event);});}});
+    window.omdRestoreFoldTransaction=()=>Object.defineProperty(IDBTransaction.prototype,'oncomplete',descriptor);
+  });
+  await row(ids.long).getByRole('checkbox').check();await page.waitForFunction(()=>window.omdFoldTransactionReady);
+  await fold().click();assert.equal(await fold().getAttribute('aria-expanded'),'true');
+  await page.evaluate(()=>{window.omdRestoreFoldTransaction();window.omdReleaseFoldTransaction();});await branch().waitFor({state:'hidden'});
+  assert.equal(await fold().evaluate(el=>el!==window.omdBeforeFoldRender),true,'The fold intent must survive replacement controls.');
+  await fold().click();await branch().waitFor({state:'visible'});await call('checklist_update',{blockId,itemId:ids.long,patch:{done:false}});
+  // A fold waits for pending writes and never hides a failed draft.
+  await page.evaluate(async()=>{
+    const store=(await import(new URL('./src/app.js',document.baseURI).href)).getStore(),dispatch=store.dispatch;
+    store.dispatch=async(name,input,options)=>{if(name==='checklist_update'&&input.patch?.text==='Pending fold save'){window.omdFoldSaving=true;await new Promise(resolve=>{window.omdFinishFoldSave=resolve;});}return dispatch(name,input,options);};
+    window.omdRestoreFoldDispatch=()=>{store.dispatch=dispatch;};
+  });
+  await input(ids.long).fill('Pending fold save');await page.waitForFunction(()=>window.omdFoldSaving);
+  await fold().click();assert.equal(await fold().getAttribute('aria-expanded'),'true');
+  await page.evaluate(()=>{window.omdRestoreFoldDispatch();window.omdFinishFoldSave();});await branch().waitFor({state:'hidden'});
+  assert.equal((await children(ids.mobile))[0].text,'Pending fold save');
+  await fold().click();await branch().waitFor({state:'visible'});
+  await page.evaluate(async()=>{
+    const store=(await import(new URL('./src/app.js',document.baseURI).href)).getStore(),dispatch=store.dispatch;
+    store.dispatch=async(name,input,options)=>{if(name==='checklist_update'&&input.patch?.text==='Retry fold draft')throw new Error('Fold draft write failed');return dispatch(name,input,options);};
+    window.omdRestoreFoldDispatch=()=>{store.dispatch=dispatch;};
+  });
+  await input(ids.long).fill('Retry fold draft');await fold().click();await page.locator('.notice').filter({hasText:'Fold draft write failed'}).first().waitFor();
+  assert.equal(await fold().getAttribute('aria-expanded'),'true');assert.equal(await input(ids.long).innerText(),'Retry fold draft');
+  await page.evaluate(()=>window.omdRestoreFoldDispatch());await items();
+  assert.equal((await children(ids.mobile))[0].text,'Retry fold draft');
+  await call('checklist_update',{blockId,itemId:ids.long,patch:{text:'Kiểm tra dòng dài, [đường dẫn](https://example.com) và `inline code` ở cấp 4.'}});
+  // Detached controls retain the page that created them, not the new selection.
+  await row(ids.publish).getByRole('checkbox').evaluate(el=>{window.omdStaleChecklistCheck=el;});
+  await call('page_select',{pageId:another});await page.evaluate(()=>{const check=window.omdStaleChecklistCheck;check.checked=true;check.dispatchEvent(new Event('change',{bubbles:true}));});
+  await page.evaluate(async({pageId,blockId,id})=>{
+    const store=(await import(new URL('./src/app.js',document.baseURI).href)).getStore(),start=performance.now();
+    while(performance.now()-start<5000){await store.idle();if((await store.getPage(pageId)).blocks.find(b=>b.id===blockId).items.find(i=>i.id===id).done)return;await new Promise(resolve=>setTimeout(resolve,25));}
+    throw new Error('Detached checkbox did not update its original page');
+  },{pageId,blockId,id:ids.publish});
+  assert.equal(await page.evaluate(async()=> (await import(new URL('./src/app.js',document.baseURI).href)).getStore().getState().blocks.length),0);
+  await call('page_select',{pageId});await call('checklist_update',{blockId,itemId:ids.publish,patch:{done:false}});
+  await fold().click();await branch().waitFor({state:'hidden'});await page.reload();await page.evaluate(async()=>await (await import(new URL('./src/app.js',document.baseURI).href)).ready);
+  assert.equal(await fold().getAttribute('aria-expanded'),'true');assert.equal(await row(ids.experience).locator('.checklist-branch-progress').innerText(),'3/7');
+  assert.deepEqual(await items(),original,'View changes, reload, and add/remove must preserve original Markdown sources.');
+  await call('page_remove',{pageId:another});
+  const imported=await page.evaluate(async({pageId,blockId})=>{
+    const app=await import(new URL('./src/app.js',document.baseURI).href),store=app.getStore(),notebook=JSON.parse(await store.export()),block=notebook.pages.find(page=>page.id===pageId).blocks.find(block=>block.id===blockId);
+    block.id='block\u0000nul';block.items[0].id='parent\u0000nul';await store.import(JSON.stringify(notebook));return {blockId:block.id,itemId:block.items[0].id};
+  },{pageId,blockId});
+  blockId=imported.blockId;
+  const nulRow=page.locator('.check-row').first();await nulRow.locator('.checklist-fold').click();
+  await page.waitForFunction(()=>document.querySelector('.checklist-fold').getAttribute('aria-expanded')==='false');
+  await nulRow.getByRole('button',{name:'Checklist item actions',exact:true}).click();await page.locator('#block-actions-dialog').getByRole('button',{name:'Add child checklist item',exact:true}).click();
+  const nulChild=(await children(imported.itemId)).at(-1).id;await focused(nulChild);
+  assert.equal(await nulRow.locator('.checklist-fold').getAttribute('aria-expanded'),'true');
+}
+
 async function markdownCases() {
   const pageId=(await call('page_add',{title:'Markdown at every checklist level'})).pageId;
   const toggle=(await call('add_block',{type:'toggle',title:'Markdown tasks'})).block;
@@ -174,9 +290,9 @@ try {
   await input(leaf).press('Enter');
   await page.waitForFunction(id=>document.querySelector(`[data-item-id="${id}"] > .checklist-items`)?.children.length===2,grandchild);
   const sibling=(await children(grandchild))[1].id;await focused(sibling);await input(sibling).fill('Sibling');
-  await row(sibling).getByRole('button',{name:'Move checklist item up',exact:true}).click();await placed(sibling,grandchild,0);await focused(sibling);
+  await (await menu(sibling)).getByRole('button',{name:'Move checklist item up',exact:true}).click();await placed(sibling,grandchild,0);await focused(sibling);
   assert.deepEqual((await children(grandchild)).map(i=>i.id),[sibling,leaf]);
-  await row(sibling).getByRole('button',{name:'Move checklist item down',exact:true}).click();await placed(sibling,grandchild,1);await focused(sibling);
+  await (await menu(sibling)).getByRole('button',{name:'Move checklist item down',exact:true}).click();await placed(sibling,grandchild,1);await focused(sibling);
   assert.deepEqual((await children(grandchild)).map(i=>i.id),[leaf,sibling]);
   await row(leaf).getByRole('checkbox').check();
   await page.waitForFunction(blockId=>document.querySelector(`[data-block-id="${blockId}"] .checklist-progress`)?.textContent==='1 / 6',blockId);
@@ -193,10 +309,10 @@ try {
   await input(leaf).evaluate(el=>{el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));});
   assert.deepEqual(await items(),before);
   await mkdir(`${root}/test-results`,{recursive:true});await page.screenshot({path:`${root}/test-results/checklist-${engine}-desktop.png`});
-  await row(second).getByRole('button',{name:'Delete checklist item',exact:true}).click();await input(second).waitFor({state:'detached'});assert.equal((await items()).length,1);
+  await (await menu(second)).getByRole('button',{name:'Delete checklist item',exact:true}).click();await input(second).waitFor({state:'detached'});assert.equal((await items()).length,1);
   await call('undo');assert.deepEqual(await items(),before);await call('redo');assert.equal((await items()).length,1);await call('undo');
   await page.reload();await page.evaluate(async()=>await (await import(new URL('./src/app.js',document.baseURI).href)).ready);assert.deepEqual(await items(),before);
-  await markdownCases();await context.close();
+  await markdownCases();await styleCases();await context.close();
 
   // Touch controls and four levels fit even the smallest supported viewport.
   const mobile=await browser.newContext({viewport:{width:320,height:844},isMobile:true,hasTouch:true});mobile.setDefaultTimeout(10000);

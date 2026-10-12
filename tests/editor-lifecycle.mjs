@@ -158,10 +158,31 @@ async function importedFocus() {
   const input=editor(page,'page-title'),focus=()=>page.waitForFunction(()=>document.activeElement?.closest('[data-checklist-editor]')?.dataset.checklistEditor==='page-title');
   const editorId=await input.getAttribute('id');assert.notEqual(editorId,'page-title');assert.equal(await page.locator('[id="page-title"]').count(),1);
   await input.press('Tab');await page.waitForFunction(()=>lifecycleStore.getState().blocks[0].items[0].children?.[0]?.id==='page-title');await focus();
-  assert.equal(await input.getAttribute('id'),editorId);await input.press('Shift+Tab');await page.waitForFunction(()=>lifecycleStore.getState().blocks[0].items[1]?.id==='page-title');await focus();
-  const title=await page.locator('#page-title').inputValue();await input.press('End');await page.keyboard.type(' stays focused');await flush(page);
+  assert.equal(await input.getAttribute('id'),editorId);
+  await page.evaluate(()=>{
+    const raf=requestAnimationFrame;window.pendingChecklistFocus=null;
+    window.requestAnimationFrame=function(callback){
+      if(String(callback).includes('revealChecklistItem(target)')){
+        window.pendingChecklistFocus=()=>{window.requestAnimationFrame=raf;callback(performance.now());};return 0;
+      }
+      return raf.call(this,callback);
+    };
+  });
+  await input.press('Shift+Tab');await page.waitForFunction(()=>lifecycleStore.getState().blocks[0].items[1]?.id==='page-title'&&!!window.pendingChecklistFocus);
+  const {before,after,wouldReset}=await input.evaluate(el=>{
+    el.focus();el.editor.commands.setTextSelection(1);
+    const node=el.querySelector('p').firstChild,range=document.createRange(),selection=getSelection();
+    range.setStart(node,node.length);range.collapse(true);selection.removeAllRanges();selection.addRange(range);
+    const before=selection.anchorOffset;
+    el.editor.view.focus();const wouldReset=selection.anchorOffset===0;
+    selection.removeAllRanges();selection.addRange(range);window.pendingChecklistFocus();
+    return {before,after:selection.anchorOffset,wouldReset};
+  });
+  assert.equal(before,'Imported task'.length);assert.equal(wouldReset,true);assert.equal(after,before);
+  await focus();const title=await page.locator('#page-title').inputValue();await page.keyboard.type(' stays focused');await flush(page);
   assert.equal(await page.locator('#page-title').inputValue(),title);assert.equal(await text(page,{...f,itemId:'page-title'}),'Imported task stays focused');
-  await page.locator('[data-item-id="page-title"] > .check-row').getByRole('button',{name:'Move checklist item up',exact:true}).click();
+  await page.locator('[data-item-id="page-title"] > .check-row').getByRole('button',{name:'Checklist item actions',exact:true}).click();
+  await page.locator('#block-actions-dialog').getByRole('button',{name:'Move checklist item up',exact:true}).click();
   await page.waitForFunction(()=>lifecycleStore.getState().blocks[0].items[0]?.id==='page-title');await focus();
   await input.press('Enter');await page.waitForFunction(()=>lifecycleStore.getState().blocks[0].items.length===3);
   const added=await page.evaluate(()=>lifecycleStore.getState().blocks[0].items[1].id);
