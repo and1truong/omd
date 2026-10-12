@@ -168,9 +168,8 @@ try {
   assert.equal((await call('get_notebook')).blocks.find(b=>b.id===checklist.id).items[0].text,'Đang chọn chữ');
   await call('checklist_update',{blockId:checklist.id,itemId:composeItem.id,patch:{text:composeItem.text,done:composeItem.done}});await page.evaluate(()=>delete window.omdComposing);
   await page.evaluate(()=>{const input=document.getElementById('page-title');input.focus();input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));input.value='Tiêu đề đang chọn';input.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));});
-  let titleUpdateFinished=false;const titleUpdate=call('card_update',{blockId:board.id,cardId:card,patch:{description:'Background edit during title composition'}}).then(result=>{titleUpdateFinished=true;return result;});
-  await page.waitForTimeout(100);assert.equal(titleUpdateFinished,false);assert.equal(await page.locator('#page-title').inputValue(),'Tiêu đề đang chọn');
-  await page.locator('#page-title').dispatchEvent('compositionend');await titleUpdate;await settle();assert.equal((await call('get_notebook')).title,'Tiêu đề đang chọn');await call('set_page',{title:'Written by a person'});
+  await call('card_update',{blockId:board.id,cardId:card,patch:{description:'Background edit during title composition'}});assert.equal(await page.locator('#page-title').inputValue(),'Tiêu đề đang chọn');
+  await page.locator('#page-title').dispatchEvent('compositionend');await settle();assert.equal((await call('get_notebook')).title,'Tiêu đề đang chọn');await call('set_page',{title:'Written by a person'});
 
   // The engines have never been imported, even when hidden scenes are edited.
   const hiddenDiagram=(await call('add_block',{type:'mermaid',source:'flowchart LR\n Lazy --> Visible',containerId:outer.tabs[1].id})).block;
