@@ -1,6 +1,6 @@
 {
   "name": "omd",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "private": true,
   "type": "module",
   "description": "oh my day \u2014 a local-first notebook",
@@ -10,7 +10,9 @@
     "build": "node scripts/build.mjs",
     "test:browser": "node tests/browser.mjs",
     "typecheck": "tsc --noEmit && tsc --project tsconfig.worker.json --noEmit",
-    "check:static": "node tests/static-output.mjs"
+    "check:static": "node tests/static-output.mjs",
+    "package:release": "node scripts/package-release.mjs",
+    "test:release": "node tests/release-package.mjs"
   },
   "engines": {
     "node": ">=22"

@@ -1,7 +1,8 @@
 import http from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
-const root = resolve(new URL('..', import.meta.url).pathname, process.env.OMD_STATIC_DIR || '.');
+import { fileURLToPath } from 'node:url';
+const root = resolve(fileURLToPath(new URL('..', import.meta.url)), process.env.OMD_STATIC_DIR || '.');
 const basePath=(process.env.OMD_BASE_PATH??'').replace(/\/$/,'');
 if(basePath&&!/^\/[a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_-]+)*$/.test(basePath))throw new Error('Invalid static base path.');
 const port = Number(process.env.OMD_PORT || 3000);

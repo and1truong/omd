@@ -14,7 +14,15 @@ Content width and desktop sidebar preferences persist separately in browser stor
 
 ## Run
 
+For a ready-to-run download, use the named ZIP or tar.gz from [GitHub Releases](https://github.com/and1truong/omd/releases). Extract it and run `node start.mjs` with Node 22+. All browser libraries, fonts and assets are included; no npm install or build is needed. Serve the included `dist` folder on any static HTTP/HTTPS host if you prefer.
+
 Node 22 or newer. Run `npm start` (builds first) and open localhost port 3000. Run `npm install` once to install the pinned libraries and development tools. Application modules and the service worker are TypeScript; `npm run typecheck` checks both browser and worker environments in strict mode. `npm test` runs source-level tests through tsx. Build scripts remain Node ESM. For production, run `npm run build` and serve `dist` from any static HTTPS host. Relative URLs support deployment at a subpath, including GitHub Pages.
+
+## Release packaging
+
+Maintainers run `npm run build`, `npm run check:static`, `npm run package:release` and `npm run test:release`. Packaging creates ZIP, tar.gz and SHA256SUMS.txt in `release`, with a dependency-free local launcher, dependency inventory and available third-party notices. Tests extract each archive outside the checkout, start the packaged server without node_modules, and verify every asset against the build.
+
+Pushing a `release/vVERSION` branch whose version matches package.json explicitly publishes that version. The Release workflow checks types, source tests, native browsers at root and `/omd/`, and extracted packages before creating a draft with assets and publishing it. It tags the tested commit, refuses to overwrite existing tags/releases, and can also be run manually from the matching release branch. Update docs/releases/vVERSION.md for each release. Publishing a release is independent of merging the packaging PR into main; main remains the GitHub Pages source.
 
 ## Pages
 
