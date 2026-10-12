@@ -101,7 +101,7 @@ try {
   await page.locator('#page-title').fill('Written by a person');
   await call('set_view',{sidebarOpen:false,contentWidth:'wide',collapsedPageIds:[]});
   await page.reload(); await page.waitForFunction(() => document.getElementById('agent-status').textContent.includes('50 tools'));
-  assert.deepEqual(await call('get_view'),{sidebarOpen:false,contentWidth:'wide',collapsedPageIds:[]});await call('set_view',{sidebarOpen:true,contentWidth:'reading'});
+  assert.deepEqual(await call('get_view'),{sidebarOpen:false,contentWidth:'wide',collapsedPageIds:[],theme:'system'});await call('set_view',{sidebarOpen:true,contentWidth:'reading'});
   assert.equal(await page.locator('#page-title').inputValue(), 'Written by a person');
   assert.ok((await call('get_notebook')).blocks[0].items[0].done);
   const outer = (await call('add_block', { type: 'tabs', orientation: 'horizontal', title: 'Chapters' })).block;

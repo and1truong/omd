@@ -78,7 +78,7 @@ export function createTools(store:NotebookStore,ui:WebMCPUI = {}):WebMCPTool[] {
     const page=await store.getPage(input.pageId);
     await ui.setView({theme});
     if(Object.keys(content).some(key=>key!=='pageId'))return store.dispatch('set_page',content);
-    return {pageId:page.id,theme};
+    return {pageId:page.id,theme,revision:store.getRevision()};
   });
   command('add_block', 'Add a block, including Mermaid or Excalidraw. Mermaid accepts raw source or a fenced Markdown mermaid block. Use excalidraw_set_scene for drawing data. containerId defaults to page. Tabs alternate direction, at most two levels. Reminders cannot reliably deliver while closed.', { type: { type: 'string', enum: BLOCK_TYPES }, containerId: text(), index, text: text(), title: text(), source:text('Mermaid definition or fenced Markdown.'), orientation: { type: 'string', enum: ['horizontal', 'vertical'] }, dueAt: text('ISO date-time including timezone, e.g. 2026-10-12T16:00:00+10:00.') }, ['type']);
   command('update_block', 'Edit a block. Text blocks store Markdown in text; headings store plain text. Mermaid uses source for its definition; Excalidraw uses excalidraw_set_scene. Other fields depend on type: title, orientation, open, dueAt, enabled. Tab direction changes preserve the alternating two-level structure.', { blockId, patch: patch({ text: text(), title: text(), source:text(), orientation: { type: 'string', enum: ['horizontal', 'vertical'] }, open: bool, dueAt: text(), enabled: bool }) }, ['blockId', 'patch']);
