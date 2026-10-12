@@ -4,7 +4,7 @@ import type {createCompositionGuard} from './composition.js';
 import {errorOf} from './dom.js';
 
 /** Visible Markdown controls own a Tiptap instance; persisted content stays Markdown. */
-export function createTextEditors(store:NotebookStore,{composition,notify,createNext,flushPending}:{composition:ReturnType<typeof createCompositionGuard>;notify:Notify;createNext:(blockId:string,pageId:string)=>Promise<unknown>;flushPending:()=>Promise<unknown>}) {
+export function createTextEditors(store:NotebookStore,{composition,notify,createNext,flushPending,onDraftsChange=()=>{}}:{composition:ReturnType<typeof createCompositionGuard>;notify:Notify;createNext:(blockId:string,pageId:string)=>Promise<unknown>;flushPending:()=>Promise<unknown>;onDraftsChange?:()=>void}) {
   type ItemKeyDown=(event:KeyboardEvent)=>boolean;
   interface Entry {host:HTMLDivElement;editor:Editor;pageId:string;blockId:string;itemId?:string;onKeyDown?:ItemKeyDown;source:string;serialized:string;pending:string|null;saving?:Promise<unknown>;creating:boolean}
   const entries=new Map<string,Entry>(),key=(pageId:string,blockId:string,itemId?:string)=>JSON.stringify([pageId,blockId,itemId]);
@@ -20,12 +20,12 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
     try {
       entry.saving=write(entry,text);await entry.saving;
       entry.source=text;if(entry.pending===text)entry.pending=null;
-    } finally {entry.saving=undefined;}
+    } finally {entry.saving=undefined;manager.end();}
     if(entry.pending!==null)await flush(entry);
   }
   function capture(entry:Entry) {
     const text=entry.editor.getMarkdown();if(text===entry.serialized)return;
-    entry.serialized=text;entry.pending=text;
+    entry.serialized=text;entry.pending=text;onDraftsChange();
   }
   function changed(entry:Entry) {
     if(composition.isComposing(entry.editor.view.dom)||entry.editor.view.composing)return;
@@ -96,6 +96,7 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
           try{await entry!.saving;entry!.source=text;if(entry!.pending===text)entry!.pending=null;}finally{entry!.saving=undefined;}
         }
       } catch(error){capture(entry!);notify(errorOf(error).message,'error',true);}
+      finally{manager.end();}
     },()=>pageId);
     const controls:[string,string,(editor:Editor)=>void,()=>boolean][]=[
       ['B','Bold',e=>{e.chain().focus().toggleBold().run();},()=>editor.isActive('bold')],
@@ -131,7 +132,17 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
   }
   const manager={mount,
     mountChecklist(blockId:string,item:ChecklistItem,pageId:string,onKeyDown:ItemKeyDown){return mount({id:blockId,type:'text',text:item.text},pageId,item,onKeyDown);},
-    end(){for(const [id,entry] of entries)if(entry.pageId!==store.getActivePageId()||!entry.host.isConnected){entry.editor.destroy();entries.delete(id);}},
+    end(){for(const [id,entry] of entries)if((entry.pageId!==store.getActivePageId()||!entry.host.isConnected)&&entry.pending===null&&!entry.saving&&!composition.isComposing(entry.editor.view.dom)){entry.editor.destroy();entries.delete(id);}onDraftsChange();},
+    drafts(){return [...entries].filter(([,entry])=>entry.pending!==null&&!entry.host.isConnected).map(([id,entry])=>({id,pageId:entry.pageId,blockId:entry.blockId,itemId:entry.itemId,text:entry.pending!}));},
+    hasPending(){return [...entries.values()].some(entry=>entry.pending!==null||entry.saving||composition.isComposing(entry.editor.view.dom));},
+    async retry(id:string){const entry=entries.get(id);if(!entry)return;await composition.settled(input=>input===entry.editor.view.dom);await flush(entry);await store.idle();},
+    async recover(id:string){
+      const entry=entries.get(id);if(!entry)return;const pageId=store.getActivePageId();
+      await composition.settled(input=>input===entry.editor.view.dom);if(entry.saving)try{await entry.saving;}catch{}
+      if(entry.pending===null)return;const text=entry.pending;
+      await store.dispatch('add_block',{pageId,type:'text',text});
+      if(entry.pending===text)entry.pending=null;manager.end();
+    },
     captureFocus(){const entry=[...entries.values()].find(e=>e.editor.view.dom===document.activeElement);return entry?key(entry.pageId,entry.blockId,entry.itemId):null;},
     restoreFocus(id:string|null){const entry=id&&entries.get(id);if(entry&&entry.host.isConnected)entry.editor.view.focus();},
     focus(blockId:string){

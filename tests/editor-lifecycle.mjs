@@ -63,9 +63,50 @@ async function historyBarrier() {
   await context.close();
 }
 
+async function retainedDrafts(type) {
+  const {context,page}=await fresh(),f=await fixture(page,{toggle:true,type}),input=f.itemId?editor(page,f.itemId):textEditor(page,f.blockId),draft=`Retained ${type} draft tiếng Việt`;
+  await input.evaluate(el=>{window.retainedEditor=el.editor;});await failWrites(page,f.blockId);await input.fill(draft);
+  await page.waitForFunction(()=>document.getElementById('save-status').textContent==='Not saved');
+  const peer=await context.newPage();await ready(peer);await call(peer,'page_select',{pageId:f.pageId});
+  await call(peer,'update_block',{blockId:f.containerId,patch:{open:false}});await input.waitFor({state:'detached'});
+  assert.equal(await page.evaluate(()=>retainedEditor.isDestroyed),false);
+  await page.getByRole('textbox',{name:'Unsaved Markdown draft',exact:true}).waitFor();
+  assert.equal(await page.getByRole('textbox',{name:'Unsaved Markdown draft',exact:true}).inputValue(),draft);
+  assert.equal(await page.locator('#save-status').innerText(),'Not saved');await assert.rejects(()=>flush(page),/Injected Markdown draft storage failure/);
+  await screenshot(page,`${type}-retained`);await restoreWrites(page);
+  await page.getByRole('button',{name:'Retry Markdown draft save',exact:true}).click();
+  await page.getByRole('textbox',{name:'Unsaved Markdown draft',exact:true}).waitFor({state:'detached'});
+  assert.equal(await text(page,f),draft);assert.equal(await page.locator('#save-status').innerText(),'Saved');
+  assert.equal(await page.evaluate(()=>retainedEditor.isDestroyed),true);
+  await call(page,'update_block',{blockId:f.containerId,patch:{open:true}});assert.equal(await input.innerText(),draft);
+  await failWrites(page,f.blockId);await input.fill(`${draft} after reopening`);await page.waitForFunction(()=>document.getElementById('save-status').textContent==='Not saved');
+  await page.evaluate(()=>lifecycleStore.dispatch('page_add',{title:'Direct navigation retains draft'}));
+  await input.waitFor({state:'detached'});assert.equal(await page.getByRole('textbox',{name:'Unsaved Markdown draft',exact:true}).inputValue(),`${draft} after reopening`);
+  await restoreWrites(page);await flush(page);assert.equal(await text(page,f),`${draft} after reopening`);
+  await context.close();
+}
+
+async function deletedDrafts(removePage=false) {
+  const {context,page}=await fresh(),f=await fixture(page),draft=removePage?'Draft from deleted page':'Draft from deleted checklist';
+  await failWrites(page,f.blockId);await editor(page,f.itemId).fill(draft);await page.waitForFunction(()=>document.getElementById('save-status').textContent==='Not saved');
+  const peer=await context.newPage();await ready(peer);await call(peer,'page_select',{pageId:f.pageId});
+  await call(peer,removePage?'page_remove':'remove_block',removePage?{pageId:f.pageId}:{blockId:f.blockId});
+  await editor(page,f.itemId).waitFor({state:'detached'});await restoreWrites(page);
+  await assert.rejects(()=>flush(page),/not found/i);assert.equal(await page.getByRole('textbox',{name:'Unsaved Markdown draft',exact:true}).inputValue(),draft);
+  const downloadEvent=page.waitForEvent('download');await page.getByRole('button',{name:'Download unsaved Markdown draft',exact:true}).click();
+  const download=await downloadEvent,stream=await download.createReadStream();assert.equal(Buffer.concat(await stream.toArray()).toString(),draft);
+  assert.equal(await page.locator('#save-status').innerText(),'Not saved');
+  await page.getByRole('button',{name:'Recover Markdown draft as a new note',exact:true}).click();await page.getByRole('textbox',{name:'Unsaved Markdown draft',exact:true}).waitFor({state:'detached'});
+  assert.equal(await page.evaluate(draft=>lifecycleStore.getState().blocks.filter(block=>block.type==='text'&&block.text===draft).length,draft),1);
+  await flush(page);await screenshot(page,removePage?'page-recovered':'checklist-recovered');
+  await page.reload();await page.evaluate(async()=>{await (await import(new URL('./src/app.js',document.baseURI).href)).ready;});
+  assert.equal(await page.locator('[data-text-editor] .markdown-editor').filter({hasText:draft}).count(),1);
+  await context.close();
+}
+
 try {
   await new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.once('error',reject);server.once('exit',code=>reject(new Error(`Server exited: ${code}`)));});
   await mkdir(`${root}/test-results`,{recursive:true});browser=await ({chromium,webkit}[engine]).launch({headless:true});
-  await historyBarrier();assert.deepEqual(errors,[]);
-  console.log(`${engine} ${basePath||'/'}: rich-editor undo/redo honors failed table drafts.`);
+  await historyBarrier();await retainedDrafts('checklist');await retainedDrafts('text');await deletedDrafts();await deletedDrafts(true);assert.deepEqual(errors,[]);
+  console.log(`${engine} ${basePath||'/'}: history barriers, detached drafts, remote deletion retry/download/recovery and reload passed.`);
 } finally {await browser?.close();server.kill();}
