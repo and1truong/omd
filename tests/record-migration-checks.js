@@ -4,7 +4,7 @@ export async function migrationChecks({sourceRoot,extension='ts',startupVersion}
   const {createStore}=await import(`${sourceRoot}store.${extension}`);
   const {startReminders}=await import(`${sourceRoot}reminders.${extension}`);
   const {emptyNotebook,makeBlock,STORAGE_KEY}=await import(`${sourceRoot}model.${extension}`);
-  const {wrapPage}=await import(`${sourceRoot}notebook.${extension}`);
+  const {wrapPage,listPages}=await import(`${sourceRoot}notebook.${extension}`);
   const {bookRecords,metadataBook}=await import(`${sourceRoot}records.${extension}`);
   const check=(ok,message)=>{if(!ok)throw new Error(message);};
   const equal=(a,b,message)=>check(JSON.stringify(a)===JSON.stringify(b),message);
@@ -52,6 +52,49 @@ export async function migrationChecks({sourceRoot,extension='ts',startupVersion}
     mutate?.(tx,{book,drawing,reminder});await completed;db.close();
   }
   async function rejects(fn,pattern){let error;try{await fn();}catch(e){error=e;}check(error&&pattern.test(error.message),`Expected recovery error ${pattern}, got ${error?.message??'success'}`);}
+  function invalidPage(book,index,id){
+    const bad=structuredClone(book);bad.pages[index].id=id;bad.activePageId=bad.pages[0].id;
+    bad.parents=Object.fromEntries(bad.pages.map((page,i)=>[page.id,i?bad.pages[0].id:'']));return bad;
+  }
+  const invalidIds=['',null,42,{},[]];
+  for(const version of [1,2,3]){
+    const f=fixture(),healthyName=name();await seed(healthyName,version,f);const healthy=await snapshot(healthyName);
+    for(const index of [0,1])for(const id of invalidIds){
+      const dbName=name(),data=storage(),bad={...f,book:invalidPage(f.book,index,id)};
+      data.setItem(STORAGE_KEY,JSON.stringify(f.book));data.setItem(`${STORAGE_KEY}.v1-backup`,'unchanged backup');const sources=data.entries();
+      await seed(dbName,version,bad);const before=await snapshot(dbName);
+      await rejects(()=>createStore(data,{name:dbName,initial:emptyNotebook}),id===''?/upgrade failed.*intact.*nonempty/:/upgrade failed.*intact/);
+      equal(await snapshot(dbName),before,`Invalid page ID at ${index} v${version} changed schema/data`);equal(data.entries(),sources,'Invalid legacy page ID changed recovery bytes');
+      // User recovery repairs the malformed rows in the same legacy database, not a reset.
+      const db=await req(indexedDB.open(dbName,version)),tx=db.transaction([...db.objectStoreNames],'readwrite'),completed=done(tx);
+      for(const [name,saved]of Object.entries(healthy.stores)){
+        const store=tx.objectStore(name);for(const key of before.stores[name].keys)if(!saved.keys.includes(key))store.delete(key);
+        saved.keys.forEach((key,i)=>store.put(saved.values[i],key));
+      }
+      await completed;db.close();equal(await snapshot(dbName),healthy,'User recovery changed legacy schema or valid data');
+      const retry=await createStore(data,{name:dbName,initial:emptyNotebook});equal(await retry.getNotebook(),f.book,'Recovered page ID failed retry');
+      equal(retry.listPages().map(row=>[row.pageId,row.depth]),listPages(f.book).map(row=>[row.pageId,row.depth]),'Special page IDs did not list after recovery');await retry.close();equal(data.entries(),sources,'Recovered migration changed recovery bytes');
+    }
+    evidence.push({case:`v${version} invalid IDs in every page / exact schema+data rollback / unchanged localStorage / same-DB user recovery and retry / special IDs list`,cases:2*invalidIds.length,passed:true});
+  }
+  for(const version of [1,2,3]){
+    const book=wrapPage(emptyNotebook());book.pages.push(emptyNotebook());book.parents[book.pages[1].id]=book.pages[0].id;
+    const raw=book=>JSON.stringify(version===1?book.pages[0]:version===2?(({parents,...book})=>({...book,version:2}))(book):book);
+    const valid=raw(book),data=storage(),dbName=name(),store=await createStore(data,{name:dbName,initial:emptyNotebook});
+    const before=await snapshot(dbName),exported=await store.export();
+    for(const index of version===1?[0]:[0,1])for(const id of invalidIds){
+      const invalid=raw(invalidPage(book,index,id));await rejects(()=>store.import(invalid),/Notebook ID must be (nonempty )?text/);
+      equal(await snapshot(dbName),before,'Malformed page import changed IndexedDB');check(await store.export()===exported,'Malformed page import changed live notebook');check(store.listPages().length===1,'Malformed import reached page listing');
+      const recovery=storage(),recoveryName=name();recovery.setItem(STORAGE_KEY,invalid);for(const v of [1,2,3])recovery.setItem(`${STORAGE_KEY}.v${v}-backup`,`untouched v${v} backup`);const sources=recovery.entries();
+      await rejects(()=>createStore(recovery,{name:recoveryName,initial:emptyNotebook}),/Saved notebook.*preserved.*Notebook ID must be (nonempty )?text/);
+      const emptyBefore=await snapshot(recoveryName);check(Object.values(emptyBefore.stores).every(store=>store.values.length===0),'Malformed recovery initialized notebook data');
+      await rejects(()=>createStore(recovery,{name:recoveryName,initial:emptyNotebook}),/Saved notebook.*preserved.*Notebook ID must be (nonempty )?text/);
+      equal(await snapshot(recoveryName),emptyBefore,'Malformed localStorage page wrote IndexedDB');equal(recovery.entries(),sources,'Malformed localStorage page changed source/backup bytes');
+      recovery.setItem(STORAGE_KEY,valid);const retry=await createStore(recovery,{name:recoveryName,initial:emptyNotebook});check(retry.listPages().length===(version===1?1:2),'Recovered localStorage page did not list');await retry.close();
+      check(recovery.getItem(STORAGE_KEY)===valid,'Recovery source rewritten');for(const v of [1,2,3])check(recovery.getItem(`${STORAGE_KEY}.v${v}-backup`)===`untouched v${v} backup`,'Recovery backup rewritten on retry');
+    }
+    await store.close();evidence.push({case:`v${version} malformed page import/recovery / no writes or hierarchy loop / exact localStorage backups / user recovery retry`,passed:true});
+  }
   for(const version of [1,2,3]){
     const f=fixture(),dbName=name(),data=storage();data.setItem(STORAGE_KEY,'unchanged recovery source');data.setItem(`${STORAGE_KEY}.v1-backup`,'unchanged recovery backup');
     await seed(dbName,version,f);const before=await snapshot(dbName),bytes=data.entries();

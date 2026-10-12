@@ -12,6 +12,19 @@ function memoryStorage() {
   return { getItem: key => entries.get(key) ?? null, setItem: (key, value) => entries.set(key, value) };
 }
 
+test('page IDs must be nonempty text without restricting valid special IDs', () => {
+  for (const id of ['', null, 42, {}, []]) {
+    const page = {...emptyNotebook(), id};
+    assert.throws(() => validateNotebook(page), /Notebook ID must be (nonempty )?text/);
+    assert.throws(() => parseImport(JSON.stringify(page)), /Notebook ID must be (nonempty )?text/);
+  }
+  for (const id of ['p:á/"一', '$page', '__proto__', 'constructor', ' ']) {
+    const page = {...emptyNotebook(), id};
+    assert.deepEqual(validateNotebook(page), page);
+    assert.deepEqual(parseImport(JSON.stringify(page)), page);
+  }
+});
+
 test('tabs support both alternating two-level layouts, including through hidden containers', async () => {
   for (const orientation of ['horizontal', 'vertical']) {
     const f = fixture(); const outer = f.act('add_block', { type: 'tabs', orientation }).block;
