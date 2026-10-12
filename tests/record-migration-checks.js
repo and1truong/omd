@@ -31,11 +31,12 @@ export async function migrationChecks({sourceRoot,extension='ts',startupVersion}
     const book=wrapPage(page);book.pages.push(other);book.parents[other.id]=page.id;book.activePageId=other.id;book.revision=29;
     return {book,text,drawing,reminder};
   }
-  async function seed(name,version,{book,drawing,reminder},mutate){
+  async function seed(name,version,{book,drawing,reminder}={},mutate){
     const opening=indexedDB.open(name,version);opening.onupgradeneeded=()=>{
       const db=opening.result;db.createObjectStore('meta');db.createObjectStore('records').createIndex('pageId','pageId');db.createObjectStore('reminders').createIndex('due','due');const history=db.createObjectStore('history');if(version>=3)history.createIndex('owner','owner');db.createObjectStore('delivery');
     };
-    const db=await req(opening),tx=db.transaction([...db.objectStoreNames],'readwrite'),completed=done(tx),records=tx.objectStore('records');
+    const db=await req(opening);if(!book){db.close();return;}
+    const tx=db.transaction([...db.objectStoreNames],'readwrite'),completed=done(tx),records=tx.objectStore('records');
     tx.objectStore('meta').put(metadataBook(book),'book');tx.objectStore('meta').put('Do not erase extra metadata','recovery-note');
     for(const value of bookRecords(book).values()){
       if(version<3&&value.kind==='files')continue;
@@ -59,7 +60,9 @@ export async function migrationChecks({sourceRoot,extension='ts',startupVersion}
     equal(after.stores.meta,before.stores.meta,'Metadata changed');check(after.stores.history.values.length===0,'Legacy patch paths survived upgrade');check(after.stores.delivery.values.length===before.stores.delivery.values.length,'Delivery ledger lost entries');equal(after.stores.delivery.values,before.stores.delivery.values,'Delivery payload changed');
     equal(after.stores.reminders.values,before.stores.reminders.values,'Reminder values changed');equal(after.stores.reminders.keys,[[f.book.pages[0].id,f.reminder.id]],'Reminder keys were not migrated');
     check((await store.dueReminders(Date.now())).length===1,'Reminder query failed');
-    const first=f.book.pages[0].id;await store.dispatch('update_block',{pageId:first,blockId:f.text.id,patch:{text:'changed'}});await store.undo();equal(await store.getPage(first),f.book.pages[0],'Undo changed migrated contents');await store.redo();check((await store.getPage(first)).blocks[0].text==='changed','Redo failed');
+    const first=f.book.pages[0].id,tab=await createStore(data,{name:dbName,initial:emptyNotebook,activePageId:first});check(tab.getActivePageId()===first&&store.getActivePageId()===f.book.activePageId,'Preferred page was not tab-local after migration');
+    await store.dispatch('page_select',{pageId:first});await store.dispatch('page_select',{pageId:f.book.activePageId});check(tab.getActivePageId()===first,'Migrated tab followed another tab navigation');equal((await snapshot(dbName)).stores.meta,after.stores.meta,'Page selection wrote migrated notebook metadata');await tab.close();
+    await store.dispatch('update_block',{pageId:first,blockId:f.text.id,patch:{text:'changed'}});await store.undo();equal(await store.getPage(first),f.book.pages[0],'Undo changed migrated contents');await store.redo();check((await store.getPage(first)).blocks[0].text==='changed','Redo failed');
     // Tombstones use native keys; undo must restore nested scene and files independently.
     await store.dispatch('remove_block',{pageId:first,blockId:'tabs:"'});await store.undo();equal((await store.getPage(first)).blocks[1],f.book.pages[0].blocks[1],'Nested delete/undo lost images');
     const journals=(await snapshot(dbName)).stores.history.values;check(journals.every(j=>j.changes.every(c=>Array.isArray(c.key)&&c.key.length===3)),'Journal points at old string record keys');
@@ -93,6 +96,7 @@ export async function migrationChecks({sourceRoot,extension='ts',startupVersion}
     try{await rejects(()=>createStore(data,{name:dbName,initial:emptyNotebook}),/import quota/);fail=false;const retry=await createStore(data,{name:dbName,initial:emptyNotebook});equal((await retry.getNotebook()).pages,f.book.pages.slice(0,version===1?1:2),`localStorage v${version} recovery failed`);check(data.getItem(STORAGE_KEY)===raw,'localStorage source was rewritten');if(version<3)check(data.getItem(`${STORAGE_KEY}.v${version}-backup`)===raw,'localStorage backup changed');await retry.close();}finally{IDBObjectStore.prototype.put=put;}
     evidence.push({case:`localStorage v${version} failed import / retry`,passed:true});
   }
+  for(const version of [1,2,3]){const dbName=name();await seed(dbName,version);const empty=await createStore(storage(),{name:dbName,initial:emptyNotebook});check((await empty.getNotebook()).pages.length===1,'Empty legacy database failed');check((await snapshot(dbName)).version===4,'Empty legacy database did not upgrade');await empty.close();evidence.push({case:`empty v${version} → initialized v4`,passed:true});}
   const data=storage(),fresh=await createStore(data,{name:name(),initial:emptyNotebook});check((await fresh.getNotebook()).pages.length===1,'New install failed');await fresh.close();
   for(const version of [1,2,3]){
     const dbName=name(),f=fixture();await seed(dbName,version,f);const legacy=await req(indexedDB.open(dbName,version));let changed=false;legacy.onversionchange=()=>{changed=true;legacy.close();};
