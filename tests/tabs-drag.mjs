@@ -162,6 +162,21 @@ async function failedRenameRecovery(orientation,nested=false) {
   console.log(`${engine} ${basePath||'/'}: ${orientation} ${nested?'nested':'root'} IME quota failure retains inline draft across redraw/navigation, copy, retry and cancel passed.`);
 }
 
+async function inactiveDoubleClick(orientation,nested=false) {
+  await call('page_add',{title:`Double-click ${orientation} ${nested?'nested':'root'}`});
+  const outer=await group(nested?(orientation==='horizontal'?'vertical':'horizontal'):orientation,null,'Quick edits');
+  const tabs=nested?await group(orientation,outer.ids[0],'Nested quick edits'):outer,id=tabs.ids[1];
+  for(let attempt=0;attempt<3;attempt++){
+    await header(tabs.ids[0]).click();await settled();const before=await revision(),old=await titleOf(tabs,id);
+    await header(id).dblclick({delay:0});await titleInput().waitFor();await page.evaluate(async()=>{await window.tabsApp.getStore().idle();await new Promise(requestAnimationFrame);});
+    assert.equal(await titleInput().isVisible(),true);assert.equal(await titleInput().inputValue(),old);assert.equal(await header(id).locator('..').locator('.tab-title-input').count(),1);assert.equal((await block(tabs.id)).activeTabId,id);assert.equal(await revision(),before+1);
+    if(attempt===0)await screenshot(`${orientation}-${nested?'nested':'root'}-inactive-dblclick`);
+    await titleInput().fill('Zero-delay inline edit');await titleInput().press('Enter');await settled();assert.equal(await titleOf(tabs,id),'Zero-delay inline edit');assert.equal(await revision(),before+2);
+    await page.locator('#undo-button').click();await settled();assert.equal(await titleOf(tabs,id),old);await header(id).click();await settled();assert.equal(await page.evaluate(()=>window.tabsApp.getStore().canRedo()),true);
+  }
+  console.log(`${engine} ${basePath||'/'}: ${orientation} ${nested?'nested':'root'} zero-delay inactive double-click retains live editor and one rename history entry passed.`);
+}
+
 try {
   await new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.once('error',reject);server.once('exit',code=>reject(new Error(`Server exited: ${code}`)));});
   browser=await ({chromium,webkit}[engine]).launch({headless:true});
@@ -172,6 +187,7 @@ try {
 
   for(const orientation of ['horizontal','vertical'])await staleTabControls(orientation);
   for(const orientation of ['horizontal','vertical'])for(const nested of [false,true])await failedRenameRecovery(orientation,nested);
+  for(const orientation of ['horizontal','vertical'])for(const nested of [false,true])await inactiveDoubleClick(orientation,nested);
 
   for(const orientation of ['horizontal','vertical']) {
     await call('page_add',{title:`Drag ${orientation} tabs without losing your work`});
