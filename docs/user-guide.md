@@ -56,7 +56,9 @@ Builds fingerprint the service-worker cache. Network-first app assets allow upgr
 
 Data stays in this browser profile and origin. Clearing site data or using a different device does not preserve it; export provides a portable backup. Reminders can run while the page is open and catch up when reopened. A browser-only service worker cannot guarantee a scheduled notification after the app has closed.
 
-View preferences, including sidebar state, content width and collapsed page branches, stay on this device and are excluded from notebook JSON exports.
+View preferences, including theme, sidebar state, content width and collapsed page branches, stay on this device and are excluded from notebook JSON exports.
+
+Settings → Appearance → Theme selects one **Light**, **Dark** or **System** mode for the whole app, not individual pages. It persists on this browser/site and updates other open same-origin tabs without switching their pages. **System** follows OS appearance changes while the app is open; explicit Light/Dark ignore them. The shell, Mermaid and embedded/full-page Excalidraw canvases use the same appearance. The first upgrade retains the active old page's mode; old per-page theme fields remain in backups but switching or importing pages no longer changes appearance. Changing theme never adds notebook undo history. WebMCP uses `get_view.theme` and `set_view.theme`; older `set_page.theme` calls change this same global preference.
 
 ## WebMCP
 
