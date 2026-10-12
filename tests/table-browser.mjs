@@ -56,8 +56,15 @@ try{
   await cell(2,1).evaluate(el=>el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'最後の文字'})));
   await page.waitForFunction(other=>tableApp.getStore().getActivePageId()===other,other);await call('page_select',{pageId:current});assert.equal((await grid()).rows[1].cells[0],'最後の文字');
   // Header semantics and pin configuration are persisted, not merely CSS state.
-  await block().getByRole('checkbox',{name:'Header row',exact:true}).uncheck();await settled();assert.equal(await block().locator('.table-header').count(),0);await block().getByRole('checkbox',{name:'Header row',exact:true}).check();await settled();
+  assert.equal(await block().locator('.table-options-panel:visible').count(),0);assert.equal(await block().locator('.table-column-tools').count(),0);
+  await block().locator('.table-options summary').click();assert.equal(await block().getByRole('checkbox',{name:'Pin header',exact:true}).isEnabled(),true);
+  await block().getByRole('checkbox',{name:'Header row',exact:true}).uncheck();await settled();assert.equal(await block().locator('.table-header').count(),0);assert.equal(await block().getByRole('checkbox',{name:'Pin header',exact:true}).isEnabled(),false);await block().getByRole('checkbox',{name:'Header row',exact:true}).check();await settled();
   await block().getByRole('combobox',{name:'Pinned first columns',exact:true}).selectOption('2');await settled();assert.equal((await grid()).pinnedColumns,2);
+  await block().locator('.table-options summary').click();
+  await (await menu('Column',2)).getByRole('button',{name:'Unpin columns',exact:true}).click();await settled();assert.equal((await grid()).pinnedColumns,0);
+  await (await menu('Column',2)).getByRole('button',{name:'Pin columns up to column 2',exact:true}).click();await settled();assert.equal((await grid()).pinnedColumns,2);
+  await (await menu('Row',1)).getByRole('button',{name:'Unpin header row',exact:true}).click();await settled();assert.equal((await grid()).pinnedHeader,false);assert.equal(await block().locator('.table-header-pinned').count(),0);
+  await (await menu('Row',1)).getByRole('button',{name:'Pin header row',exact:true}).click();await settled();assert.equal((await grid()).pinnedHeader,true);
   await mkdir(`${root}/test-results`,{recursive:true});await page.evaluate(async()=>await tableApp.setView({theme:'light',contentWidth:'reading',sidebarOpen:false}));await shot('light');
   await page.evaluate(async()=>await tableApp.setView({theme:'dark',contentWidth:'wide'}));await shot('dark');
   await page.emulateMedia({colorScheme:'dark'});await page.evaluate(async()=>await tableApp.setView({theme:'system'}));await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark');
@@ -82,7 +89,7 @@ try{
   // Mobile wide/tall table: pinned header/first columns remain fixed in local scrolling.
   await page.setViewportSize({width:320,height:844});await page.evaluate(async()=>await tableApp.setView({contentWidth:'reading',sidebarOpen:false,theme:'light'}));
   for(let i=0;i<10;i++)await call('table_row_add',{blockId:id});for(let i=0;i<3;i++)await call('table_column_add',{blockId:id});await shape(14,7);
-  await block().getByRole('combobox',{name:'Pinned first columns',exact:true}).selectOption('1');await settled();
+  await block().locator('.table-options summary').click();await block().getByRole('combobox',{name:'Pinned first columns',exact:true}).selectOption('1');await settled();await block().locator('.table-options summary').click();
   const pins=await block().locator('.table-scroll').evaluate(scroll=>{const header=scroll.querySelector('.table-header th'),first=scroll.querySelector('tbody tr td');scroll.scrollLeft=280;scroll.scrollTop=180;return {width:scroll.scrollWidth,client:scroll.clientWidth,headerTop:header.getBoundingClientRect().top,firstLeft:first.getBoundingClientRect().left,top:scroll.getBoundingClientRect().top,left:scroll.getBoundingClientRect().left};});
   assert.ok(pins.width>pins.client);assert.ok(Math.abs(pins.headerTop-pins.top)<=2);assert.ok(Math.abs(pins.firstLeft-pins.left)<=2);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Wide table must not overflow the whole page');await block().scrollIntoViewIfNeeded();await shot('mobile-pinned');
   // Arbitrary imported IDs must not collide when combined into DOM cell identity.
