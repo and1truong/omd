@@ -44,6 +44,8 @@ export function createDiagramManager(store,{notify}) {
   }
   function mount(block,pageId) {
     const id=key(pageId,block.id); used.add(id); let entry=entries.get(id);
+    // A valid imported notebook may reuse an ID with a different block type.
+    if(entry && entry.type!==block.type) { cleanup(entry);entry=null; }
     if(!entry) {
       const host=document.createElement('div');host.className=block.type==='mermaid'?'mermaid-body':'excalidraw-host'; host.dataset.diagramBlock=block.id;
       entry={host,pageId,blockId:block.id,type:block.type,token:0,saved:block.scene?JSON.stringify(block.scene):null,disposed:false};entries.set(id,entry);
@@ -74,7 +76,7 @@ export function createDiagramManager(store,{notify}) {
   return {
     mount,openFocus,closeFocus,
     updateSource(blockId,source) { const entry=entries.get(key(store.getState().id,blockId));if(entry)scheduleMermaid(entry,source); },
-    begin() { used=new Set(); if(focused) { const entry=entries.get(focused);try{get(entry.pageId,entry.blockId);if(entry.pageId!==store.getState().id)closeFocus();}catch{closeFocus();} } },
+    begin() { used=new Set(); if(focused) { const entry=entries.get(focused);try{const block=get(entry.pageId,entry.blockId);if(entry.pageId!==store.getState().id||block.type!=='excalidraw')closeFocus();}catch{closeFocus();} } },
     end() { if(focused)used.add(focused);for(const [id,entry] of entries)if(!used.has(id))cleanup(entry); if(focused){const entry=entries.get(focused);document.getElementById('canvas-stage-host').replaceChildren(entry.host);} },
     themeChanged() { for(const entry of entries.values()) { if(entry.type==='mermaid')scheduleMermaid(entry,entry.source);else if(entry.renderer)entry.renderer.draw(get(entry.pageId,entry.blockId).scene,theme()); } },
     flushAll() {for(const entry of entries.values())flush(entry);},

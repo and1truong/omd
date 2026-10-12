@@ -107,6 +107,15 @@ try {
   assert.ok(await page.locator('#canvas-stage').isHidden());
   await call('page_select',{pageId:firstPage});
   const exported = (await call('export_notebook')).json;
+  const changedType=JSON.parse(exported);
+  const importedPage=changedType.pages.find(p=>p.id===changedType.activePageId);
+  importedPage.blocks=importedPage.blocks.map(b=>b.id===diagram.id?{id:b.id,type:'excalidraw',title:'Imported canvas',scene:{elements:[],appState:{},files:{}}}:b);
+  const replaceType=call('import_notebook',{json:JSON.stringify(changedType)});
+  await page.getByRole('button',{name:'Back up & import',exact:true}).click();await replaceType;
+  await page.locator(`[data-diagram-block="${diagram.id}"] .excalidraw canvas`).first().waitFor();
+  const restoreType=call('import_notebook',{json:exported});
+  await page.getByRole('button',{name:'Back up & import',exact:true}).click();await restoreType;
+  await page.locator(`[data-block-id="${diagram.id}"] [data-mermaid-preview] svg`).waitFor();
   await call('set_page', { title: 'Before replacement' });
   const imported = call('import_notebook', { json: exported });
   await page.getByRole('button', { name: 'Back up & import', exact: true }).click();
