@@ -21,7 +21,10 @@ try {
     if (!registry?.getTools || !registry?.executeTool) throw new Error('Native document.modelContext discovery/execution unavailable.');
     const tool = (await registry.getTools()).find(t => t.name === `omd_${name}`);
     if (!tool) throw new Error(`Missing native tool: ${name}`);
-    const value = await registry.executeTool(tool, input);
+    // Chrome 151's WebIDL takes a JSON string. Newer drafts take an object;
+    // JSON-string arguments are deprecated from Chrome 155 onward.
+    const major = Number(navigator.userAgent.match(/(?:Chrome|Chromium)\/(\d+)/)?.[1] ?? 155);
+    const value = await registry.executeTool(tool, major < 155 ? JSON.stringify(input) : input);
     if (typeof value === 'string') { try { return JSON.parse(value); } catch { return value; } } return value;
   }, { name, input });
   let notebook = await call('get_notebook');
