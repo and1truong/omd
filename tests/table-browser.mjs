@@ -18,21 +18,25 @@ const settled=()=>page.evaluate(async()=>{await tableApp.flushPending();});
 const shape=async(rows,columns)=>{await page.waitForFunction(({id,rows,columns})=>{const block=document.querySelector(`[data-block-id="${id}"]`);return block?.querySelectorAll('.table-cell').length===rows*columns&&block.querySelector('.table-toolbar span')?.textContent===`${rows} rows × ${columns} columns`;},{id,rows,columns});};
 const shot=async(name)=>page.screenshot({path:`${root}/test-results/table-${engine}-${base?'omd':'root'}-${name}.png`});
 async function verifyInFlightNativeIme() {
-  for(const kind of ['page','title','cell']){
-    const input=kind==='page'?page.locator('#page-title'):kind==='title'?block().getByRole('textbox',{name:'table title',exact:true}):cell(2,1),original=await input.inputValue();
-    await page.evaluate(async()=>{
+  const hold=()=>page.evaluate(async()=>{
       const request=indexedDB.open(tableApp.getStore().databaseName()),db=await new Promise((resolve,reject)=>{request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
       const tx=db.transaction('meta','readwrite'),meta=tx.objectStore('meta');window.nativeHolding=true;
       const finished=new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error);});
       const tick=()=>{const get=meta.get('book');get.onsuccess=()=>{if(nativeHolding)tick();};};tick();
       window.releaseNativeTransaction=async()=>{nativeHolding=false;await finished;db.close();};
     });
+  for(const same of [false,true])for(const kind of ['page','title','cell']){
+    const input=kind==='page'?page.locator('#page-title'):kind==='title'?block().getByRole('textbox',{name:'table title',exact:true}):cell(2,1),original=await input.inputValue(),before=`Before ${kind} ${same?'same':'new'} IME`,preedit=same?before:`PREEDIT ${kind}`;
+    await hold();
     try {
-      await input.fill(`Before ${kind} IME`);await input.evaluate((el,kind)=>{el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.value=`PREEDIT ${kind}`;el.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));},kind);
+      await input.fill(before);await input.evaluate((el,preedit)=>{el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.value=preedit;el.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));},preedit);
       await page.evaluate(()=>releaseNativeTransaction());await page.evaluate(async()=>{await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));await tableApp.getStore().idle();});
       const saved=await page.evaluate(({kind,id})=>{const p=tableApp.getStore().getState(),b=p.blocks.find(b=>b.id===id);return kind==='page'?p.title:kind==='title'?b.title:b.rows[1].cells[0];},{kind,id});
-      assert.equal(saved,`Before ${kind} IME`);assert.equal(await input.inputValue(),`PREEDIT ${kind}`);assert.match(await page.locator('#save-status').innerText(),/^Saving/);
-      await input.evaluate((el,kind)=>{el.value=`Final ${kind} Việt 日本語`;el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));},kind);await settled();assert.equal(await input.inputValue(),`Final ${kind} Việt 日本語`);
+      assert.equal(saved,before);assert.equal(await input.inputValue(),preedit);assert.match(await page.locator('#save-status').innerText(),/^Saving/);
+      await hold();await input.evaluate((el,kind)=>{el.value=`Final ${kind} Việt 日本語`;el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));},kind);
+      await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));assert.match(await page.locator('#save-status').innerText(),/^Saving/);
+      assert.equal(await input.evaluate(el=>el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}))),true);
+      await page.evaluate(()=>releaseNativeTransaction());await settled();assert.equal(await input.inputValue(),`Final ${kind} Việt 日本語`);
       await input.fill(original);await settled();
     } finally {await page.evaluate(()=>releaseNativeTransaction());}
   }
