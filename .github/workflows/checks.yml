@@ -75,6 +75,7 @@ jobs:
       - run: npm install --ignore-scripts --no-audit --no-fund
       - run: npm run build
       - run: npm run test:startup
+      - run: npm run test:migration
       - run: npm run test:theme
       - run: npm run test:insertion
       - run: npm run test:checklist

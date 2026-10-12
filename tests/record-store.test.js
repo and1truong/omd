@@ -32,7 +32,8 @@ test('leaf events preserve sibling identity, notify only the selected block and 
   const a=(await store.dispatch('add_block',{type:'text',text:'a'})).blockId,b=(await store.dispatch('add_block',{type:'text',text:'b'})).blockId;
   const sibling=store.getRenderState().blocks[1],events=[];store.subscribeBlock(a,()=>events.push(a));store.subscribeBlock(b,()=>events.push(b));const writes=trace(store);
   try {await store.dispatch('update_block',{blockId:a,patch:{text:'changed'}});assert.equal(store.getRenderState().blocks[1],sibling);assert.deepEqual(events,[a]);
-    assert.deepEqual(writes.puts.filter(p=>p.store==='records').map(p=>JSON.parse(p.key)[1]).sort(),[`$block:${a}`,'$page'].sort());assert.deepEqual(writes.reads,[]);
+    assert.deepEqual(writes.puts.filter(p=>p.store==='records').map(p=>[p.value.kind,p.value.id]).sort(),[['block',a],['page',store.getActivePageId()]].sort());assert.deepEqual(writes.reads,[]);
+    assert.ok(writes.puts.filter(p=>p.store==='records').every(p=>p.key===undefined&&!Object.hasOwn(p.value,'key')));
     const history=writes.puts.find(p=>p.store==='history').value;assert.ok(history.changes.every(p=>p.inverse&&p.forward));assert.ok(!JSON.stringify(history).includes('"text":"b"'));
   }finally{writes.stop();store.close();}
 });
@@ -49,7 +50,7 @@ test('changing pages releases payloads; metadata navigation never reads unrelate
 test('canvas title changes do not read or write scene records',async()=>{
   const store=await createStore(memory(),{initial:emptyNotebook}),id=(await store.dispatch('add_block',{type:'excalidraw'})).blockId;
   const scene=store.getRenderState().blocks[0].scene,writes=trace(store);
-  try{await store.dispatch('update_block',{blockId:id,patch:{title:'New title'}});assert.equal(store.getRenderState().blocks[0].scene,scene);assert.ok(!writes.puts.some(p=>p.store==='records'&&p.key.includes('$scene:')));assert.deepEqual(writes.reads,[]);}finally{writes.stop();store.close();}
+  try{await store.dispatch('update_block',{blockId:id,patch:{title:'New title'}});assert.equal(store.getRenderState().blocks[0].scene,scene);assert.ok(!writes.puts.some(p=>p.store==='records'&&p.value.kind==='scene'));assert.deepEqual(writes.reads,[]);}finally{writes.stop();store.close();}
 });
 test('undo reads touched records and preserves the unrelated block instance',async()=>{
   const store=await createStore(memory(),{initial:emptyNotebook});const id=(await store.dispatch('add_block',{type:'text',text:'old'})).blockId;await store.dispatch('add_block',{type:'text',text:'sibling'});
@@ -100,7 +101,7 @@ test('Web Lock leases preserve live tab journals and reclaim abandoned session j
 test('drawing edits neither rewrite unchanged image bytes nor duplicate them into the undo journal',async()=>{
   const store=await createStore(memory(),{initial:emptyNotebook}),scene=makeBlock('excalidraw').scene;scene.files.image={id:'image',dataURL:'data:image/png;base64,'+'A'.repeat(200000)};
   const id=(await store.dispatch('add_block',{type:'excalidraw',scene})).blockId,changed=structuredClone(store.getRenderState().blocks[0].scene);changed.elements.push({id:'shape',type:'rectangle',x:1,y:1,width:50,height:50});const writes=trace(store);
-  try{await store.dispatch('update_block',{blockId:id,patch:{scene:changed}});assert.ok(!writes.puts.some(p=>p.store==='records'&&p.key.includes('$files:')));assert.ok(!JSON.stringify(writes.puts.find(p=>p.store==='history').value).includes('data:image'));await store.undo();assert.equal(store.getRenderState().blocks[0].scene.elements.length,0);assert.equal(store.getRenderState().blocks[0].scene.files.image.dataURL,scene.files.image.dataURL);}finally{writes.stop();await store.close();}
+  try{await store.dispatch('update_block',{blockId:id,patch:{scene:changed}});assert.ok(!writes.puts.some(p=>p.store==='records'&&p.value.kind==='files'));assert.ok(!JSON.stringify(writes.puts.find(p=>p.store==='history').value).includes('data:image'));await store.undo();assert.equal(store.getRenderState().blocks[0].scene.elements.length,0);assert.equal(store.getRenderState().blocks[0].scene.files.image.dataURL,scene.files.image.dataURL);}finally{writes.stop();await store.close();}
 });
 test('older IndexedDB scene records upgrade atomically to separate image-file maps',async()=>{
   const data=memory(),name=`old-preview-${crypto.randomUUID()}`,page=emptyNotebook(),drawing=makeBlock('excalidraw'),book=wrapPage(page);drawing.scene.files.image={id:'image',dataURL:'data:image/png;base64,AA=='};
