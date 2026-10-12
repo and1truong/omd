@@ -18,6 +18,14 @@ Pages can contain subpages up to 32 levels, counting root pages as level 1. Use 
 
 **Move to…** chooses a new parent, **Move to notebook** promotes a page to the root, and up/down actions reorder siblings. Moving a parent carries its entire subtree. The destination picker excludes the moving page and its descendants; the model independently rejects cycles. Deleting a page deletes its subtree after UI confirmation, preserves at least one page, selects a surviving parent when needed, and supports undo.
 
+## Writing and Markdown
+
+Text blocks use Tiptap: type Markdown shortcuts such as `## ` for a heading, `- ` for a list, or `**bold**`, and use the formatting toolbar for bold, italic, strikethrough, inline code, headings, lists, quotes and code blocks. Pasting plain Markdown renders its formatting; pasting into a code block keeps literal code. The toolbar appears on hover or focus on desktop and stays visible on mobile.
+
+**Enter** creates a paragraph inside the current text block. **Shift+Enter** creates an empty text block immediately after the current text or heading block and moves the cursor to its start. The original block keeps all its content, including text after the cursor. This also works inside tabs, expandable blocks and accordion sections. Undo removes the insertion; redo restores it. While editing a text block, Cmd/Ctrl+Z and Cmd/Ctrl+Shift+Z use notebook undo/redo.
+
+Text content is saved as Markdown in JSON backups and WebMCP's `text` field. Existing text loads without a storage migration or automatic rewrite. Editor libraries are bundled and cached for offline writing. Switching pages or hiding a section releases its editor and retains the saved content.
+
 ## Checklists
 
 Checklist items can contain children up to 4 levels, counting root items as level 1. Open an item's **…** menu to **Add child checklist item**, **Indent checklist item** under its previous sibling, or **Outdent checklist item** after its parent. While editing item text, Tab indents and Shift+Tab outdents when available; Enter adds the next sibling and focuses it. These shortcuts wait until text composition finishes.

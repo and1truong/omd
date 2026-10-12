@@ -113,7 +113,7 @@ try {
   assert.equal(await mobileGap.evaluate(el=>getComputedStyle(el).opacity),'1');
   await mobileGap.tap();await choose('text');const added=(await order())[1];
   assert.deepEqual(await order(),[mobileIds[0],added,mobileIds[1],mobileIds[2]]);await focused(added);
-  await page.locator(`[data-block-id="${added}"] textarea`).fill('Right after the first thought');
+  await page.locator(`[data-block-id="${added}"] [contenteditable="true"]`).fill('Right after the first thought');
   await page.screenshot({path:`${root}/test-results/block-insertion-${engine}-mobile.png`});
   await page.locator(`[data-block-id="${mobileIds[0]}"]`).getByRole('button',{name:'Block actions',exact:true}).tap();
   await page.locator('#block-actions-dialog').getByRole('button',{name:'Insert block after',exact:true}).tap();await choose('divider');
