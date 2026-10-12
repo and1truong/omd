@@ -15,12 +15,12 @@ export const uid = () => globalThis.crypto.randomUUID();
 const copy = <T>(value:T):T => structuredClone(value);
 function assert(test:unknown,message:string):asserts test {if(!test)throw new Error(message);}
 const object = (value:unknown):value is Record<string,unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
-function string(value:unknown,label:string) {
+function string(value:unknown,label:string):asserts value is string {
   assert(typeof value === 'string', `${label} must be text.`);
 }
 function integer(value:unknown,max:number) { assert(typeof value==='number'&&Number.isInteger(value) && value >= 0 && value <= max, 'Invalid position.'); }
 function boolean(value:unknown,label:string) { assert(typeof value === 'boolean', `${label} must be true or false.`); }
-function tableSize(value:unknown,max:number) { integer(value,max);assert(value!>0,`Tables need 1–${max} rows/columns.`); }
+function tableSize(value:unknown,max:number) { integer(value,max);assert(typeof value==='number'&&value>0,`Tables need 1–${max} rows/columns.`); }
 function date(value:unknown,label:string) { assert(typeof value === 'string' && ISO_DATE.test(value) && Number.isFinite(Date.parse(value)), `${label} must be an ISO date-time with a timezone.`); }
 function fields(value:unknown,allowed:readonly string[]) {
   assert(object(value), 'Expected an object.');

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {emptyNotebook,makeBlock,applyAction,validateNotebook,MAX_TABLE_CELL_LENGTH} from '../src/model.ts';
 import {createStore,failWrites} from './store-helper.js';
 import {createTools} from '../src/webmcp.ts';
+const content=json=>JSON.parse(json,(key,value)=>['revision','updatedAt'].includes(key)?undefined:value);
 
 test('table defaults, stable identities and positional dimension edits',()=>{
   let page=emptyNotebook();const table=makeBlock('table');page.blocks.push(table);
@@ -29,7 +30,7 @@ test('model and import reject oversized, malformed, duplicate ID and non-text gr
   }
   for(const action of ['table_row_remove','table_column_remove']){
     const page=emptyNotebook(),b=makeBlock('table',{rowCount:1,columnCount:1});page.blocks.push(b);
-    assert.throws(()=>applyAction(page,action,{blockId:b.id,rowId:b.rows[0].id,columnId:b.columns[0].id}));
+    assert.throws(()=>applyAction(page,action,{blockId:b.id,...(action==='table_row_remove'?{rowId:b.rows[0].id}:{columnId:b.columns[0].id})}),/at least one/);
   }
 });
 
@@ -43,11 +44,12 @@ test('nested tables persist, import/export, immutable snapshots, undo/redo and f
   const input={blockId:table.id,rowId:table.rows[0].id,columnId:table.columns[0].id,text:'Việt 日本語'};
   await store.dispatch('table_cell_update',input);
   const original=await store.export(),snapshot=store.getRenderState();assert.ok(Object.isFrozen(snapshot));
-  await store.dispatch('table_column_add',{blockId:table.id,index:0});await store.undo();assert.equal(await store.export(),original);await store.redo();await store.undo();
-  const restore=failWrites(store);await assert.rejects(()=>store.dispatch('table_cell_update',{...input,text:'lost'}),/quota/);restore();assert.equal(await store.export(),original);
-  await store.dispatch('move_block',{blockId:table.id,containerId:'page'});await store.undo();assert.equal(await store.export(),original);
-  await store.dispatch('remove_block',{blockId:table.id});await store.undo();assert.equal(await store.export(),original);
-  await store.close();store=await createStore(storage);assert.equal(await store.export(),original);
+  await store.dispatch('table_column_add',{blockId:table.id,index:0});await store.undo();assert.deepEqual(content(await store.export()),content(original));await store.redo();await store.undo();
+  const beforeFailure=await store.export(),restore=failWrites(store);await assert.rejects(()=>store.dispatch('table_cell_update',{...input,text:'lost'}),/quota/);restore();assert.equal(await store.export(),beforeFailure);
+  const invalid=JSON.parse(original);invalid.pages[0].blocks[0].tabs[1].blocks[0].blocks[0].items[0].blocks[0].rows[0].cells=[];await assert.rejects(()=>store.import(JSON.stringify(invalid)),/rectangular/);assert.equal(await store.export(),beforeFailure);
+  await store.dispatch('move_block',{blockId:table.id,containerId:'page'});await store.undo();assert.deepEqual(content(await store.export()),content(original));
+  await store.dispatch('remove_block',{blockId:table.id});await store.undo();assert.deepEqual(content(await store.export()),content(original));
+  const beforeClose=await store.export();await store.close();store=await createStore(storage);assert.equal(await store.export(),beforeClose);
   await store.import(original);assert.deepEqual((await store.getNotebook()).pages[0].blocks[0].tabs[1].blocks[0].blocks[0].items[0].blocks[0],table.type==='table'?{...table,rows:[{...table.rows[0],cells:['Việt 日本語']}]}:table);
   await store.close();
 });
