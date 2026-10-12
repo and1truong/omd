@@ -38,7 +38,7 @@ try {
   assert.equal(await page.locator('#page-title').inputValue(), 'My verified day');
   assert.ok(await page.locator('#sidebar').isVisible());
   const contentRevision=(await call('get_notebook')).revision;
-  await page.locator('#sidebar-toggle').click();await settle();assert.deepEqual(await call('get_view'),{sidebarOpen:false,contentWidth:'reading',collapsedPageIds:[]});
+  await page.locator('#sidebar-toggle').click();await settle();assert.deepEqual(await call('get_view'),{sidebarOpen:false,contentWidth:'reading',collapsedPageIds:[],theme:'system'});
   await call('set_view',{sidebarOpen:true,contentWidth:'wide'});assert.ok(await page.locator('#sidebar').isVisible());
   assert.equal(await page.locator('body').getAttribute('data-content-width'),'wide');
   assert.equal(await page.locator('#page-width').innerText(),'Fluid');assert.equal(await page.locator('#page-width').getAttribute('aria-pressed'),'true');
@@ -242,7 +242,7 @@ try {
   await call('set_page',{theme:'dark'});await page.screenshot({path:`${root}/test-results/desktop-dark.png`});await call('set_page',{theme:'system'});
   await page.setViewportSize({ width: 390, height: 844 });
   await page.locator('#sidebar').waitFor({state:'hidden'});
-  assert.deepEqual(await call('get_view'),{sidebarOpen:false,contentWidth:'reading',collapsedPageIds:[]});
+  assert.deepEqual(await call('get_view'),{sidebarOpen:false,contentWidth:'reading',collapsedPageIds:[],theme:'system'});
   await page.locator('#sidebar-toggle').click();await settle();assert.ok(await page.locator('#sidebar').isVisible());
   assert.ok(await page.evaluate(()=>document.getElementById('sidebar').contains(document.activeElement)),'Drawer opening must move keyboard focus inside.');
   await page.screenshot({path:`${root}/test-results/mobile-drawer.png`});
