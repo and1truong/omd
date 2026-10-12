@@ -83,3 +83,22 @@ test('non-settling flush skips native preedit but strict barriers still wait for
   let done=false;const strict=edits.flushAll().then(()=>done=true);await Promise.resolve();assert.equal(done,false);
   edits.stage(target,'Final 日本語','Page title');finish();await strict;assert.deepEqual(writes,[{pageId:'captured',title:'Final 日本語'}]);assert.equal(edits.list().length,0);
 });
+
+test('an in-flight native write never recursively commits preedit or clears its pending draft',async()=>{
+  for(const target of [{kind:'page',pageId:'page',field:'title'},{kind:'title',pageId:'page',blockId:'block'},{kind:'cell',pageId:'page',blockId:'block',rowId:'row',columnId:'column'}]){
+    let release,started,composing=false;const gate=new Promise(resolve=>release=resolve),first=new Promise(resolve=>started=resolve),writes=[];
+    const edits=createNativeEdits({dispatch:async(name,input)=>{writes.push(input);if(writes.length===1){started();await gate;}},idle:async()=>{}},{settled:async()=>{},isComposingTarget:()=>composing});
+    const saving=edits.write(target,'Before IME','Native field');await first;composing=true;edits.stage(target,'PREEDIT','Native field');release();await saving;
+    assert.equal(writes.length,1);assert.equal(edits.value(target,'saved'),'PREEDIT');assert.equal(edits.list().length,1);
+    await edits.flushAll({settle:false});assert.equal(writes.length,1);
+    await edits.write(target,'Final Việt 日本語','Native field');assert.equal(writes.length,2);assert.equal(edits.list().length,0);composing=false;await edits.flushAll();assert.equal(writes.length,2);
+  }
+});
+
+test('a final value queued behind a prior write remains committable during the next composition',async()=>{
+  let release,started,composing=false;const gate=new Promise(resolve=>release=resolve),first=new Promise(resolve=>started=resolve),writes=[];
+  const edits=createNativeEdits({dispatch:async(name,input)=>{writes.push(input.title);if(writes.length===1){started();await gate;}},idle:async()=>{}},{settled:async()=>{},isComposingTarget:()=>composing}),target={kind:'page',pageId:'page',field:'title'};
+  const saving=edits.write(target,'Before','Page title');await first;composing=true;edits.stage(target,'First preedit','Page title');const final=edits.write(target,'First final','Page title');
+  edits.stage(target,'Second PREEDIT','Page title');release();await Promise.all([saving,final]);assert.deepEqual(writes,['Before','First final']);assert.equal(edits.value(target,'saved'),'Second PREEDIT');
+  await edits.write(target,'Second final','Page title');assert.deepEqual(writes,['Before','First final','Second final']);assert.equal(edits.list().length,0);
+});

@@ -17,6 +17,26 @@ const focus=async(r,c)=>assert.equal(await cell(r,c).evaluate(el=>el===document.
 const settled=()=>page.evaluate(async()=>{await tableApp.flushPending();});
 const shape=async(rows,columns)=>{await page.waitForFunction(({id,rows,columns})=>{const block=document.querySelector(`[data-block-id="${id}"]`);return block?.querySelectorAll('.table-cell').length===rows*columns&&block.querySelector('.table-toolbar span')?.textContent===`${rows} rows × ${columns} columns`;},{id,rows,columns});};
 const shot=async(name)=>page.screenshot({path:`${root}/test-results/table-${engine}-${base?'omd':'root'}-${name}.png`});
+async function verifyInFlightNativeIme() {
+  for(const kind of ['page','title','cell']){
+    const input=kind==='page'?page.locator('#page-title'):kind==='title'?block().getByRole('textbox',{name:'table title',exact:true}):cell(2,1),original=await input.inputValue();
+    await page.evaluate(async()=>{
+      const request=indexedDB.open(tableApp.getStore().databaseName()),db=await new Promise((resolve,reject)=>{request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
+      const tx=db.transaction('meta','readwrite'),meta=tx.objectStore('meta');window.nativeHolding=true;
+      const finished=new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error);});
+      const tick=()=>{const get=meta.get('book');get.onsuccess=()=>{if(nativeHolding)tick();};};tick();
+      window.releaseNativeTransaction=async()=>{nativeHolding=false;await finished;db.close();};
+    });
+    try {
+      await input.fill(`Before ${kind} IME`);await input.evaluate((el,kind)=>{el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.value=`PREEDIT ${kind}`;el.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));},kind);
+      await page.evaluate(()=>releaseNativeTransaction());await page.evaluate(async()=>{await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));await tableApp.getStore().idle();});
+      const saved=await page.evaluate(({kind,id})=>{const p=tableApp.getStore().getState(),b=p.blocks.find(b=>b.id===id);return kind==='page'?p.title:kind==='title'?b.title:b.rows[1].cells[0];},{kind,id});
+      assert.equal(saved,`Before ${kind} IME`);assert.equal(await input.inputValue(),`PREEDIT ${kind}`);assert.match(await page.locator('#save-status').innerText(),/^Saving/);
+      await input.evaluate((el,kind)=>{el.value=`Final ${kind} Việt 日本語`;el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));},kind);await settled();assert.equal(await input.inputValue(),`Final ${kind} Việt 日本語`);
+      await input.fill(original);await settled();
+    } finally {await page.evaluate(()=>releaseNativeTransaction());}
+  }
+}
 async function verifyNativeDrafts(context,current,other) {
   const title=page.locator('#page-title'),description=page.locator('#page-subtitle'),tableTitle=()=>block().getByRole('textbox',{name:'table title',exact:true});
   const fields=await page.evaluate(()=>{const p=tableApp.getStore().getState();return {title:p.title,subtitle:p.subtitle};});
@@ -119,6 +139,7 @@ try{
   await page.evaluate(()=>{IDBObjectStore.prototype.put=tablePut;});await settled();assert.equal((await grid()).rows[1].cells[0],'Bản nháp còn nguyên');
   for(const notice of await page.locator('.notice.error button').all())await notice.click();
   await verifyNativeDrafts(context,current,other);
+  await verifyInFlightNativeIme();
   // Navigation through the real palette waits for the final composing cell and its captured page.
   await page.evaluate(()=>tableApp.openPalette());await page.locator('#page-search').fill('Other page');
   await cell(2,1).evaluate(el=>{el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.value='最後の文字';});
