@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
-const root = resolve(new URL('..', import.meta.url).pathname);
+import { fileURLToPath } from 'node:url';
+const root = fileURLToPath(new URL('..', import.meta.url));
 const source=path=>path==='service-worker.js'?'service-worker.ts':path.startsWith('./src/')||path.startsWith('src/')?path.replace(/\.js$/,'.ts'):path;
 const read = path => readFile(resolve(root, source(path)), 'utf8');
 test('all PWA shell assets, manifest icons and relative source imports exist', async () => {

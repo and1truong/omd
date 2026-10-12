@@ -168,8 +168,9 @@ try {
   assert.equal((await call('get_notebook')).blocks.find(b=>b.id===checklist.id).items[0].text,'Đang chọn chữ');
   await call('checklist_update',{blockId:checklist.id,itemId:composeItem.id,patch:{text:composeItem.text,done:composeItem.done}});await page.evaluate(()=>delete window.omdComposing);
   await page.evaluate(()=>{const input=document.getElementById('page-title');input.focus();input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));input.value='Tiêu đề đang chọn';input.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));});
-  await call('card_update',{blockId:board.id,cardId:card,patch:{description:'Background edit during title composition'}});assert.equal(await page.locator('#page-title').inputValue(),'Tiêu đề đang chọn');
-  await page.locator('#page-title').dispatchEvent('compositionend');await settle();assert.equal((await call('get_notebook')).title,'Tiêu đề đang chọn');await call('set_page',{title:'Written by a person'});
+  let titleUpdateFinished=false;const titleUpdate=call('card_update',{blockId:board.id,cardId:card,patch:{description:'Background edit during title composition'}}).then(result=>{titleUpdateFinished=true;return result;});
+  await page.waitForTimeout(100);assert.equal(titleUpdateFinished,false);assert.equal(await page.locator('#page-title').inputValue(),'Tiêu đề đang chọn');
+  await page.locator('#page-title').dispatchEvent('compositionend');await titleUpdate;await settle();assert.equal((await call('get_notebook')).title,'Tiêu đề đang chọn');await call('set_page',{title:'Written by a person'});
 
   // The engines have never been imported, even when hidden scenes are edited.
   const hiddenDiagram=(await call('add_block',{type:'mermaid',source:'flowchart LR\n Lazy --> Visible',containerId:outer.tabs[1].id})).block;
@@ -336,7 +337,9 @@ try {
   await call('open_canvas',{pageId:'quoted-page',blockId:'quote"\\canvas'},edgePage);await edgePage.locator('#canvas-stage .excalidraw canvas').first().waitFor();await call('close_canvas',{},edgePage);assert.ok(await edgePage.locator('#canvas-stage').isHidden());
   // An agent page switch during header composition still saves the final text to its original page.
   await edgePage.evaluate(()=>{const input=document.getElementById('page-title');input.focus();input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));input.value='Original-page IME edit';});
-  await call('page_select',{pageId:'a'},edgePage);await edgePage.locator('#page-title').dispatchEvent('compositionend');await settle(edgePage);assert.equal((await call('get_page',{pageId:'quoted-page'},edgePage)).title,'Original-page IME edit');assert.equal((await call('get_notebook',{},edgePage)).id,'a');
+  let pageSwitchFinished=false;const pageSwitch=call('page_select',{pageId:'a'},edgePage).then(result=>{pageSwitchFinished=true;return result;});
+  await edgePage.waitForTimeout(100);assert.equal(pageSwitchFinished,false);assert.equal(await edgePage.locator('#page-title').inputValue(),'Original-page IME edit');
+  await edgePage.locator('#page-title').dispatchEvent('compositionend');await pageSwitch;await settle(edgePage);assert.equal((await call('get_page',{pageId:'quoted-page'},edgePage)).title,'Original-page IME edit');assert.equal((await call('get_notebook',{},edgePage)).id,'a');
   await edgeContext.close();
   await verifyPageRoutes({browser,appURL,call,root});
   assert.deepEqual(errors.filter(error => error !== 'Tabs are limited to two levels.'), []);

@@ -54,9 +54,10 @@ export async function verifyPageRoutes({browser,appURL,call,root}) {
     const text=(await call('add_block',{type:'text',text:'Before browser history'},b)).block;
     await b.getByRole('textbox',{name:'text content',exact:true}).fill('Saved before navigating back');
     await b.goBack();await b.waitForURL(path(first));await ready(b);
+    await b.waitForFunction(pageId=>window.omdRouteStore.getActivePageId()===pageId,first);
     assert.equal(await active(b),first);
     assert.equal((await call('get_page',{pageId:second},b)).blocks.find(block=>block.id===text.id).text,'Saved before navigating back');
-    await b.goForward();await b.waitForURL(path(second));assert.equal(await active(b),second);
+    await b.goForward();await b.waitForURL(path(second));await b.waitForFunction(pageId=>window.omdRouteStore.getActivePageId()===pageId,second);assert.equal(await active(b),second);
     await synchronized(a,(await call('get_notebook',{},b)).revision);
     await call('page_select',{pageId:first},a);
     await a.screenshot({path:`${root}/test-results/routes-left.png`});await b.screenshot({path:`${root}/test-results/routes-right.png`});
