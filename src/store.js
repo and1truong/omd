@@ -11,10 +11,10 @@ export async function createStore(storage, options = {}) {
   validateNotebook(materialize(loaded.records,loaded.meta.activePageId));
   const state=createZustandStore(subscribeWithSelector(()=>({meta:null,records:new Map(),options:{},page:null})));
   state.setState({meta:freeze(loaded.meta,true),records:loaded.records,page:freeze(materialize(loaded.records,loaded.meta.activePageId),true)});loaded=null;
-  const undoStack=[],redoStack=[],afterChange=new Set();let queue=Promise.resolve(),closed=false,pending=0,lastError=null;const statusListeners=new Set();
-  function status(){return {pending,error:lastError};}
+  const undoStack=[],redoStack=[],afterChange=new Set();let queue=Promise.resolve(),closed=false,pending=0,navigations=0,lastError=null;const statusListeners=new Set();
+  function status(){return {pending,navigating:navigations>0,error:lastError};}
   function notifyStatus(){for(const fn of statusListeners)fn(status());}
-  function enqueue(fn){pending++;lastError=null;notifyStatus();const task=queue.then(fn).catch(error=>{lastError=error;throw error;}).finally(()=>{pending--;notifyStatus();});queue=task.catch(()=>{});return task;}
+  function enqueue(fn,navigate=false){pending++;if(navigate)navigations++;lastError=null;notifyStatus();const task=queue.then(fn).catch(error=>{lastError=error;throw error;}).finally(()=>{pending--;if(navigate)navigations--;notifyStatus();});queue=task.catch(()=>{});return task;}
   function publish(meta,records,event={}) {
     if(meta.activePageId!==state.getState().meta.activePageId)materialize=makeMaterializer();
     state.setState({meta:freeze(meta,true),records,options:event,page:freeze(materialize(records,meta.activePageId),true)});
@@ -71,7 +71,7 @@ export async function createStore(storage, options = {}) {
         }
         await commit(next,changes,{actionName:action,changedBlockId:input.blockId,changedPageId:target,...options},{history:options.history??!['reminder_fired','page_select'].includes(action)});
         return {...result,revision:next.revision};
-      });
+      },['page_select','page_add','page_remove','import_notebook'].includes(action));
     },
     subscribe(fn){return state.subscribe(s=>s.meta,()=>{const s=state.getState();fn(s.page,s.options);});},
     subscribeBlock(id,fn){return state.subscribe(s=>[s.records.get(recordKey(s.meta.activePageId,`$block:${id}`))?.data,s.records.get(recordKey(s.meta.activePageId,`$scene:${id}`))?.data],()=>fn(state.getState().page,state.getState().options),{equalityFn:(a,b)=>a[0]===b[0]&&a[1]===b[1]});},

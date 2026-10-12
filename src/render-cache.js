@@ -61,8 +61,9 @@ export function createRenderCache({makeBlock,makeList,observeBlock,observeList,o
     entry.ids=data.map(b=>b.id);return entry.node;
   }
   function block(data,containerId,index,count) {
-    usedBlocks.add(data.id);const signature=blockSignature(data);let entry=blocks.get(data.id);
+    usedBlocks.add(data.id);let entry=blocks.get(data.id);
     if(Object.isFrozen(data)&&entry?.data===data&&entry.context===`${containerId}:${index}:${index===count-1}`){mark(data.id);return entry.node;}
+    const signature=blockSignature(data);
     // Synchronize descendants independently; changes inside a tab do not rebuild
     // its headers or its parent block.
     for(const child of visibleContainers(data))list(child.blocks,child.id);

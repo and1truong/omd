@@ -34,7 +34,7 @@ export function makeMaterializer() {
   const cache=new Map();
   return function materialize(records,pageId) {
     const get=id=>records.get(recordKey(pageId,id))?.data;
-    function list(id) {return get(`$container:${id}`).blockIds.map(block);}
+    function list(id) {const ids=get(`$container:${id}`).blockIds,result=ids.map(block);containerCache.set(result,ids);return result;}
     function block(id) {
       const data=get(`$block:${id}`),scene=get(`$scene:${id}`);let children=[];
       if(data.type==='tabs')children=data.tabs.map(t=>list(t.id));
@@ -47,7 +47,7 @@ export function makeMaterializer() {
       if(data.type==='tabs')value={...data,tabs:data.tabs.map((t,i)=>({...t,blocks:children[i]}))};
       if(data.type==='toggle')value={...data,blocks:children[0]};
       if(data.type==='accordion')value={...data,items:data.items.map((t,i)=>({...t,blocks:children[i]}))};
-      cache.set(id,{data,scene,children,value});return value;
+      ownCache.set(value,data);cache.set(id,{data,scene,children,value});return value;
     }
     const value={...get('$page'),blocks:list('page')};
     for(const id of cache.keys())if(!records.has(recordKey(pageId,`$block:${id}`)))cache.delete(id);

@@ -299,7 +299,7 @@ async function boot() {
   });
   shell=setupShell(store,{beforeNavigate:()=>diagrams.beforeNavigate(),openPalette,confirm:confirmAction,onError:error=>notify(error.message,'error',true)});
   store.subscribe(render); render(store.getRenderState());
-  store.subscribeStatus(({pending,error})=>{const status=$('#save-status');status.replaceChildren();const dot=element('span','status-dot');status.append(dot,document.createTextNode(error?'Not saved':pending?'Saving…':'Saved'));});
+  store.subscribeStatus(({pending,navigating,error})=>{$('#page-title').disabled=navigating;$('#page-subtitle').disabled=navigating;$('#notebook').inert=navigating;const status=$('#save-status');status.replaceChildren();const dot=element('span','status-dot');status.append(dot,document.createTextNode(error?'Not saved':pending?'Saving…':'Saved'));});
   palette = setupPalette(store, { onError: error => notify(error.message, 'error', true), beforeOpen:()=>shell.closeMobile(), beforeNavigate:()=>diagrams.beforeNavigate() });
   let fitFrame;window.addEventListener('resize',()=>{cancelAnimationFrame(fitFrame);fitFrame=requestAnimationFrame(()=>{for(const el of document.querySelectorAll('[data-autofit],.auto-height'))fit(el);});});
   $('#canvas-stage-close').addEventListener('click',closeCanvas);$('#canvas-stage-pages').addEventListener('click',openPalette);
