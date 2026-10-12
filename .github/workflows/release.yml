@@ -32,7 +32,7 @@ jobs:
             throw new Error('Run from release/vVERSION matching package.json.');
           appendFileSync(process.env.GITHUB_OUTPUT,`tag=v${version}\n`);
           NODE
-      - run: npm install --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
       - run: npm run typecheck
       - run: npm test
       - run: npm run build

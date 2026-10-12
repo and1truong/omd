@@ -4,10 +4,10 @@
 
 ## Requirements and local server
 
-Use Node.js 22 or newer. Install dependencies once, then start the app:
+Use Node.js 22 or newer. Install the locked dependency graph once, then start the app:
 
 ```sh
-npm install
+npm ci
 npm start
 ```
 
@@ -33,6 +33,8 @@ npx playwright install chromium
 npm run test:browser
 npm run test:checklist
 npm run test:editor
+npm run test:transition
+npm run test:diagrams
 ```
 
 The browser suite enables Chrome's native WebMCP feature and executes tools through the real registry. It also checks mobile layout, themes, reminders, import confirmation, persistent edits and offline reopening. An unavailable browser binary or unsupported native API is a verification failure. Adapter tests alone do not verify a Gemini integration; that requires a real extension session.
@@ -73,3 +75,5 @@ npm run test:release
 Packaging creates ZIP, tar.gz and `SHA256SUMS.txt` in `release`, with a dependency-free local launcher, dependency inventory and available third-party notices. Package tests extract each archive outside the checkout, start the server without `node_modules`, and verify every asset against the build.
 
 Pushing a `release/vVERSION` branch whose version matches `package.json` explicitly publishes that version. The Release workflow checks types, source tests, native browsers at root and `/omd/`, and extracted packages before creating a draft with assets and publishing it. It tags the tested commit and can also be run manually from the matching release branch. If publication fails, rerunning refreshes the assets and resumes only an unpublished draft targeting the same tested commit; published releases, unrelated existing tags and mismatched drafts cannot be overwritten. Update `docs/releases/vVERSION.md` for each release. Publishing a release is independent of merging changes into main; main remains the GitHub Pages source.
+
+See [ticket fixes and dependency verification](ticket-resolution.md) for input-transfer, native click, database recovery and patched bundle evidence.
