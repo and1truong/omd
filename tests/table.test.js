@@ -46,7 +46,7 @@ test('nested tables persist, import/export, immutable snapshots, undo/redo and f
   const original=await store.export(),snapshot=store.getRenderState();assert.ok(Object.isFrozen(snapshot));
   await store.dispatch('table_column_add',{blockId:table.id,index:0});await store.undo();assert.deepEqual(content(await store.export()),content(original));await store.redo();await store.undo();
   const beforeFailure=await store.export(),restore=failWrites(store);await assert.rejects(()=>store.dispatch('table_cell_update',{...input,text:'lost'}),/quota/);restore();assert.equal(await store.export(),beforeFailure);
-  const invalid=JSON.parse(original);invalid.pages[0].blocks[0].tabs[1].blocks[0].blocks[0].items[0].blocks[0].rows[0].cells=[];await assert.rejects(()=>store.import(JSON.stringify(invalid)),/rectangular/);assert.equal(await store.export(),beforeFailure);
+  const invalid=JSON.parse(original);invalid.pages[0].blocks[0].tabs[1].blocks[0].blocks[0].items[0].blocks[0].rows[0].cells=[];assert.throws(()=>store.import(JSON.stringify(invalid)),/rectangular/);assert.equal(await store.export(),beforeFailure);
   await store.dispatch('move_block',{blockId:table.id,containerId:'page'});await store.undo();assert.deepEqual(content(await store.export()),content(original));
   await store.dispatch('remove_block',{blockId:table.id});await store.undo();assert.deepEqual(content(await store.export()),content(original));
   const beforeClose=await store.export();await store.close();store=await createStore(storage);assert.equal(await store.export(),beforeClose);
