@@ -28,7 +28,7 @@ export const getView = () => shell!.getView();
 export const setView = async (patch:PartialView) => {if(patch.sidebarOpen)await beforeNavigate();return shell!.setView(patch);};
 export async function flushPending(){await tabTitleEdit?.flush();await tableEdits?.flushAll();await textEditors?.flushAll();await diagrams?.flushAll();}
 export const flushDiagrams=flushPending;
-async function beforeNavigate(){await tabTitleEdit?.flush();await tableEdits?.flushAll();await textEditors?.flushAll();await diagrams?.beforeNavigate();}
+async function beforeNavigate(){await tabTitleEdit?.flush();await tableEdits?.flushAll();await textEditors?.flushAll({settle:false});await diagrams?.beforeNavigate();}
 export async function openCanvas(blockId:string,pageId?:string) {
   const page=await store.getPage(pageId);findBlock(page,blockId,'excalidraw');await flushPending();
   shell?.closeMobile();

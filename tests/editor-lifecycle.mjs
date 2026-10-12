@@ -104,9 +104,52 @@ async function deletedDrafts(removePage=false) {
   await context.close();
 }
 
+async function composed(page,input,text) {
+  await input.evaluate((el,text)=>{
+    el.focus();el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));
+    el.replaceChildren(Object.assign(document.createElement('p'),{textContent:text}));el.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));
+  },text);
+}
+async function compositionBarrier(type) {
+  const {context,page}=await fresh(),f=await fixture(page,{type}),input=f.itemId?editor(page,f.itemId):textEditor(page,f.blockId),draft=`Tiếng Việt 漢字 ${type}`;
+  await composed(page,input,draft);
+  await page.evaluate(()=>{window.exportFinished=false;window.strictExport=lifecycleApp.downloadJson().then(()=>{window.exportFinished=true;});});
+  await page.waitForTimeout(100);assert.equal(await page.evaluate(()=>exportFinished),false);
+  const downloadEvent=page.waitForEvent('download');await input.evaluate(el=>el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));
+  await page.evaluate(()=>strictExport);const download=await downloadEvent,stream=await download.createReadStream(),book=JSON.parse(Buffer.concat(await stream.toArray()).toString());
+  const block=book.pages.find(p=>p.id===f.pageId).blocks[0];assert.equal(f.itemId?block.items[0].text:block.text,draft);
+  await composed(page,input,`${draft} final`);
+  await input.evaluate(el=>el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));
+  await flush(page);assert.equal(await text(page,f),`${draft} final`);
+  await page.waitForFunction(({itemId,blockId})=>!document.querySelector(itemId?`[data-checklist-editor="${itemId}"] .markdown-editor`:`[data-text-editor="${blockId}"] .markdown-editor`).editor.view.composing,f);
+  await composed(page,input,`${draft} pending write`);
+  await page.evaluate(({blockId,itemId})=>{
+    const dispatch=lifecycleStore.dispatch;window.restoreCompositionDispatch=()=>{lifecycleStore.dispatch=dispatch;};
+    lifecycleStore.dispatch=async(name,input,options)=>{
+      if(input.blockId===blockId&&(itemId?name==='checklist_update':name==='update_block')&&input.patch?.text?.endsWith('pending write')){
+        window.finalWriteStarted=true;await new Promise(resolve=>{window.finishCompositionWrite=resolve;});
+      }return dispatch(name,input,options);
+    };
+  },f);
+  await input.evaluate(el=>el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));await page.waitForFunction(()=>window.finalWriteStarted);
+  await page.evaluate(()=>{window.strictFlushFinished=false;window.strictFlush=lifecycleApp.flushPending().then(()=>{window.strictFlushFinished=true;});});
+  await page.waitForTimeout(100);assert.equal(await page.evaluate(()=>strictFlushFinished),false);
+  await input.evaluate(el=>el.editor.chain().setTextSelection(el.editor.state.doc.content.size-1).insertContent(' tiếp').run());
+  await page.evaluate(()=>{restoreCompositionDispatch();finishCompositionWrite();});await page.evaluate(()=>strictFlush);
+  assert.equal(await text(page,f),`${draft} pending write tiếp`);
+  await page.waitForFunction(({itemId,blockId})=>!document.querySelector(itemId?`[data-checklist-editor="${itemId}"] .markdown-editor`:`[data-text-editor="${blockId}"] .markdown-editor`).editor.view.composing,f);
+  await composed(page,input,`${draft} on original page`);await input.evaluate(el=>{window.originalComposingEditor=el;});
+  const next=(await page.evaluate(()=>lifecycleStore.dispatch('page_add',{title:'Composition navigation destination'}))).pageId;
+  await page.waitForFunction(pageId=>lifecycleStore.getActivePageId()===pageId,next);assert.equal(await page.evaluate(()=>originalComposingEditor.isConnected),true);
+  await page.evaluate(()=>originalComposingEditor.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));await flush(page);
+  assert.equal(await text(page,f),`${draft} on original page`);assert.equal(await page.evaluate(()=>lifecycleStore.getActivePageId()),next);
+  await context.close();
+}
+
 try {
   await new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.once('error',reject);server.once('exit',code=>reject(new Error(`Server exited: ${code}`)));});
   await mkdir(`${root}/test-results`,{recursive:true});browser=await ({chromium,webkit}[engine]).launch({headless:true});
-  await historyBarrier();await retainedDrafts('checklist');await retainedDrafts('text');await deletedDrafts();await deletedDrafts(true);assert.deepEqual(errors,[]);
-  console.log(`${engine} ${basePath||'/'}: history barriers, detached drafts, remote deletion retry/download/recovery and reload passed.`);
+  await historyBarrier();await retainedDrafts('checklist');await retainedDrafts('text');await deletedDrafts();await deletedDrafts(true);
+  await compositionBarrier('checklist');await compositionBarrier('text');assert.deepEqual(errors,[]);
+  console.log(`${engine} ${basePath||'/'}: history/draft recovery, strict export/final composition barriers and original-page navigation passed.`);
 } finally {await browser?.close();server.kill();}

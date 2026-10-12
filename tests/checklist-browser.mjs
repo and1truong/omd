@@ -11,10 +11,10 @@ let browser,page,blockId;const errors=[];
 const call=(name,input={})=>page.evaluate(async({name,input})=>{
   const app=await import(new URL('./src/app.js',document.baseURI).href);await app.flushPending();const store=app.getStore();return name==='undo'?store.undo():name==='redo'?store.redo():store.dispatch(name,input);
 },{name,input});
-const items=()=>page.evaluate(async blockId=>{
-  const app=await import(new URL('./src/app.js',document.baseURI).href);await app.flushPending();const store=app.getStore();
+const items=(flush=true)=>page.evaluate(async({blockId,flush})=>{
+  const app=await import(new URL('./src/app.js',document.baseURI).href);if(flush)await app.flushPending();const store=app.getStore();
   const {findBlock}=await import(new URL('./src/model.js',document.baseURI).href);return findBlock(store.getState(),blockId,'checklist').block.items;
-},blockId);
+},{blockId,flush});
 const input=id=>page.locator(`[id="${id}"]`);
 const host=id=>page.locator(`[data-checklist-editor="${id}"]`);
 const row=id=>page.locator(`[data-item-id="${id}"] > .check-row`);
@@ -26,7 +26,7 @@ const placed=(id,parentId,index)=>page.waitForFunction(({id,parentId,index})=>{
   return !!entry&&!!list&&(list.parentElement?.dataset.itemId??'')===parentId&&[...list.children].indexOf(entry)===index;
 },{id,parentId,index});
 const menu=async id=>{await row(id).getByRole('button',{name:'Checklist item actions',exact:true}).click();return page.locator('#block-actions-dialog');};
-const children=id=>{const visit=items=>{for(const item of items){if(item.id===id)return item.children??[];const found=visit(item.children??[]);if(found)return found;}};return items().then(visit);};
+const children=(id,flush=true)=>{const visit=items=>{for(const item of items){if(item.id===id)return item.children??[];const found=visit(item.children??[]);if(found)return found;}};return items(flush).then(visit);};
 const addChild=async id=>{
   const count=(await children(id)).length;
   await (await menu(id)).getByRole('button',{name:'Add child checklist item',exact:true}).click();
@@ -107,8 +107,8 @@ async function markdownCases() {
     el.replaceChildren(Object.assign(document.createElement('p'),{textContent:'Đang gõ tiếng Việt'}));el.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));
     for(const key of ['Enter','Tab'])el.dispatchEvent(new KeyboardEvent('keydown',{key,shiftKey:true,isComposing:true,bubbles:true,cancelable:true}));
   });
-  await call('checklist_update',{blockId,itemId:leaf,patch:{text:'External edit during composition'}});
-  assert.equal(await input(leaf).innerText(),'Đang gõ tiếng Việt');assert.equal((await children(ids[2])).length,1);
+  await page.evaluate(async({blockId,itemId})=>(await import(new URL('./src/app.js',document.baseURI).href)).getStore().dispatch('checklist_update',{blockId,itemId,patch:{text:'External edit during composition'}}),{blockId,itemId:leaf});
+  assert.equal(await input(leaf).innerText(),'Đang gõ tiếng Việt');assert.equal((await children(ids[2],false)).length,1);
   await page.evaluate(async()=>{
     const store=(await import(new URL('./src/app.js',document.baseURI).href)).getStore(),dispatch=store.dispatch;
     store.dispatch=async(name,input,options)=>{

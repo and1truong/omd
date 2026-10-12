@@ -151,7 +151,14 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
       // directly instead of Tiptap's delayed React focus path.
       entry.editor.commands.setTextSelection(1);entry.editor.view.focus();entry.editor.view.dom.scrollIntoView({block:'nearest'});
     },
-    async flushAll(){await Promise.all([...entries.values()].map(flush));await store.idle();},
+    async flushAll({settle=true}:{settle?:boolean}={}){
+      const owns=(input:EventTarget)=>[...entries.values()].some(entry=>entry.editor.view.dom===input);
+      do {
+        if(settle)await composition.settled(owns);
+        await Promise.all([...entries.values()].map(flush));await store.idle();
+      } while(settle&&manager.hasPending());
+      manager.end();
+    },
     destroy(){for(const entry of entries.values())entry.editor.destroy();entries.clear();}
   };return manager;
 }
