@@ -61,6 +61,9 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - uses: actions/download-artifact@v4
         with:
           name: omd-release
@@ -72,19 +75,4 @@ jobs:
           RELEASE_TAG: ${{ needs.build.outputs.tag }}
         run: |
           (cd release && sha256sum --check SHA256SUMS.txt)
-          # Existing tags are immutable for this workflow; a retry never replaces a release.
-          set +e
-          git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" > /tmp/omd-release-tag
-          tag_status=$?
-          set -e
-          if [ "$tag_status" -eq 0 ]; then
-            echo "Tag already exists; refusing to replace $RELEASE_TAG."
-            exit 1
-          elif [ "$tag_status" -ne 2 ]; then
-            echo "Unable to check release tag."
-            exit "$tag_status"
-          fi
-          gh release create "$RELEASE_TAG" release/*.zip release/*.tar.gz release/SHA256SUMS.txt \
-            --target "$GITHUB_SHA" --title "omd $RELEASE_TAG" --draft \
-            --notes-file "docs/releases/$RELEASE_TAG.md"
-          gh release edit "$RELEASE_TAG" --draft=false --latest
+          node scripts/publish-release.mjs
