@@ -75,3 +75,4 @@ jobs:
       - run: npm run test:insertion
       - run: npm run test:checklist
       - run: npm run test:editor
+      - run: npm run test:tabs

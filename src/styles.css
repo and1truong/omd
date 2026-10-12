@@ -158,7 +158,12 @@ body[data-content-width=wide] .paper { max-width: none; }
 .tab-panel .block-controls { left: -27px; }
 .tab-panel .block-controls .icon-button { min-width: 23px; }
 .tab-editbar { display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--line); padding-bottom: 6px; margin-bottom: 10px; }
-.tab-label-edit { font-size: 11px; padding: 2px; flex: 1; }
+.tab-header { display: flex; position: relative; min-width: 0; align-items: center; }
+.tab-header > .tab-button { flex: 1; }
+.tab-rename { font-size: 11px; min-width: 22px; padding: 3px; opacity: 0; }
+.tab-header:hover > .tab-rename, .tab-header:focus-within > .tab-rename { opacity: 1; }
+.tab-title-input { font-size: 12px; padding: 6px 10px; max-width: 100%; }
+.tab-header > [hidden] { display: none; }
 .tab-panel .tabs-layout.vertical { grid-template-columns: 104px minmax(0,1fr); }
 .toggle-head, .accordion-head { display: flex; align-items: center; gap: 7px; }
 .toggle-arrow { min-width: 25px; min-height: 28px; padding: 3px; color: var(--secondary); display: flex; align-items: center; }
@@ -208,6 +213,15 @@ body[data-content-width=wide] .paper { max-width: none; }
 .dragging-block .drop-slot { height: 12px; border: 1px dashed var(--line); border-radius: 3px; }
 .dragging-block .block-insert-button { visibility: hidden; }
 .drop-active { outline: 2px dashed var(--focus); outline-offset: 2px; }
+.tab-button[draggable] { position: relative; cursor: grab; }
+.tab-button.dragging { cursor: grabbing; }
+.tab-drop-before::before, .tab-drop-after::after { content: ''; position: absolute; background: var(--focus); pointer-events: none; z-index: 1; }
+.tabs-layout.horizontal > .tablist > .tab-drop-before::before, .tabs-layout.horizontal > .tablist > .tab-drop-after::after { top: 0; bottom: 0; width: 3px; }
+.tabs-layout.horizontal > .tablist > .tab-drop-before::before { left: 0; }
+.tabs-layout.horizontal > .tablist > .tab-drop-after::after { right: 0; }
+.tabs-layout.vertical > .tablist > .tab-drop-before::before, .tabs-layout.vertical > .tablist > .tab-drop-after::after { left: 0; right: 0; height: 3px; }
+.tabs-layout.vertical > .tablist > .tab-drop-before::before { top: 0; }
+.tabs-layout.vertical > .tablist > .tab-drop-after::after { bottom: 0; }
 .dragging { opacity: .45; }
 dialog { border: 1px solid var(--line); background: var(--paper); color: var(--text); border-radius: 10px; box-shadow: 0 12px 60px #0003; padding: 24px; width: min(540px,calc(100% - 32px)); max-height: 85dvh; overflow: auto; }
 dialog::backdrop { background: #11191655; }
@@ -300,7 +314,7 @@ h3 { font-size: 13px; margin: 0 0 12px; }
   .tab-panel .tabs-layout.vertical { grid-template-columns: 74px minmax(0,1fr); }
   .tab-button { font-size: 11px; padding: 6px; }
   .tab-editbar .row-controls .icon-button { min-width: 21px; padding: 2px; }
-  .tab-label-edit { font-size: 10px; }
+  .tab-rename { opacity: 1; }
   .toggle-content { padding-left: 16px; margin-left: 8px; }
   .accordion-head { padding: 6px; gap: 3px; }
   .accordion-content { padding: 10px 12px; }
