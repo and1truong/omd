@@ -147,7 +147,7 @@ try {
     el.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));
     el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',shiftKey:true,isComposing:true,bubbles:true,cancelable:true}));
   });
-  await call('update_block',{blockId:next,patch:{text:'External edit during composition'}});
+  await page.evaluate(async({blockId})=>(await import(new URL('./src/app.js',document.baseURI).href)).getStore().dispatch('update_block',{blockId,patch:{text:'External edit during composition'}}),{blockId:next});
   assert.equal(await box(next).innerText(),'Đang gõ tiếng Việt');assert.equal((await order('page')).length,count);
   await page.evaluate(async()=>{
     const store=(await import(new URL('./src/app.js',document.baseURI).href)).getStore(),dispatch=store.dispatch;

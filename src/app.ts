@@ -23,6 +23,25 @@ let nativeEdits:ReturnType<typeof createNativeEdits>|undefined;
 let saveState:SaveStatus={pending:0,navigating:false,error:null},dismissedSaveError:Error|null=null;
 let recovery:HTMLElement|undefined;
 const recoveryNodes=new Map<string,HTMLElement>();
+const collapsedChecklistItems=new Set<string>();
+const checklistViewKey=(pageId:string,blockId:string,itemId:string)=>JSON.stringify([pageId,blockId,itemId]);
+const checklistControlId=(viewKey:string,part:'fold'|'children'|'menu')=>`checklist-${encodeURIComponent(viewKey)}-${part}`;
+function syncChecklistFolds(scope:ParentNode) {
+  const button=scope.querySelector<HTMLButtonElement>('.checklist-fold-all');if(!button)return;
+  const folds=[...scope.querySelectorAll<HTMLButtonElement>('.checklist-fold')],collapse=folds.some(fold=>fold.getAttribute('aria-expanded')==='true');
+  button.hidden=folds.length===0;button.textContent=collapse?'Collapse branches':'Expand branches';button.setAttribute('aria-label',collapse?'Collapse checklist branches':'Expand checklist branches');
+}
+function revealChecklistItem(target:HTMLElement) {
+  let list=target.closest<HTMLElement>('.checklist-items');
+  while(list) {
+    const parent=list.parentElement;
+    if(!parent?.classList.contains('checklist-item'))break;
+    const fold=parent.querySelector<HTMLButtonElement>(':scope > .check-row .checklist-fold');
+    if(fold){list.hidden=false;fold.setAttribute('aria-expanded','true');fold.title='Collapse checklist branch';fold.setAttribute('aria-label',fold.title);collapsedChecklistItems.delete(fold.dataset.viewKey!);}
+    list=parent.parentElement?.closest<HTMLElement>('.checklist-items')??null;
+  }
+  const block=target.closest('.block');if(block)syncChecklistFolds(block);
+}
 interface InsertionAnchor {blockId:string;side:'before'|'after'}
 interface DragData {containerId?:string;kind:'block'|'card'|'column'|'tab';blockId:string;cardId?:string;columnId?:string;tabId?:string;pageId?:string}
 let suppressTabClick=false;
@@ -30,9 +49,9 @@ let tabTitleEdit:{flush:()=>Promise<unknown>}|undefined;
 export const openPalette = () => {shell?.closeMobile();palette?.open();};
 export const getView = () => shell!.getView();
 export const setView = async (patch:PartialView) => {if(patch.sidebarOpen)await beforeNavigate();return shell!.setView(patch);};
-export async function flushPending(options:{settle?:boolean}={}){await tabTitleEdit?.flush();await nativeEdits?.flushAll(options);await textEditors?.flushAll();await diagrams?.flushAll();await nativeEdits?.flushAll(options);}
+export async function flushPending(options:{settle?:boolean}={}){await tabTitleEdit?.flush();await nativeEdits?.flushAll(options);await textEditors?.flushAll(options);await diagrams?.flushAll();await nativeEdits?.flushAll(options);}
 export const flushDiagrams=flushPending;
-async function beforeNavigate(){await tabTitleEdit?.flush();await nativeEdits?.flushAll();await textEditors?.flushAll();await diagrams?.beforeNavigate();await nativeEdits?.flushAll();}
+async function beforeNavigate(){await tabTitleEdit?.flush();await nativeEdits?.flushAll();await textEditors?.flushAll({settle:false});await diagrams?.beforeNavigate();await nativeEdits?.flushAll();}
 export async function openCanvas(blockId:string,pageId?:string) {
   const page=await store.getPage(pageId);findBlock(page,blockId,'excalidraw');await flushPending();
   shell?.closeMobile();
@@ -42,19 +61,42 @@ export async function openCanvas(blockId:string,pageId?:string) {
 }
 export const closeCanvas = async () => {await flushPending();diagrams?.closeFocus();};
 let deferredRender=false;
-const composition=createCompositionGuard({onSettled:()=>{if(deferredRender){deferredRender=false;render(store.getRenderState(),{reset:true});}}});
+const composition=createCompositionGuard({onSettled:()=>{if(deferredRender){deferredRender=false;render(store.getRenderState(),{reset:true});}else textEditors?.end();}});
 const themeQuery = matchMedia('(prefers-color-scheme: dark)');
 export function notify(message:string,kind = '', persistent = false) {
   const el = element('div', `notice ${kind}`); const text = element('span'); text.textContent = message;
   const close = button('×', 'Dismiss message', () => el.remove()); el.append(text, close); domId('notices').append(el);
   if (!persistent) setTimeout(() => el.remove(), kind === 'error' ? 12000 : 5000);
 }
+const editorDraftNotices=new Map<string,HTMLElement>();
+function editorDraftsChanged() {
+  const drafts=textEditors?.drafts()??[],ids=new Set(drafts.map(draft=>draft.id));
+  for(const [id,notice] of editorDraftNotices)if(!ids.has(id)){notice.remove();editorDraftNotices.delete(id);}
+  for(const draft of drafts) {
+    let notice=editorDraftNotices.get(draft.id);
+    if(!notice) {
+      notice=element('div','notice error');notice.dataset.editorDraft=draft.id;
+      const content=element('div'),message=element('p');message.textContent='Unsaved Markdown draft kept in this tab. Retry saving or recover it before closing.';
+      const preview=element('textarea','page-subtitle');preview.readOnly=true;preview.rows=3;preview.setAttribute('aria-label','Unsaved Markdown draft');
+      const run=(operation:()=>Promise<unknown>)=>{retry.disabled=recover.disabled=true;void operation().catch(error=>notify(errorOf(error).message,'error',true)).finally(()=>{retry.disabled=recover.disabled=false;});};
+      const retry=button('Retry save','Retry Markdown draft save',()=>run(()=>textEditors!.retry(draft.id)),'secondary-button');
+      const recover=button('Recover as note','Recover Markdown draft as a new note',()=>run(()=>textEditors!.recover(draft.id)),'secondary-button');
+      const download=button('Download draft','Download unsaved Markdown draft',()=>{
+        const current=textEditors!.drafts().find(item=>item.id===draft.id);if(!current)return;
+        const url=URL.createObjectURL(new Blob([current.text],{type:'text/markdown;charset=utf-8'})),link=element('a');link.href=url;link.download='omd-unsaved-draft.md';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+      },'secondary-button');
+      content.append(message,preview,retry,recover,download);notice.append(content);domId('notices').append(notice);editorDraftNotices.set(draft.id,notice);
+    }
+    notice.querySelector('textarea')!.value=draft.text;
+  }
+  updateSaveStatus();
+}
 function element<T extends keyof HTMLElementTagNameMap>(tag:T,className = '') { const el = document.createElement(tag); el.className = className; return el; }
 function button(label:string,aria:string,fn:(event:MouseEvent)=>unknown,className = 'icon-button') {
   const b = element('button', className); b.type = 'button'; if(labelIcon[label])b.append(icon(labelIcon[label]));else b.textContent=label; b.title = aria; b.setAttribute('aria-label', aria); b.addEventListener('click', fn); return b;
 }
-async function action<K extends CommandName>(name:K,input:CommandInput<K>,{quiet=false,focus}: {quiet?:boolean;focus?:string}={}):Promise<MutationResult<K>|null> {
-  try { input={...input,pageId:input.pageId??store.getActivePageId()}; if(!quiet)await flushPending(); const result = await store.dispatch(name, input, { quiet }); if (focus) requestAnimationFrame(()=>document.getElementById(focus)?.focus()); return result; }
+async function action<K extends CommandName>(name:K,input:CommandInput<K>,{quiet=false,focus}: {quiet?:boolean;focus?:string|(()=>void)}={}):Promise<MutationResult<K>|null> {
+  try { input={...input,pageId:input.pageId??store.getActivePageId()}; if(!quiet)await flushPending(); const result = await store.dispatch(name, input, { quiet }); if (focus) requestAnimationFrame(()=>typeof focus==='function'?focus():document.getElementById(focus)?.focus()); return result; }
   catch (error) { updateSaveStatus(); notify(errorOf(error).message, 'error', true); return null; }
 }
 function editable(value:string,aria:string,fn:(value:string,pageId:string)=>unknown,{multiline=false,className='',placeholder='',id,draft}: {multiline?:boolean;className?:string;placeholder?:string;id?:string;draft?:NativeTarget}={}) {
@@ -72,7 +114,7 @@ function writeNative(target:NativeTarget,value:string,label:string) {
 }
 function updateSaveStatus() {
   const drafts=nativeEdits?.list()??[],failed=drafts.filter(draft=>draft.error),status=domId('save-status'),dot=element('span','status-dot');
-  const label=failed.length?'Not saved':saveState.pending||drafts.length?'Saving…':saveState.error&&saveState.error!==dismissedSaveError?'Not saved':'Saved';
+  const label=failed.length?'Not saved':saveState.pending||drafts.length?'Saving…':(saveState.error&&saveState.error!==dismissedSaveError)||textEditors?.hasPending()?'Not saved':'Saved';
   status.dataset.state=label==='Not saved'?'error':label==='Saved'?'saved':'pending';
   status.replaceChildren(dot,document.createTextNode(label));
   if(!recovery){recovery=element('section','draft-recovery');recovery.setAttribute('aria-label','Unsaved edits');document.querySelector('.page-heading')!.after(recovery);}
@@ -208,8 +250,36 @@ function renderBlock(b:Block,containerId:string,index:number,count:number) {
   return shell;
 }
 function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
-  let total=0,done=0;
-  async function addItem(parentId?:string,index?:number) {const result=await action('checklist_add',{blockId:b.id,parentId,index});if(result)requestAnimationFrame(()=>domId(result.itemId)?.focus());}
+  let total=0,done=0;const pageId=store.getActivePageId();
+  function focusItem(itemId:string) {
+    requestAnimationFrame(()=>{
+      if(pageId!==store.getActivePageId())return;
+      const block=[...document.querySelectorAll<HTMLElement>('.block-type-checklist')].find(block=>block.dataset.blockId===b.id),entry=block&&[...block.querySelectorAll<HTMLElement>('[data-item-id]')].find(entry=>entry.dataset.itemId===itemId),target=entry?.querySelector<HTMLElement>(':scope > .check-row .markdown-editor');
+      if(target){revealChecklistItem(target);if(document.activeElement!==target)textEditors!.focusChecklist(b.id,itemId,pageId);}
+    });
+  }
+  async function addItem(parentId?:string,index?:number) {const result=await action('checklist_add',{pageId,blockId:b.id,parentId,index});if(result)focusItem(result.itemId);}
+  async function moveItem(itemId:string,parentId:string|undefined,index:number) {const result=await action('checklist_move',{pageId,blockId:b.id,itemId,parentId,index});if(result)focusItem(itemId);return result;}
+  function branchProgress(item:ChecklistItem):[number,number] {
+    let done=item.done?1:0,total=1;
+    for(const child of item.children??[]){const [childDone,childTotal]=branchProgress(child);done+=childDone;total+=childTotal;}
+    return [done,total];
+  }
+  async function setCollapsed(folds:HTMLButtonElement[],collapsed:boolean) {
+    const keys=new Set(folds.map(fold=>fold.dataset.viewKey));
+    try {
+      await flushPending();if(pageId!==store.getActivePageId())return;
+      const liveFolds=[...document.querySelectorAll<HTMLButtonElement>('.checklist-fold')].filter(fold=>keys.has(fold.dataset.viewKey));
+      for(const fold of liveFolds) {
+        const list=fold.closest('.checklist-item')!.querySelector<HTMLElement>(':scope > .checklist-items')!;
+        if(collapsed&&list.contains(document.activeElement))fold.focus();
+        list.hidden=collapsed;fold.setAttribute('aria-expanded',String(!collapsed));
+        fold.title=collapsed?'Expand checklist branch':'Collapse checklist branch';fold.setAttribute('aria-label',fold.title);
+        if(collapsed)collapsedChecklistItems.add(fold.dataset.viewKey!);else collapsedChecklistItems.delete(fold.dataset.viewKey!);
+      }
+      syncChecklistFolds(liveFolds[0]?.closest('.block')??shell);
+    }catch(error){notify(errorOf(error).message,'error',true);}
+  }
   function renderItems(items:ChecklistItem[],ancestors:ChecklistItem[]=[]):HTMLElement {
     const list=element('div','checklist-items');list.setAttribute('role','list');
     items.forEach((item,index)=>{
@@ -217,30 +287,47 @@ function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
       const parent=ancestors.at(-1),level=ancestors.length+1;
       const entry=element('div','checklist-item');entry.setAttribute('role','listitem');entry.dataset.itemId=item.id;entry.dataset.level=String(level);
       const row=element('div',`check-row ${item.done?'done':''}`),check=element('input');check.type='checkbox';check.checked=item.done;check.setAttribute('aria-label',`Complete ${item.text||'item'}`);
-      check.addEventListener('change',()=>action('checklist_update',{blockId:b.id,itemId:item.id,patch:{done:check.checked}}));
+      check.addEventListener('change',()=>action('checklist_update',{pageId,blockId:b.id,itemId:item.id,patch:{done:check.checked}}));
       const canIndent=index>0&&level+checklistHeight(item)<=MAX_CHECKLIST_LEVELS;
-      const indent=()=>action('checklist_move',{blockId:b.id,itemId:item.id,parentId:items[index-1].id,index:items[index-1].children?.length??0},{focus:item.id});
+      const indent=()=>moveItem(item.id,items[index-1].id,items[index-1].children?.length??0);
       const outdent=()=>{
         const grandparent=ancestors.at(-2),siblings=grandparent?.children??b.items;
-        return action('checklist_move',{blockId:b.id,itemId:item.id,parentId:grandparent?.id??'',index:siblings.findIndex(sibling=>sibling.id===parent!.id)+1},{focus:item.id});
+        return moveItem(item.id,grandparent?.id??'',siblings.findIndex(sibling=>sibling.id===parent!.id)+1);
       };
-      const text=textEditors!.mountChecklist(b.id,item,store.getActivePageId(),key=>{
+      const text=textEditors!.mountChecklist(b.id,item,pageId,key=>{
         if(key.ctrlKey||key.metaKey||key.altKey)return false;
         if(key.key==='Enter'){if(!key.repeat)void addItem(parent?.id,index+1);return true;}
         if(key.key==='Tab'&&((key.shiftKey&&parent)||(!key.shiftKey&&canIndent))){if(!key.repeat)void (key.shiftKey?outdent():indent());return true;}
         return false;
       });
-      const controls=rowsControls(()=>action('checklist_move',{blockId:b.id,itemId:item.id,index:index-1},{focus:item.id}),()=>action('checklist_move',{blockId:b.id,itemId:item.id,index:index+1},{focus:item.id}),()=>action('checklist_remove',{blockId:b.id,itemId:item.id}),index===0,index===items.length-1,'checklist item');
+      text.querySelector('.checklist-branch-progress')?.remove();
+      if(item.children?.length) {
+        const [done,total]=branchProgress(item),count=element('span','checklist-branch-progress');count.textContent=`${done}/${total}`;count.setAttribute('aria-label',`${done} of ${total} items complete in branch`);text.append(count);
+      }
+      const controls=element('div','row-controls');
       const more=button('…','Checklist item actions',()=>showMenu('block-actions-dialog','Checklist item actions',[
         {label:'Add child checklist item',icon:'plus',disabled:level>=MAX_CHECKLIST_LEVELS,run:()=>addItem(item.id)},
         {label:'Indent checklist item',icon:'right',disabled:!canIndent,run:indent},
-        {label:'Outdent checklist item',icon:'left',disabled:!parent,run:outdent}
-      ],more));more.id=`${item.id}-menu`;controls.prepend(more);
-      row.append(check,text,controls);entry.append(row);if(item.children?.length)entry.append(renderItems(item.children,[...ancestors,item]));list.append(entry);
+        {label:'Outdent checklist item',icon:'left',disabled:!parent,run:outdent},
+        {label:'Move checklist item up',icon:'up',disabled:index===0,run:()=>moveItem(item.id,undefined,index-1)},
+        {label:'Move checklist item down',icon:'down',disabled:index===items.length-1,run:()=>moveItem(item.id,undefined,index+1)},
+        {label:'Delete checklist item',icon:'trash',danger:true,run:()=>action('checklist_remove',{pageId,blockId:b.id,itemId:item.id})}
+      ],more));more.id=textEditors!.checklistId(b.id,item.id,pageId,'menu');controls.append(more);
+      if(item.children?.length) {
+        const children=renderItems(item.children,[...ancestors,item]),viewKey=checklistViewKey(pageId,b.id,item.id),collapsed=collapsedChecklistItems.has(viewKey);
+        children.id=checklistControlId(viewKey,'children');children.hidden=collapsed;
+        const fold=button('▾',collapsed?'Expand checklist branch':'Collapse checklist branch',()=>setCollapsed([fold],fold.getAttribute('aria-expanded')==='true'),'icon-button checklist-fold');
+        fold.id=checklistControlId(viewKey,'fold');
+        fold.setAttribute('aria-expanded',String(!collapsed));fold.setAttribute('aria-controls',children.id);fold.setAttribute('aria-describedby',text.querySelector<HTMLElement>('.markdown-editor')!.id);fold.dataset.viewKey=viewKey;
+        row.append(fold,check,text,controls);entry.append(row,children);
+      }else {const marker=element('span','checklist-leaf');marker.setAttribute('aria-hidden','true');row.append(marker,check,text,controls);entry.append(row);}
+      list.append(entry);
     });return list;
   }
-  const head=title(b,'☑'),progress=element('span','checklist-progress'),items=renderItems(b.items);progress.textContent=`${done} / ${total}`;head.append(progress);shell.append(head,items);
-  shell.append(button('+ Add an item', 'Add checklist item', async () => { const r = await action('checklist_add', { blockId: b.id }); if (r) requestAnimationFrame(() => domId(r.itemId)?.focus()); }, 'add-inline'));
+  const head=title(b,'☑'),progress=element('span','checklist-progress'),items=renderItems(b.items),meter=element('progress','checklist-meter');progress.textContent=`${done} / ${total}`;
+  meter.max=Math.max(1,total);meter.value=done;meter.setAttribute('aria-label','Checklist progress');head.append(progress,meter);shell.append(head,items);
+  const foot=element('div','checklist-footer'),foldAll=button('Collapse branches','Collapse checklist branches',()=>{const scope=foldAll.closest('.block')!;return setCollapsed([...scope.querySelectorAll<HTMLButtonElement>('.checklist-fold')],scope.querySelector('.checklist-fold[aria-expanded=true]')!==null);},'checklist-fold-all');
+  foot.append(button('+ Add an item','Add checklist item',()=>addItem(),'add-inline'),foldAll);shell.append(foot);syncChecklistFolds(shell);
 }
 function renderTable(shell:HTMLElement,b:BlockOf<'table'>) {
   const pageId=store.getActivePageId(),cellKey=(rowId:string,columnId:string)=>`table-cell-${encodeURIComponent(JSON.stringify([b.id,rowId,columnId]))}`,cellId=(r:number,c:number)=>cellKey(b.rows[r].id,b.columns[c].id);
@@ -330,20 +417,43 @@ function renderTabs(shell:HTMLElement,b:BlockOf<'tabs'>) {
   });
   b.tabs.forEach((t, i) => {
     const header=element('div','tab-header');
-    const tab = button(t.title || 'Untitled', `Open ${t.title || 'tab'}`, event => {if(suppressTabClick){event.preventDefault();return;}return action('tab_select', { blockId: b.id, tabId: t.id });}, 'tab-button'); tab.setAttribute('role', 'tab'); tab.setAttribute('aria-selected', String(t.id === b.activeTabId)); tab.id = `${t.id}-button`; tab.setAttribute('aria-controls', `${t.id}-panel`); tab.tabIndex = t.id === b.activeTabId ? 0 : -1;
+    let selecting:Promise<unknown>|undefined;
+    const tab = button(t.title || 'Untitled', `Open ${t.title || 'tab'}`, event => {if(suppressTabClick){event.preventDefault();return;}if(event.detail===2){void beginEdit();return;}return selecting=action('tab_select', { pageId, blockId: b.id, tabId: t.id });}, 'tab-button'); tab.setAttribute('role', 'tab'); tab.setAttribute('aria-selected', String(t.id === b.activeTabId)); tab.id = `${t.id}-button`; tab.setAttribute('aria-controls', `${t.id}-panel`); tab.tabIndex = t.id === b.activeTabId ? 0 : -1;
     draggable(tab,{kind:'tab',pageId,blockId:b.id,tabId:t.id});headers.push(header);tab.title+=' (drag to reorder; double-click or F2 to rename)';
     const rename=button('✎',`Rename ${t.title||'Untitled'} tab`,()=>void beginEdit(),'tab-rename icon-button');
     async function beginEdit() {
       if(suppressTabClick)return;
+      await selecting;
+      if(store.getActivePageId()!==pageId)return;
+      if(!header.isConnected){const live=document.getElementById(`${t.id}-button`);if(live?.closest('[data-block-id]')?.getAttribute('data-block-id')===b.id)live.dispatchEvent(new KeyboardEvent('keydown',{key:'F2',bubbles:true}));return;}
+      if(header.querySelector('input'))return;
       try{await tabTitleEdit?.flush();}catch{return;}
-      if(!header.isConnected||header.querySelector('input')||store.getActivePageId()!==pageId)return;
+      if(!header.isConnected){void beginEdit();return;}
+      if(header.querySelector('input')||store.getActivePageId()!==pageId)return;
       let value:string;try{value=findBlock(store.getRenderState(),b.id,'tabs').block.tabs.find(tab=>tab.id===t.id)!.title;}catch{return;}
       const input=element('input','tab-title-input');input.type='text';input.value=value;input.id=`${t.id}-label`;input.setAttribute('aria-label','Rename tab');input.size=Math.max(5,input.value.length);
-      const original=input.value;let finished=false,requested=false,pending:Promise<void>|undefined;
+      const original=input.value;let finished=false,requested=false,failed=false,pending:Promise<void>|undefined;
+      let editHeader:HTMLElement=header;let editTab=tab,editRename=rename,recovery:HTMLElement|undefined,notice:HTMLElement|undefined;
       const session={flush:()=>finish()};
       function close(focus=false) {
         finished=true;observer.disconnect();if(tabTitleEdit===session)tabTitleEdit=undefined;
-        input.remove();header.removeAttribute('role');for(const name of ['aria-label','aria-selected','aria-controls'])header.removeAttribute(name);tab.hidden=rename.hidden=false;if(focus&&tab.isConnected)tab.focus();
+        input.remove();recovery?.remove();notice?.remove();editHeader.style.removeProperty('flex-wrap');editHeader.removeAttribute('role');for(const name of ['aria-label','aria-selected','aria-controls'])editHeader.removeAttribute(name);editTab.hidden=editRename.hidden=false;if(focus&&editTab.isConnected)editTab.focus();
+      }
+      function recover() {
+        if(!recovery){
+          recovery=element('span','tab-title-recovery');
+          recovery.append(button('Retry','Retry tab rename',()=>void finish(true).catch(()=>{})),button('Copy','Copy tab title draft',()=>void navigator.clipboard.writeText(input.value).catch(error=>notify(errorOf(error).message,'error',true))),button('Cancel','Cancel tab rename',()=>close(true)));
+        }
+        const live=store.getActivePageId()===pageId?document.getElementById(`${t.id}-button`):null;
+        if(live?.closest('[data-block-id]')?.getAttribute('data-block-id')===b.id){
+          notice?.remove();editTab=live as HTMLButtonElement;editHeader=editTab.parentElement!;editRename=editHeader.querySelector<HTMLButtonElement>('.tab-rename')!;
+          editTab.hidden=editRename.hidden=true;editHeader.style.flexWrap='wrap';editHeader.setAttribute('role','tab');for(const name of ['aria-label','aria-selected','aria-controls'])editHeader.setAttribute(name,editTab.getAttribute(name)!);
+          if(input.parentElement!==editHeader||recovery.parentElement!==editHeader)editHeader.append(input,recovery);
+        }else{
+          if(!notice){notice=element('div','notice error');notice.style.flexWrap='wrap';const label=element('span');label.textContent=`Unsaved tab title — ${store.getPageMetadata(pageId)?.title||'Untitled page'} / ${original||'Untitled tab'}`;notice.append(label);}
+          if(!notice.isConnected)domId('notices').append(notice);
+          if(input.parentElement!==notice||recovery.parentElement!==notice)notice.append(input,recovery);
+        }
       }
       function finish(focus=false,finalComposition=false):Promise<void> {
         if(finished)return Promise.resolve();requested=true;
@@ -352,13 +462,14 @@ function renderTabs(shell:HTMLElement,b:BlockOf<'tabs'>) {
         const value=input.value;
         pending=Promise.resolve().then(async()=>{
           input.disabled=true;
+          recovery?.querySelectorAll('button').forEach(button=>button.disabled=true);
           if(value!==original)await store.dispatch('tab_update',{pageId,blockId:b.id,tabId:t.id,title:value},{quiet:true});
-          tab.textContent=value||'Untitled';tab.setAttribute('aria-label',`Open ${value||'tab'}`);rename.setAttribute('aria-label',`Rename ${value||'Untitled'} tab`);close(focus);
-        }).catch(error=>{input.disabled=false;notify(errorOf(error).message,'error',true);throw error;}).finally(()=>{pending=undefined;});return pending;
+          editTab.textContent=value||'Untitled';editTab.setAttribute('aria-label',`Open ${value||'tab'}`);editRename.setAttribute('aria-label',`Rename ${value||'Untitled'} tab`);close(focus);
+        }).catch(error=>{requested=false;input.disabled=false;recovery?.querySelectorAll('button').forEach(button=>button.disabled=false);failed=true;recover();notify(errorOf(error).message,'error',true);throw error;}).finally(()=>{pending=undefined;});return pending;
       }
-      const observer=new MutationObserver(()=>{if(!input.isConnected){observer.disconnect();void finish().catch(()=>{});}});observer.observe(document.body,{childList:true,subtree:true});
+      const observer=new MutationObserver(()=>{if(failed&&!finished)recover();else if(!input.isConnected)void finish().catch(()=>{});});observer.observe(document.body,{childList:true,subtree:true});
       composition.track(input,()=>requested?finish(false,true).catch(()=>{}):undefined,()=>pageId);
-      input.addEventListener('blur',()=>void finish().catch(()=>{}));
+      input.addEventListener('blur',()=>{if(!failed)void finish().catch(()=>{});});
       input.addEventListener('keydown',event=>{
         event.stopPropagation();if(event.isComposing||event.keyCode===229||composition.isComposing(input))return;
         if(event.key==='Enter'){event.preventDefault();void finish(true).catch(()=>{});}
@@ -366,17 +477,18 @@ function renderTabs(shell:HTMLElement,b:BlockOf<'tabs'>) {
       });
       tabTitleEdit=session;tab.hidden=rename.hidden=true;header.setAttribute('role','tab');for(const name of ['aria-label','aria-selected','aria-controls'])header.setAttribute(name,tab.getAttribute(name)!);header.append(input);input.focus();input.select();
     }
+    tab.addEventListener('mousedown',event=>{if(event.button===0&&event.detail===2){event.preventDefault();void beginEdit();}});
     tab.addEventListener('dblclick',()=>void beginEdit());
     tab.addEventListener('keydown', e => { const keys = b.orientation === 'horizontal' ? ['ArrowLeft', 'ArrowRight'] : ['ArrowUp', 'ArrowDown']; let n;
       if(e.key==='F2'){e.preventDefault();void beginEdit();return;}
       if (e.key === keys[0]) n = (i - 1 + b.tabs.length) % b.tabs.length; if (e.key === keys[1]) n = (i + 1) % b.tabs.length; if (e.key === 'Home') n = 0; if (e.key === 'End') n = b.tabs.length - 1;
-      if (n !== undefined) { e.preventDefault(); action('tab_select', { blockId: b.id, tabId: b.tabs[n].id }, { focus: `${b.tabs[n].id}-button` }); }
+      if (n !== undefined) { e.preventDefault(); action('tab_select', { pageId, blockId: b.id, tabId: b.tabs[n].id }, { focus: `${b.tabs[n].id}-button` }); }
     });header.append(tab,rename);tablist.append(header);
   });
-  tablist.append(button('+', 'Add tab', () => action('tab_add', { blockId: b.id }), 'tab-button tab-plus'));
+  tablist.append(button('+', 'Add tab', () => action('tab_add', { pageId, blockId: b.id }), 'tab-button tab-plus'));
   const t = b.tabs.find(t => t.id === b.activeTabId)!; const panel = element('div', 'tab-panel'); panel.id = `${t.id}-panel`; panel.setAttribute('role', 'tabpanel'); panel.setAttribute('aria-labelledby', `${t.id}-button`);
   const edit = element('div', 'tab-editbar'); const i = b.tabs.indexOf(t);
-  edit.append(rowsControls(() => action('tab_move', { blockId: b.id, tabId: t.id, index: i - 1 }), () => action('tab_move', { blockId: b.id, tabId: t.id, index: i + 1 }), async () => { if (b.tabs.length > 1 && await confirmAction('Remove this tab?', 'Everything inside this tab will be removed. You can undo it.', 'Remove tab')) action('tab_remove', { blockId: b.id, tabId: t.id }); }, i === 0, i === b.tabs.length - 1, 'tab'));
+  edit.append(rowsControls(() => action('tab_move', { pageId, blockId: b.id, tabId: t.id, index: i - 1 }), () => action('tab_move', { pageId, blockId: b.id, tabId: t.id, index: i + 1 }), async () => { if (b.tabs.length > 1 && await confirmAction('Remove this tab?', 'Everything inside this tab will be removed. You can undo it.', 'Remove tab')) action('tab_remove', { pageId, blockId: b.id, tabId: t.id }); }, i === 0, i === b.tabs.length - 1, 'tab'));
   edit.querySelector<HTMLElement>('.row-controls')!.style.opacity = '1'; if (b.tabs.length === 1) edit.querySelector<HTMLButtonElement>('.delete')!.disabled = true;
   panel.append(edit, renderer.childList(t.id)); layout.append(tablist, panel); group.append(layout); shell.append(group);
 }
@@ -533,7 +645,7 @@ async function boot() {
   for (const close of document.querySelectorAll('[data-close]')) close.addEventListener('click', () => close.closest('dialog')!.close());
   for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', e => { if (e.target === dialog) { const rect = dialog.getBoundingClientRect(); if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) dialog.close(); } });
   diagrams=createDiagramManager(store,{notify});
-  textEditors=createTextEditors(store,{composition,notify,createNext:createTextAfter});
+  textEditors=createTextEditors(store,{composition,notify,createNext:createTextAfter,flushPending,onDraftsChange:editorDraftsChanged});
   nativeEdits=createNativeEdits(store,{
     settled:()=>composition.settled(input=>input instanceof Element&&(input.hasAttribute('data-native-draft')||input.id==='page-title'||input.id==='page-subtitle')),
     isComposingTarget:target=>{const input=document.querySelector(`[data-native-draft="${CSS.escape(nativeEdits!.id(target))}"]`);return !!input&&composition.isComposing(input);}

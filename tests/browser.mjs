@@ -15,7 +15,7 @@ const consoleErrors=[];
 const engineRequests=[];
 try {
   await new Promise((resolve,reject) => { server.stdout.once('data', resolve); server.once('error', reject); server.once('exit', code => reject(new Error(`Server exited: ${code}`))); });
-  browser = await chromium.launch({ headless: true, args: ['--enable-features=WebMCP,WebMCPTesting', '--enable-experimental-web-platform-features'] });
+  browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--enable-features=WebMCP,WebMCPTesting', '--enable-experimental-web-platform-features'] });
   const context = await browser.newContext({ viewport: { width: 1440, height: 1100 }, colorScheme: 'light' });
   page = await context.newPage(); page.on('pageerror', error => errors.push(error.message));page.on('console',msg=>{if(msg.type()==='error')consoleErrors.push(msg.text());});
   page.on('request',request=>{if(/\/(?:excalidraw|mermaid)-engine\.(?:js|css)/.test(request.url()))engineRequests.push(request.url());});
@@ -156,13 +156,15 @@ try {
   assert.ok(await page.evaluate(()=>window.omdIdentity.outer.isConnected&&window.omdIdentity.inner.isConnected&&window.omdIdentity.checklist.isConnected&&window.omdIdentity.input.isConnected));
   assert.equal(await page.getByRole('textbox',{name:'text content',exact:true}).innerText(),'Updated without rebuilding ancestors');
   await page.evaluate(()=>delete window.omdIdentity);
-  // Composition keeps the real DOM control connected through an external edit of the same block.
+  // Agent operations wait for composition without disconnecting the editing control.
   const composeItem=(await call('get_notebook')).blocks.find(b=>b.id===checklist.id).items[0];
-  await page.evaluate(id=>{const input=document.getElementById(id);window.omdComposing=input;input.focus();input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));input.replaceChildren(Object.assign(document.createElement('p'),{textContent:'Đang chọn chữ'}));input.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));},composeItem.id);
-  await call('checklist_update',{blockId:checklist.id,itemId:composeItem.id,patch:{done:false}});
+  await page.evaluate(id=>{const input=document.querySelector(`[data-checklist-editor="${id}"] .markdown-editor`);window.omdComposing=input;input.focus();input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));input.replaceChildren(Object.assign(document.createElement('p'),{textContent:'Đang chọn chữ'}));input.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));},composeItem.id);
+  const composingAgentUpdate=call('checklist_update',{blockId:checklist.id,itemId:composeItem.id,patch:{done:false}});
+  await page.waitForTimeout(100);
   assert.deepEqual(await page.evaluate(()=>[window.omdComposing.isConnected,window.omdComposing.innerText]),[true,'Đang chọn chữ']);
   await page.evaluate(()=>window.omdComposing.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));
-  await pollStore(page,({blockId,itemId})=>!document.getElementById(itemId).editor.view.composing&&window.omdPollingStore.getState().blocks.find(b=>b.id===blockId)?.items[0]?.text==='Đang chọn chữ',{blockId:checklist.id,itemId:composeItem.id});await settle();
+  await composingAgentUpdate;
+  await pollStore(page,({blockId,itemId})=>!document.querySelector(`[data-checklist-editor="${itemId}"] .markdown-editor`).editor.view.composing&&window.omdPollingStore.getState().blocks.find(b=>b.id===blockId)?.items[0]?.text==='Đang chọn chữ',{blockId:checklist.id,itemId:composeItem.id});await settle();
   assert.equal((await call('get_notebook')).blocks.find(b=>b.id===checklist.id).items[0].text,'Đang chọn chữ');
   await call('checklist_update',{blockId:checklist.id,itemId:composeItem.id,patch:{text:composeItem.text,done:composeItem.done}});await page.evaluate(()=>delete window.omdComposing);
   await page.evaluate(()=>{const input=document.getElementById('page-title');input.focus();input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));input.value='Tiêu đề đang chọn';input.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));});

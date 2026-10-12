@@ -57,6 +57,20 @@ Run `npm run build` and serve `dist` from a static HTTPS host. Relative asset, m
 
 The local server falls back to `index.html` for `/page/:id` document requests, while missing scripts/styles remain 404s. The build emits `404.html` for GitHub Pages deep links. On other static hosts, configure an equivalent document fallback. The shell derives its base before loading assets; the service worker serves the cached shell for offline page routes. Deep links require notebook data in the same browser profile/origin: sharing a URL alone does not transfer local data.
 
+The local and packaged launchers accept `OMD_BASE_PATH`, for example
+`OMD_BASE_PATH=/apps/page/demo node start.mjs` in an extracted package. Open
+`http://localhost:3000/apps/page/demo/`. The launcher inserts that explicit base
+into HTML responses, including the shell cached for offline deep links.
+
+Unconfigured static hosting can infer the root and normal prefixes such as
+`/omd/`, but a prefix containing a `/page/` segment is ambiguous with a notebook
+route. For such a static deployment, add an explicit
+`<base href="/apps/page/demo/">` before the bootstrap script in `index.html`, then
+rebuild so both shell documents and the cache fingerprint include the base, or
+configure the host to inject it into both shell responses. The bootstrap honors
+an existing base; changing which `/page/` occurrence it guesses cannot provide
+universal support.
+
 The GitHub Pages workflow runs only for pushes to `main` or a manual run on `main`. Both build and deploy jobs require `refs/heads/main`; a manual run selecting another branch skips them. Pull requests and feature branches use the separate Checks workflow. Set **Settings → Pages → Source** to **GitHub Actions**. Main then publishes to [omd](https://and1truong.github.io/omd/), unless a custom domain is configured. Generated files and a publishing branch are not committed.
 
 The deploy job uses the `github-pages` environment and Pages/OIDC permissions. Build checks include strict TypeScript, source tests and static-artifact integrity.
@@ -68,8 +82,14 @@ npm run build
 npm run check:static
 npm run package:release
 npm run test:release
+npm run test:release:browser
 ```
 
 Packaging creates ZIP, tar.gz and `SHA256SUMS.txt` in `release`, with a dependency-free local launcher, dependency inventory and available third-party notices. Package tests extract each archive outside the checkout, start the server without `node_modules`, and verify every asset against the build.
+
+`test:release:browser` requires Playwright Chromium and checks both extracted
+archives at `/apps/page/demo/`, including persisted page-ID links and offline
+reload/new-tab reopening. CI runs it with the browser checks and before release
+publication.
 
 Pushing a `release/vVERSION` branch whose version matches `package.json` explicitly publishes that version. The Release workflow checks types, source tests, native browsers at root and `/omd/`, and extracted packages before creating a draft with assets and publishing it. It tags the tested commit and can also be run manually from the matching release branch. If publication fails, rerunning refreshes the assets and resumes only an unpublished draft targeting the same tested commit; published releases, unrelated existing tags and mismatched drafts cannot be overwritten. Update `docs/releases/vVERSION.md` for each release. Publishing a release is independent of merging changes into main; main remains the GitHub Pages source.

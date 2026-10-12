@@ -48,6 +48,13 @@ jobs:
       - run: npm run build
       - run: npm run check:static
       - run: node tests/browser.mjs
+      - name: Install release archive tooling
+        if: matrix.scope == 'root'
+        run: apt-get update && apt-get install -y zip unzip
+      - run: npm run package:release
+        if: matrix.scope == 'root'
+      - run: npm run test:release:browser
+        if: matrix.scope == 'root'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -80,5 +87,6 @@ jobs:
       - run: npm run test:insertion
       - run: npm run test:checklist
       - run: npm run test:editor
+      - run: npm run test:editor-lifecycle
       - run: npm run test:table
       - run: npm run test:tabs

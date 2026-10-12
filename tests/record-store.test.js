@@ -27,6 +27,17 @@ function trace(store){const puts=[],reads=[],put=IDBObjectStore.prototype.put,ge
   IDBIndex.prototype.getAll=function(query,...args){if(this.objectStore.transaction.db.name===store.databaseName())reads.push(query);return getAll.call(this,query,...args);};
   return {puts,reads,clear(){puts.length=reads.length=0;},stop(){IDBObjectStore.prototype.put=put;IDBIndex.prototype.getAll=getAll;}};
 }
+test('already-active tab selection validates but preserves revision, identity, history and redo without writes',async()=>{
+  const store=await createStore(memory(),{initial:emptyNotebook});const blockId=(await store.dispatch('add_block',{type:'tabs'})).blockId;
+  const [active,other]=store.getRenderState().blocks[0].tabs;await store.dispatch('tab_update',{blockId,tabId:active.id,title:'Renamed'});await store.undo();
+  const revision=store.getRevision(),history=store.residency().undoEntries,page=store.getRenderState(),writes=trace(store),events=[];store.subscribe(()=>events.push(true));
+  try{
+    assert.deepEqual(await store.dispatch('tab_select',{blockId,tabId:active.id}),{revision});assert.equal(store.getRevision(),revision);assert.equal(store.getRenderState(),page);assert.equal(store.residency().undoEntries,history);assert.equal(store.canRedo(),true);assert.deepEqual(writes.puts,[]);assert.deepEqual(events,[]);
+    await assert.rejects(()=>store.dispatch('tab_select',{blockId,tabId:'missing'}),/not found/i);assert.equal(store.canRedo(),true);
+    await store.redo();assert.equal(store.getRenderState().blocks[0].tabs[0].title,'Renamed');
+    const before=store.getRevision();await store.dispatch('tab_select',{blockId,tabId:other.id});assert.equal(store.getRevision(),before+1);assert.equal(store.getRenderState().blocks[0].activeTabId,other.id);await store.undo();assert.equal(store.getRenderState().blocks[0].activeTabId,active.id);
+  }finally{writes.stop();await store.close();}
+});
 test('leaf events preserve sibling identity, notify only the selected block and write only touched records',async()=>{
   const store=await createStore(memory(),{initial:emptyNotebook});
   const a=(await store.dispatch('add_block',{type:'text',text:'a'})).blockId,b=(await store.dispatch('add_block',{type:'text',text:'b'})).blockId;

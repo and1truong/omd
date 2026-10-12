@@ -16,6 +16,8 @@ http.createServer(async (req, res) => {
     const file = resolve(root, route?'index.html':`.${path.endsWith('/') ? path + 'index.html' : path}`);
     if (!file.startsWith(root + sep)) { res.writeHead(403); res.end(); return; }
     if (!(await stat(file)).isFile()) throw new Error('Not a file');
-    const data = await readFile(file); res.writeHead(200, { 'Content-Type': `${mime[extname(file)] ?? 'application/octet-stream'}; charset=utf-8`, 'Cache-Control': 'no-cache' }); res.end(data);
+    let data = await readFile(file);
+    if (extname(file) === '.html') data = Buffer.from(data.toString('utf8').replace('<head>', `<head>\n  <base href="${basePath}/">`));
+    res.writeHead(200, { 'Content-Type': `${mime[extname(file)] ?? 'application/octet-stream'}; charset=utf-8`, 'Cache-Control': 'no-cache' }); res.end(data);
   } catch { res.writeHead(404); res.end('Not found'); }
 }).listen(port, '127.0.0.1', () => console.log(`omd: http://localhost:${port}`));
