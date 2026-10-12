@@ -1,9 +1,11 @@
 import { createStore } from './store.js';
 import { STORAGE_KEY, allowedTypes, findBlock } from './model.js';
 import { startReminders } from './reminders.js';
+import { setupPalette } from './palette.js';
 
 const $ = selector => document.querySelector(selector);
-let store, dragData, pickerTarget = 'page';
+let store, palette, dragData, pickerTarget = 'page';
+export const openPalette = () => palette?.open();
 const themeQuery = matchMedia('(prefers-color-scheme: dark)');
 export function notify(message, kind = '', persistent = false) {
   const el = element('div', `notice ${kind}`); const text = element('span'); text.textContent = message;
@@ -240,6 +242,7 @@ function boot() {
   for (const close of document.querySelectorAll('[data-close]')) close.addEventListener('click', () => close.closest('dialog').close());
   for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', e => { if (e.target === dialog) { const rect = dialog.getBoundingClientRect(); if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) dialog.close(); } });
   store.subscribe(render); render(store.getState());
+  palette = setupPalette(store, { onError: error => notify(error.message, 'error', true) });
   for (const [selector, key] of [['#page-title', 'title'], ['#page-subtitle', 'subtitle']]) {
     const el = $(selector); let composing = false;
     const write = () => { action('set_page', { [key]: el.value }, { quiet: true }); fit(el); };
@@ -253,8 +256,8 @@ function boot() {
   $('#import-button').addEventListener('click', () => $('#import-file').click());
   $('#import-file').addEventListener('change', async event => {
     const file = event.target.files[0]; event.target.value = ''; if (!file) return;
-    try { const raw = await file.text(); const { parseImport } = await import('./model.js'); parseImport(raw);
-      if (await confirmAction('Replace this page?', 'Your current page will be exported as a backup before importing. Import replaces all page content and settings.', 'Back up & import')) { downloadJson(store.export(), `omd-before-import-${Date.now()}.json`); store.import(raw); notify('Notebook imported.'); }
+    try { const raw = await file.text(); const { parseBook } = await import('./notebook.js'); parseBook(raw);
+      if (await confirmAction('Replace this notebook?', 'All current pages will be exported as a backup before importing. Import replaces the entire notebook, page order and settings.', 'Back up & import')) { downloadJson(store.export(), `omd-before-import-${Date.now()}.json`); store.import(raw); notify('Notebook imported.'); }
     } catch (error) { notify(error.message, 'error', true); }
   });
   $('#settings-button').addEventListener('click', openSettings); $('#agent-status').addEventListener('click', openSettings);

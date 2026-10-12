@@ -12,7 +12,7 @@ const call = (tools, name, input = {}) => tools.find(t => t.name === `omd_${name
 test('registered tools execute shared actions and read back their persistent results', async () => {
   const store = setup(); const registry = new Map();
   const registered = await registerWebMCP(store, {}, { registry: { registerTool(tool, { signal }) { registry.set(tool.name, tool); signal.addEventListener('abort', () => registry.delete(tool.name)); } } });
-  assert.ok(registered.supported); assert.equal(registered.count, 37);
+  assert.ok(registered.supported); assert.equal(registered.count, 45);
   const tools = [...registry.values()];
   const outer = (await call(tools, 'add_block', { type: 'tabs', orientation: 'horizontal' })).block;
   const inner = (await call(tools, 'add_block', { type: 'tabs', orientation: 'vertical', containerId: outer.tabs[0].id })).block;
@@ -47,7 +47,7 @@ test('agent imports require actual user confirmation and backup before replaceme
   assert.deepEqual(await call(tools, 'import_notebook', { json }), { imported: false, reason: 'cancelled' });
   assert.equal(store.getState().title, 'Keep me'); assert.equal(backup.length, 0);
   approve = true; await call(tools, 'import_notebook', { json });
-  assert.equal(JSON.parse(backup[0]).title, 'Keep me'); assert.equal(store.getState().title, 'My day, on a page');
+  assert.equal(JSON.parse(backup[0]).pages[0].title, 'Keep me'); assert.equal(store.getState().title, 'My day, on a page');
   await assert.rejects(() => call(tools, 'import_notebook', { json: '{}' }), /version/);
 });
 

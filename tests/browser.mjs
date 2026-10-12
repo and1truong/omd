@@ -15,7 +15,7 @@ try {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1100 }, colorScheme: 'light' });
   const page = await context.newPage(); page.on('pageerror', error => errors.push(error.message));
   await page.goto('http://localhost:4317/');
-  await page.waitForFunction(() => document.getElementById('agent-status').textContent.includes('37 tools'));
+  await page.waitForFunction(() => document.getElementById('agent-status').textContent.includes('45 tools'));
   const call = (name, input = {}) => page.evaluate(async ({name,input}) => {
     const registry = document.modelContext;
     if (!registry?.getTools || !registry?.executeTool) throw new Error('Native document.modelContext discovery/execution unavailable.');
@@ -31,12 +31,26 @@ try {
   for (const b of notebook.blocks) await call('remove_block', { blockId: b.id });
   await call('set_page', { title: 'My verified day', notificationMode: 'toast' });
   assert.equal(await page.locator('#page-title').inputValue(), 'My verified day');
+  const firstPage = (await call('get_notebook')).id;
+  await page.keyboard.press('Control+k');
+  await page.locator('#page-search').fill('Project space');
+  await page.getByRole('button', { name: '+ Create “Project space”', exact:true }).click();
+  const createdPage = (await call('get_notebook')).id;
+  assert.notEqual(createdPage, firstPage);
+  await page.locator('#page-title').fill('A second page');
+  await page.keyboard.press('Meta+k');
+  await page.getByRole('button', { name:'Move A second page up', exact:true }).click();
+  assert.equal((await call('list_pages'))[0].pageId,createdPage);
+  await page.locator('#page-search').fill('My verified day');
+  await page.locator('#page-search').press('Enter');
+  assert.equal((await call('get_notebook')).id,firstPage);
+  assert.equal((await call('get_page',{pageId:createdPage})).title,'A second page');
   const checklist = (await call('add_block', { type: 'checklist', title: 'Test tasks' })).block;
   await call('checklist_add', { blockId: checklist.id, text: 'An agent-created task' });
   await page.getByRole('checkbox', { name: 'Complete An agent-created task', exact: true }).check();
   notebook = await call('get_notebook'); assert.ok(notebook.blocks[0].items[0].done);
   await page.locator('#page-title').fill('Written by a person');
-  await page.reload(); await page.waitForFunction(() => document.getElementById('agent-status').textContent.includes('37 tools'));
+  await page.reload(); await page.waitForFunction(() => document.getElementById('agent-status').textContent.includes('45 tools'));
   assert.equal(await page.locator('#page-title').inputValue(), 'Written by a person');
   assert.ok((await call('get_notebook')).blocks[0].items[0].done);
   const outer = (await call('add_block', { type: 'tabs', orientation: 'horizontal', title: 'Chapters' })).block;

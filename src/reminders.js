@@ -11,9 +11,9 @@ export function startReminders(store, { deliver, onError, locks = globalThis.nav
     const run = async () => {
       // A different tab may have delivered a reminder while this tab was suspended.
       store.reload();
-      for (const reminder of dueReminders(store.getState(), now())) {
-        store.dispatch('reminder_fired', { blockId: reminder.id, firedAt: new Date(now()).toISOString() });
-        await deliver(reminder, store.getState().notificationMode);
+      for (const page of store.getNotebook().pages) for (const reminder of dueReminders(page, now())) {
+        store.dispatch('reminder_fired', { pageId: page.id, blockId: reminder.id, firedAt: new Date(now()).toISOString() }, { quiet: true });
+        await deliver({ ...reminder, pageId: page.id }, page.notificationMode);
       }
     };
     try { if (locks?.request) await locks.request('omd.reminder-delivery', run); else await run(); }

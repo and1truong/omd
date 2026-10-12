@@ -1,5 +1,5 @@
 const CACHE = 'omd-shell-__OMD_BUILD__';
-const SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icons/icon-192.png', './icons/icon-512.png', './src/styles.css', './src/model.js', './src/store.js', './src/reminders.js', './src/app.js', './src/webmcp.js', './src/pwa.js', './src/integrations.js'];
+const SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icons/icon-192.png', './icons/icon-512.png', './src/styles.css', './src/model.js', './src/notebook.js', './src/store.js', './src/palette.js', './src/reminders.js', './src/app.js', './src/webmcp.js', './src/pwa.js', './src/integrations.js'];
 const paths = new Set(SHELL.map(path => new URL(path, self.registration.scope).pathname));
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting()));

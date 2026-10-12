@@ -1,4 +1,4 @@
-import { getStore, notify, openSettings, downloadJson, confirmAction, deliverReminder } from './app.js';
+import { getStore, notify, openSettings, openPalette, downloadJson, confirmAction, deliverReminder } from './app.js';
 import { registerWebMCP } from './webmcp.js';
 import { setupPWA } from './pwa.js';
 
@@ -6,13 +6,13 @@ const store = getStore();
 if (store) {
   setupPWA({ notify, openSettings });
   registerWebMCP(store, {
-    download: downloadJson, openSettings,
+    download: downloadJson, openSettings, openPalette,
     notificationPermission: () => 'Notification' in window ? Notification.permission : 'unsupported',
     confirmImport: signal => {
       const dialog = document.getElementById('confirm-dialog');
       const abort = () => dialog.close();
       signal?.addEventListener('abort', abort, { once: true });
-      return confirmAction('Replace this page?', 'The agent wants to import a notebook. Your current page will be downloaded as a backup before replacement.', 'Back up & import').finally(() => signal?.removeEventListener('abort', abort));
+      return confirmAction('Replace this notebook?', 'The agent wants to import a notebook. All your current pages will be downloaded as a backup before replacement.', 'Back up & import').finally(() => signal?.removeEventListener('abort', abort));
     },
     testReminder: () => deliverReminder({ id: 'test', title: 'A little nudge. Your reminders are ready.' }, store.getState().notificationMode)
   }, { onStatus: ({ supported, count, error }) => {
