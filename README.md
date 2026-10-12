@@ -6,21 +6,29 @@ A single-page web app with multiple notebook pages and editable text and heading
 
 ## Run
 
-Node 22 or newer. Run `npm start` and open localhost port 3000. No dependency installation or runtime dependencies to use the app. For production, run `npm run build` and serve `dist` from any static HTTPS host. Relative URLs support deployment at a subpath, including GitHub Pages.
+Node 22 or newer. Run `npm start` (builds first) and open localhost port 3000. Run `npm install` once to install the pinned diagram libraries and build tools. For production, run `npm run build` and serve `dist` from any static HTTPS host. Relative URLs support deployment at a subpath, including GitHub Pages.
 
 ## Pages
 
 Press Cmd+K on macOS or Ctrl+K elsewhere, or click the page button. Search and switch with arrows/Enter, create a named page, or use the per-page arrows to reorder the notebook. Each page has its own title, content and reminder preferences. All pages and their order/selection export together. Existing single-page storage upgrades automatically, preserving the original bytes in a v1 backup key.
 
+## Diagram blocks
+
+Add **Mermaid** for editable raw diagram definitions or fenced Mermaid Markdown, with live preview, syntax errors kept beside the source, and theme-aware rendering. Source remains editable/saved even if a diagram has syntax errors. Rendering uses Mermaid 12.1.0 in strict mode, disabling interactive links and protecting security configuration from source directives.
+
+Add **Excalidraw** for a real editable canvas, including drawing, text, shapes and image files. **Full page** expands the same canvas across the webpage and retains the notebook page title/description. **Back to notebook** restores the embedded canvas. Cmd/Ctrl+K works in canvas mode; changing pages closes it and saves pending edits. Scene elements, image files and viewport settings are part of notebook storage and JSON exports. Excalidraw 0.18.1 is the upstream security-patched release.
+
+Canvas changes save after a short debounce and flush before navigation, export, agent actions and page closure. Native Excalidraw undo remains available; external notebook undo updates the mounted scene. Runtime library assets and fonts are precached for offline editing.
+
 ## Install and offline use
 
 After the first online load, the service worker caches the app shell. Install from Chrome/Edge's browser menu, or Safari's Share → Add to Home Screen. When an install prompt is available, Settings also shows an install button. Closing the browser/PWA and reopening keeps the notebook in localStorage. Offline edits persist too.
 
-Builds fingerprint the service-worker cache. Network-first app assets allow upgrades; cached assets provide offline fallback. No server, account, analytics or AI API key is needed by omd.
+Builds fingerprint the service-worker cache. Network-first app assets allow upgrades; cached assets provide offline fallback. Mermaid, Excalidraw, React and their fonts/chunks are bundled into the static output and cached with the app. No CDN is required at runtime. No server, account, analytics or AI API key is needed by omd.
 
 ## WebMCP
 
-45 client-side tools cover reading the entire notebook, creating/editing/moving/removing all blocks and their items, selecting tabs, checklists, toggles/accordions, reminders, kanban columns/cards, themes/settings, undo/redo and import/export. UI and agents use the same validators and persistent store. Tool results include stable IDs for follow-up operations. Registration uses `document.modelContext`, with feature-detected compatibility for older `navigator.modelContext` implementations, and AbortSignal cleanup.
+48 client-side tools cover reading the entire notebook, creating/editing/moving/removing all blocks and their items, selecting tabs, checklists, toggles/accordions, reminders, kanban columns/cards, themes/settings, undo/redo and import/export. UI and agents use the same validators and persistent store. Tool results include stable IDs for follow-up operations. Registration uses `document.modelContext`, with feature-detected compatibility for older `navigator.modelContext` implementations, and AbortSignal cleanup.
 
 The footer/Settings show actual support and registration failures. Unsupported browsers retain full manual functionality; omd does not pretend a custom JavaScript bridge is native WebMCP.
 
@@ -45,7 +53,7 @@ Run `npm test` (no installation required) and `npm run build`. Tests cover atomi
 
 For native browser integration, install the development dependency with `npm install`, install Chromium with `npx playwright install chromium`, build, then run `npm run test:browser`. The browser test enables Chrome's native WebMCP feature, discovers and executes tools through the real registry (no polyfill), checks visible UI results and invalid inputs, then verifies mobile layout, themes, reminders, import confirmation, persistent edits and offline reopening. CI runs both sets of checks and uploads the static app and screenshots. An unavailable browser binary or unsupported native API is a verification failure, not a mocked success.
 
-Local verification: 22 model, reminder, asset and WebMCP adapter tests pass; build and JavaScript syntax checks pass. Browser/extension compatibility requires the native browser check and a real extension session; adapter tests alone do not verify a Gemini integration.
+Local verification: 32 model, multi-page migration, scene, reminder, asset and WebMCP adapter tests pass; JavaScript syntax checks pass. Diagram bundling and native browser verification run in CI. Browser/extension compatibility requires the native browser check and a real extension session; adapter tests alone do not verify a Gemini integration.
 
 ## PR stack
 

@@ -2,10 +2,14 @@ import { createStore } from './store.js';
 import { STORAGE_KEY, allowedTypes, findBlock } from './model.js';
 import { startReminders } from './reminders.js';
 import { setupPalette } from './palette.js';
+import { createDiagramManager } from './diagrams.js';
 
 const $ = selector => document.querySelector(selector);
-let store, palette, dragData, pickerTarget = 'page';
+let store, palette, diagrams, dragData, pickerTarget = 'page';
 export const openPalette = () => palette?.open();
+export const flushDiagrams = () => diagrams?.flushAll();
+export function openCanvas(blockId,pageId) { diagrams?.flushAll(); if(pageId && pageId!==store.getState().id)store.dispatch('page_select',{pageId}); diagrams.openFocus(blockId); }
+export const closeCanvas = () => diagrams?.closeFocus();
 const themeQuery = matchMedia('(prefers-color-scheme: dark)');
 export function notify(message, kind = '', persistent = false) {
   const el = element('div', `notice ${kind}`); const text = element('span'); text.textContent = message;
@@ -17,7 +21,7 @@ function button(label, aria, fn, className = 'icon-button') {
   const b = element('button', className); b.type = 'button'; b.textContent = label; b.title = aria; b.setAttribute('aria-label', aria); b.addEventListener('click', fn); return b;
 }
 function action(name, input, { quiet = false, focus } = {}) {
-  try { const result = store.dispatch(name, input, { quiet }); if (focus) requestAnimationFrame(() => document.getElementById(focus)?.focus()); return result; }
+  try { if(!quiet)diagrams?.flushAll(); const result = store.dispatch(name, input, { quiet }); if (focus) requestAnimationFrame(() => document.getElementById(focus)?.focus()); return result; }
   catch (error) { $('#save-status').textContent = 'Not saved'; notify(error.message, 'error', true); return null; }
 }
 function editable(value, aria, fn, { multiline = false, className = '', placeholder = '', id } = {}) {
@@ -32,7 +36,7 @@ function editable(value, aria, fn, { multiline = false, className = '', placehol
   if (multiline) input.dataset.autofit = 'true'; return input;
 }
 function fit(el) { el.style.height = 'auto'; el.style.height = `${el.scrollHeight}px`; }
-function fitAll() { for (const el of document.querySelectorAll('textarea')) fit(el); }
+function fitAll() { for (const el of document.querySelectorAll('textarea')) if(!el.closest('.excalidraw'))fit(el); }
 function title(b, glyph) {
   const head = element('div', 'block-heading'); const icon = element('span', 'type-glyph'); icon.textContent = glyph; icon.setAttribute('aria-hidden', 'true');
   head.append(icon, editable(b.title, `${b.type} title`, value => action('update_block', { blockId: b.id, patch: { title: value } }, { quiet: true }), { className: 'block-title', placeholder: 'Untitled' })); return head;
@@ -93,6 +97,13 @@ function renderBlock(b, containerId, index, count) {
     case 'accordion': renderAccordion(shell, b); break;
     case 'reminder': renderReminder(shell, b); break;
     case 'kanban': renderKanban(shell, b); break;
+    case 'mermaid': {
+      shell.append(title(b,'◇'),editable(b.source,'Mermaid Markdown source',value=>{if(action('update_block',{blockId:b.id,patch:{source:value}},{quiet:true}))diagrams.updateSource(b.id,value);},{multiline:true,className:'mermaid-source',id:`${b.id}-source`,placeholder:'flowchart LR\n  A --> B'}),diagrams.mount(b,store.getState().id)); break;
+    }
+    case 'excalidraw': {
+      const head=title(b,'✎');head.append(button('↗ Full page','Open canvas full page',()=>openCanvas(b.id), 'add-inline'));
+      const placeholder=element('div','canvas-placeholder');placeholder.dataset.canvasPlaceholder=b.id;placeholder.append(diagrams.mount(b,store.getState().id));shell.append(head,placeholder); break;
+    }
   }
   return shell;
 }
@@ -181,7 +192,8 @@ const options = [
   ['checklist', null, '☑', 'Checklist', 'Little things, checked off'], ['tabs', 'horizontal', '▤', 'Horizontal tabs', 'Chapters, side by side'],
   ['tabs', 'vertical', '▥', 'Vertical tabs', 'A tidy list of spaces'], ['toggle', null, '▸', 'Expandable block', 'Tuck a thought away'],
   ['accordion', null, '≡', 'Accordion', 'A few collapsible sections'], ['reminder', null, '◴', 'Reminder', 'A gentle nudge for later'],
-  ['kanban', null, '▦', 'Kanban board', 'Keep things moving'], ['divider', null, '—', 'Divider', 'A little breathing room']
+  ['kanban', null, '▦', 'Kanban board', 'Keep things moving'], ['divider', null, '—', 'Divider', 'A little breathing room'],
+  ['mermaid',null,'◇','Mermaid','Markdown to a diagram'],['excalidraw',null,'✎','Excalidraw','A canvas for your thoughts']
 ];
 export function openPicker(containerId = 'page') {
   pickerTarget = containerId; const allowed = allowedTypes(store.getState(), containerId); const grid = $('#picker-options'); grid.replaceChildren();
@@ -197,22 +209,25 @@ export function openPicker(containerId = 'page') {
 }
 function applyTheme(theme) {
   const resolved = theme === 'system' ? themeQuery.matches ? 'dark' : 'light' : theme;
+  const changed=document.documentElement.dataset.theme!==resolved;
   document.documentElement.dataset.theme = resolved; document.querySelector('meta[name=theme-color]').content = resolved === 'dark' ? '#171c1a' : '#f5f4ef';
+  if(changed)diagrams?.themeChanged();
 }
 function render(state, { quiet = false } = {}) {
   applyTheme(state.theme); $('#theme').value = state.theme; $('#notification-mode').value = state.notificationMode;
   $('#save-status').replaceChildren(); const dot = element('span', 'status-dot'); $('#save-status').append(dot, document.createTextNode('Saved here'));
   $('#undo-button').disabled = !store.canUndo(); $('#redo-button').disabled = !store.canRedo();
-  if (quiet) return;
+  diagrams?.syncHeader(); if (quiet) return;
   // Preserve cursor and scroll when a command updates the rest of the page.
   const focused = document.activeElement; const focusId = focused?.id; const selection = focused?.selectionStart == null ? null : [focused.selectionStart, focused.selectionEnd];
   const scroll = [scrollX, scrollY];
   $('#page-title').value = state.title; $('#page-subtitle').value = state.subtitle;
-  $('#notebook').replaceChildren(blockList(state.blocks, 'page')); fitAll();
+  diagrams?.begin(); $('#notebook').replaceChildren(blockList(state.blocks, 'page')); diagrams?.end(); fitAll();
   if (focusId) { const next = document.getElementById(focusId); if (next) { next.focus({ preventScroll: true }); if (selection && next.setSelectionRange) next.setSelectionRange(...selection); } }
   scrollTo(...scroll);
 }
-export function downloadJson(raw = store.export(), filename = `omd-${new Date().toISOString().slice(0, 10)}.json`) {
+export function downloadJson(raw, filename = `omd-${new Date().toISOString().slice(0, 10)}.json`) {
+  diagrams?.flushAll(); raw ??= store.export();
   const url = URL.createObjectURL(new Blob([raw], { type: 'application/json' })); const a = element('a'); a.href = url; a.download = filename; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 export function openSettings() {
@@ -241,8 +256,11 @@ function boot() {
   $('#today').textContent = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }).format(new Date());
   for (const close of document.querySelectorAll('[data-close]')) close.addEventListener('click', () => close.closest('dialog').close());
   for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', e => { if (e.target === dialog) { const rect = dialog.getBoundingClientRect(); if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) dialog.close(); } });
+  diagrams=createDiagramManager(store,{notify});
   store.subscribe(render); render(store.getState());
-  palette = setupPalette(store, { onError: error => notify(error.message, 'error', true) });
+  palette = setupPalette(store, { onError: error => notify(error.message, 'error', true), beforeNavigate:()=>diagrams.beforeNavigate() });
+  $('#canvas-stage-close').addEventListener('click',closeCanvas);$('#canvas-stage-pages').addEventListener('click',openPalette);
+  window.addEventListener('pagehide',flushDiagrams);window.addEventListener('beforeunload',flushDiagrams);
   for (const [selector, key] of [['#page-title', 'title'], ['#page-subtitle', 'subtitle']]) {
     const el = $(selector); let composing = false;
     const write = () => { action('set_page', { [key]: el.value }, { quiet: true }); fit(el); };
@@ -250,14 +268,14 @@ function boot() {
   }
   $('#theme').addEventListener('change', e => action('set_page', { theme: e.target.value })); themeQuery.addEventListener('change', () => applyTheme(store.getState().theme));
   $('#notification-mode').addEventListener('change', e => action('set_page', { notificationMode: e.target.value }));
-  $('#undo-button').addEventListener('click', () => { try { store.undo(); render(store.getState()); } catch (e) { notify(e.message, 'error'); } });
-  $('#redo-button').addEventListener('click', () => { try { store.redo(); render(store.getState()); } catch (e) { notify(e.message, 'error'); } });
+  $('#undo-button').addEventListener('click', () => { try { diagrams.flushAll();store.undo(); render(store.getState()); } catch (e) { notify(e.message, 'error'); } });
+  $('#redo-button').addEventListener('click', () => { try { diagrams.flushAll();store.redo(); render(store.getState()); } catch (e) { notify(e.message, 'error'); } });
   $('#export-button').addEventListener('click', () => { downloadJson(); notify('Notebook exported. Keep it somewhere safe.'); });
   $('#import-button').addEventListener('click', () => $('#import-file').click());
   $('#import-file').addEventListener('change', async event => {
     const file = event.target.files[0]; event.target.value = ''; if (!file) return;
     try { const raw = await file.text(); const { parseBook } = await import('./notebook.js'); parseBook(raw);
-      if (await confirmAction('Replace this notebook?', 'All current pages will be exported as a backup before importing. Import replaces the entire notebook, page order and settings.', 'Back up & import')) { downloadJson(store.export(), `omd-before-import-${Date.now()}.json`); store.import(raw); notify('Notebook imported.'); }
+      if (await confirmAction('Replace this notebook?', 'All current pages will be exported as a backup before importing. Import replaces the entire notebook, page order and settings.', 'Back up & import')) { diagrams.beforeNavigate();downloadJson(store.export(), `omd-before-import-${Date.now()}.json`); store.import(raw); notify('Notebook imported.'); }
     } catch (error) { notify(error.message, 'error', true); }
   });
   $('#settings-button').addEventListener('click', openSettings); $('#agent-status').addEventListener('click', openSettings);

@@ -6,10 +6,11 @@
   "description": "oh my day — a local-first notebook",
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "start": "node scripts/serve.mjs",
+    "start": "node scripts/start.mjs",
     "build": "node scripts/build.mjs",
     "test:browser": "node tests/browser.mjs"
   },
   "engines": { "node": ">=22" },
-  "devDependencies": { "playwright": "1.62.1" }
+  "dependencies": { "mermaid":"12.1.0", "@excalidraw/excalidraw":"0.18.1", "react":"19.2.0", "react-dom":"19.2.0" },
+  "devDependencies": { "playwright": "1.62.1", "esbuild":"0.25.5" }
 }

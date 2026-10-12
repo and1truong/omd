@@ -1,7 +1,8 @@
-/** The only document format. UI, imports, and agents share these invariants. */
+import { emptyScene, validateScene } from './scene.js';
+/** Page document format. UI, imports, and agents share these invariants. */
 export const FORMAT_VERSION = 1;
 export const STORAGE_KEY = 'omd.notebook.v1';
-export const BLOCK_TYPES = ['text', 'heading', 'checklist', 'tabs', 'toggle', 'accordion', 'reminder', 'kanban', 'divider'];
+export const BLOCK_TYPES = ['text', 'heading', 'checklist', 'tabs', 'toggle', 'accordion', 'reminder', 'kanban', 'divider', 'mermaid', 'excalidraw'];
 const THEMES = ['system', 'light', 'dark'];
 const MODES = ['notification', 'alert', 'toast'];
 export const uid = () => globalThis.crypto.randomUUID();
@@ -32,6 +33,8 @@ export function makeBlock(type, options = {}) {
     case 'text': return { ...base, text: options.text ?? '' };
     case 'heading': return { ...base, text: options.text ?? 'A new section' };
     case 'divider': return base;
+    case 'mermaid': return { ...base, title: options.title ?? 'A diagram in words', source: options.source ?? 'flowchart LR\n  Idea --> Plan\n  Plan --> Do' };
+    case 'excalidraw': return { ...base, title: options.title ?? 'A little drawing space', scene: options.scene ?? emptyScene() };
     case 'checklist': return { ...base, title: options.title ?? 'A few things to do', items: [] };
     case 'tabs': {
       const tabs = ['First tab', 'Second tab'].map(title => ({ id: uid(), title, blocks: [] }));
@@ -65,6 +68,8 @@ export function validateNotebook(notebook) {
       switch (b.type) {
         case 'text': case 'heading': fields(b, ['id', 'type', 'text']); string(b.text, 'Block text'); break;
         case 'divider': fields(b, ['id', 'type']); break;
+        case 'mermaid': fields(b, ['id','type','title','source']); string(b.title,'Diagram title'); string(b.source,'Mermaid source'); break;
+        case 'excalidraw': fields(b, ['id','type','title','scene']); string(b.title,'Canvas title'); validateScene(b.scene); break;
         case 'checklist':
           fields(b, ['id', 'type', 'title', 'items']); string(b.title, 'Checklist title', 200); list(b.items);
           for (const item of b.items) { fields(item, ['id', 'text', 'done']); id(item.id); string(item.text, 'Checklist item', 1000); boolean(item.done, 'Checked'); }
@@ -151,13 +156,13 @@ export function applyAction(current, action, input = {}) {
     case 'set_page':
       fields(input, ['title', 'subtitle', 'theme', 'notificationMode']); Object.assign(doc, input); break;
     case 'add_block': {
-      fields(input, ['type', 'containerId', 'index', 'text', 'title', 'orientation', 'dueAt']);
+      fields(input, ['type', 'containerId', 'index', 'text', 'title', 'orientation', 'dueAt','source','scene']);
       const container = findContainer(doc, input.containerId);
       const b = makeBlock(input.type, input); insert(container.blocks, b, input.index); result = { blockId: b.id, block: copy(b) }; break;
     }
     case 'update_block': {
       fields(input, ['blockId', 'patch']); const b = block();
-      const allowed = { text: ['text'], heading: ['text'], checklist: ['title'], tabs: ['title', 'orientation'], toggle: ['title', 'open'], accordion: ['title'], reminder: ['title', 'dueAt', 'enabled'], kanban: ['title'], divider: [] };
+      const allowed = { text: ['text'], heading: ['text'], checklist: ['title'], tabs: ['title', 'orientation'], toggle: ['title', 'open'], accordion: ['title'], reminder: ['title', 'dueAt', 'enabled'], kanban: ['title'], divider: [], mermaid:['title','source'], excalidraw:['title','scene'] };
       fields(input.patch, allowed[b.type]); Object.assign(b, input.patch);
       if (b.type === 'reminder' && ('dueAt' in input.patch || input.patch.enabled === true)) b.firedAt = null;
       result = { blockId: b.id }; break;

@@ -5,7 +5,7 @@ Interprets “PWD friendly” as PWA friendly. No application quotas on content 
 | Requirement | Implementation |
 | --- | --- |
 | PWA / single page / paper notebook | Relative static app, standalone manifest, cache-fingerprinted service worker, editable notebook canvas |
-| All features exposed to WebMCP | 37 feature-detected tools, same action/store path as UI, runtime schemas and validation |
+| All features exposed to WebMCP | 48 feature-detected tools, same action/store path as UI, runtime schemas and validation |
 | Dark/light awareness | OS-following system mode, explicit light/dark choices, persisted preference |
 | Checklist | Add, edit, check, remove and reorder items; Enter adds next item |
 | Horizontal and vertical tabs | Create, rename, select, remove and reorder; keyboard arrows, Home, End |
@@ -29,6 +29,10 @@ Interprets “PWD friendly” as PWA friendly. No application quotas on content 
 
 ## Architecture
 
-`model.js` is a pure validated action layer. `store.js` commits to localStorage before exposing a change. `app.js` renders DOM with textContent/inputs and dispatches commands. `webmcp.js` provides schemas and real agent callbacks. `reminders.js` schedules and records delivery. `pwa.js` and the service worker own installation/offline behavior. No runtime third-party dependencies.
+`model.js` is a pure validated action layer. `store.js` commits to localStorage before exposing a change. `app.js` renders DOM with textContent/inputs and dispatches commands. `webmcp.js` provides schemas and real agent callbacks. `reminders.js` schedules and records delivery. `pwa.js` and the service worker own installation/offline behavior. Core storage remains dependency-free; diagram rendering uses pinned Mermaid, Excalidraw and React bundled locally.
 
 This is intentionally a personal notebook, with plain text editing and local data. Rich text, cloud sync, accounts, collaboration and AI model hosting are outside the requested scope.
+
+## Multi-page and diagram extension
+
+Cmd/Ctrl+K lists, filters, switches, creates and reorders pages. All page data/order/selection export together; v1 storage is migrated with an original-byte backup. Reminders search every page. Mermaid accepts source or fenced Markdown and provides a theme-aware preview. Excalidraw is the real upstream canvas; full-webpage mode keeps the current notebook page header and retains the same React canvas instance. Pending edits flush before page switches, export, agent operations and closure. All rendering dependencies/fonts/chunks are cached from the same static origin.

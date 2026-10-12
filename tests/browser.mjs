@@ -15,7 +15,7 @@ try {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1100 }, colorScheme: 'light' });
   const page = await context.newPage(); page.on('pageerror', error => errors.push(error.message));
   await page.goto('http://localhost:4317/');
-  await page.waitForFunction(() => document.getElementById('agent-status').textContent.includes('45 tools'));
+  await page.waitForFunction(() => document.getElementById('agent-status').textContent.includes('48 tools'));
   const call = (name, input = {}) => page.evaluate(async ({name,input}) => {
     const registry = document.modelContext;
     if (!registry?.getTools || !registry?.executeTool) throw new Error('Native document.modelContext discovery/execution unavailable.');
@@ -50,7 +50,7 @@ try {
   await page.getByRole('checkbox', { name: 'Complete An agent-created task', exact: true }).check();
   notebook = await call('get_notebook'); assert.ok(notebook.blocks[0].items[0].done);
   await page.locator('#page-title').fill('Written by a person');
-  await page.reload(); await page.waitForFunction(() => document.getElementById('agent-status').textContent.includes('45 tools'));
+  await page.reload(); await page.waitForFunction(() => document.getElementById('agent-status').textContent.includes('48 tools'));
   assert.equal(await page.locator('#page-title').inputValue(), 'Written by a person');
   assert.ok((await call('get_notebook')).blocks[0].items[0].done);
   const outer = (await call('add_block', { type: 'tabs', orientation: 'horizontal', title: 'Chapters' })).block;
@@ -81,6 +81,27 @@ try {
   await page.locator('#theme').selectOption('system'); await page.emulateMedia({ colorScheme: 'dark' });
   await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
   await page.emulateMedia({ colorScheme: 'light' }); await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
+  const diagram=(await call('add_block',{type:'mermaid',source:'flowchart LR\n  One --> Two'})).block;
+  await page.locator(`[data-block-id="${diagram.id}"] [data-mermaid-preview] svg`).waitFor();
+  assert.ok(await page.locator(`[data-block-id="${diagram.id}"]`).textContent().then(text=>text.includes('One')));
+  await page.getByRole('textbox',{name:'Mermaid Markdown source'}).fill('not a diagram');
+  await page.locator(`[data-block-id="${diagram.id}"] .diagram-error`).filter({hasText:'Diagram syntax:'}).waitFor();
+  await call('update_block',{blockId:diagram.id,patch:{source:'flowchart LR\n  Offline --> Works'}});
+  await page.locator(`[data-block-id="${diagram.id}"] [data-mermaid-preview] svg`).waitFor();
+  const drawing=(await call('add_block',{type:'excalidraw',title:'My canvas'})).block;
+  await page.locator(`[data-diagram-block="${drawing.id}"] .excalidraw canvas`).first().waitFor();
+  await call('open_canvas',{blockId:drawing.id});
+  assert.equal(await page.locator('#canvas-stage-title').textContent(),'Written by a person');
+  await page.locator('#canvas-stage .excalidraw label[title*="Rectangle"]').first().click();
+  const canvas=page.locator('#canvas-stage .excalidraw canvas').last(),bounds=await canvas.boundingBox();
+  await page.mouse.move(bounds.x+170,bounds.y+170);await page.mouse.down();await page.mouse.move(bounds.x+330,bounds.y+270,{steps:6});await page.mouse.up();
+  await page.waitForFunction(id=>JSON.parse(localStorage.getItem('omd.notebook.v1')).pages.some(p=>p.blocks.some(b=>b.id===id&&b.scene?.elements.length>0)),drawing.id);
+  await page.getByRole('button',{name:'Back to notebook',exact:true}).click();
+  assert.ok((await call('get_notebook')).blocks.find(b=>b.id===drawing.id).scene.elements.length>0);
+  await call('open_canvas',{blockId:drawing.id});await page.keyboard.press('Control+k');
+  await page.locator('#page-search').fill('A second page');await page.locator('#page-search').press('Enter');
+  assert.ok(await page.locator('#canvas-stage').isHidden());
+  await call('page_select',{pageId:firstPage});
   const exported = (await call('export_notebook')).json;
   await call('set_page', { title: 'Before replacement' });
   const imported = call('import_notebook', { json: exported });
@@ -108,6 +129,8 @@ try {
   // Keep the explicit negative-input assertion above; permit only that one report.
   const validationErrors = errors.filter(error => error === 'Tabs are limited to two levels.');
   assert.ok(validationErrors.length <= 1);
+  await page.locator(`[data-block-id="${diagram.id}"] [data-mermaid-preview] svg`).waitFor();
+  assert.ok((await call('get_notebook')).blocks.find(b=>b.id===drawing.id).scene.elements.length>0);
   assert.deepEqual(errors.filter(error => error !== 'Tabs are limited to two levels.'), []);
   console.log('Native WebMCP, notebook UI, persistence, mobile, theme, reminders, import/export, and offline reload passed.');
 } finally { await browser?.close(); server.kill(); }

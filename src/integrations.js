@@ -1,4 +1,4 @@
-import { getStore, notify, openSettings, openPalette, downloadJson, confirmAction, deliverReminder } from './app.js';
+import { getStore, notify, openSettings, openPalette, openCanvas, closeCanvas, flushDiagrams, downloadJson, confirmAction, deliverReminder } from './app.js';
 import { registerWebMCP } from './webmcp.js';
 import { setupPWA } from './pwa.js';
 
@@ -6,7 +6,7 @@ const store = getStore();
 if (store) {
   setupPWA({ notify, openSettings });
   registerWebMCP(store, {
-    download: downloadJson, openSettings, openPalette,
+    download: downloadJson, openSettings, openPalette,openCanvas,closeCanvas,flushPending:flushDiagrams,
     notificationPermission: () => 'Notification' in window ? Notification.permission : 'unsupported',
     confirmImport: signal => {
       const dialog = document.getElementById('confirm-dialog');
