@@ -152,6 +152,15 @@ async function compositionBarrier(type) {
   await context.close();
 }
 
+async function idlePreeditStatus(type,same=false) {
+  const {context,page}=await fresh(),f=await fixture(page,{type}),input=f.itemId?editor(page,f.itemId):textEditor(page,f.blockId),saved=await text(page,f),draft=same?saved:'候補 chưa xác nhận';
+  assert.equal(await page.locator('#save-status').innerText(),'Saved');await composed(page,input,draft);await page.waitForTimeout(100);
+  assert.equal(await input.evaluate(el=>el.editor.view.composing),true);assert.equal(await text(page,f),saved);
+  assert.match(await page.locator('#save-status').innerText(),/^Not saved/);
+  assert.equal(await page.evaluate(()=>{const event=new Event('beforeunload',{cancelable:true});window.dispatchEvent(event);return event.defaultPrevented;}),true);
+  await input.evaluate(el=>el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));await flush(page);
+  assert.equal(await text(page,f),draft);assert.equal(await page.locator('#save-status').innerText(),'Saved');await context.close();
+}
 async function holdFinalTransaction(page,f,first) {
   await page.evaluate(({f,first})=>{
     const put=IDBObjectStore.prototype.put;window.restoreFinalPut=()=>{IDBObjectStore.prototype.put=put;};
@@ -361,7 +370,7 @@ try {
   await historyBarrier();await retainedDrafts('checklist');await retainedDrafts('text');await deletedDrafts();await deletedDrafts(true);
   await compositionBarrier('checklist');await compositionBarrier('text');
   await richToolAndSidebarBarriers('text');await richToolAndSidebarBarriers('checklist');
-  for(const type of ['checklist','text']){for(const mode of ['preedit','same','finishing','ordinary','failure'])await overlappingCompositions(type,mode);await immediateCompositionRestart(type);}
+  for(const type of ['checklist','text']){await idlePreeditStatus(type);await idlePreeditStatus(type,true);for(const mode of ['preedit','same','finishing','ordinary','failure'])await overlappingCompositions(type,mode);await immediateCompositionRestart(type);}
   await importedFocus();await deferredChecklistFocus();await activeRestoreFocus();await scopedSettlement();await composingDeletion();assert.deepEqual(errors,[]);
   console.log(`${engine} ${basePath||'/'}: history/draft recovery, strict scoped composition/export, held-IDB confirmed snapshots, overlapping generations, active native caret and imported focus identity passed.`);
 } finally {await browser?.close();server.kill();}

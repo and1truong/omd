@@ -100,6 +100,7 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
       } catch(error){if(isCurrent())capture(entry!);notify(errorOf(error).message,'error',true);}
       finally{manager.end();}
     },()=>pageId);
+    editor.view.dom.addEventListener('compositionstart',onDraftsChange);
     const controls:[string,string,(editor:Editor)=>void,()=>boolean][]=[
       ['B','Bold',e=>{e.chain().focus().toggleBold().run();},()=>editor.isActive('bold')],
       ['I','Italic',e=>{e.chain().focus().toggleItalic().run();},()=>editor.isActive('italic')],
