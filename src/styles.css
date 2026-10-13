@@ -100,7 +100,6 @@ dialog.sidebar[open] { display: flex; flex-direction: column; }
 .sidebar-page-more { width: 27px; min-width: 27px; opacity: 0; margin-right: 3px; }
 .sidebar-page:hover .sidebar-page-more, .sidebar-page:focus-within .sidebar-page-more { opacity: 1; }
 .sidebar-footer { border-top: 1px solid var(--line); padding: 9px; flex-shrink: 0; }
-.connectivity { display: block; font-size: 10px; color: var(--secondary); padding: 6px 10px; }
 #workspace { margin-left: var(--nav-offset); padding-top: var(--appbar-height); min-height: 100dvh; }
 .paper { width: 100%; max-width: 900px; margin: 0 auto; padding: 50px 50px 100px; min-height: calc(100dvh - var(--appbar-height)); }
 body[data-content-width=wide] .paper { max-width: none; }
