@@ -28,6 +28,14 @@ try{
   const watch=target=>target.on('pageerror',error=>errors.push(error.message));
   page=await context.newPage();watch(page);
   await page.goto(url);await ready(page);
+  // Header opener follows the actual desktop/drawer state and remains reachable after Escape.
+  const sidebarToggle=page.locator('#sidebar-toggle');
+  assert.equal(await sidebarToggle.isVisible(),false);await page.locator('#sidebar-close').click();await sidebarToggle.waitFor({state:'visible'});
+  await sidebarToggle.focus();await sidebarToggle.press('Enter');assert.equal(await sidebarToggle.isVisible(),false);assert.equal(await page.locator('#sidebar-close').evaluate(el=>el===document.activeElement),true);
+  await page.setViewportSize({width:320,height:700});await sidebarToggle.waitFor({state:'visible'});await sidebarToggle.click();assert.equal(await sidebarToggle.isVisible(),false);
+  await page.keyboard.press('Escape');await sidebarToggle.waitFor({state:'visible'});assert.equal(await sidebarToggle.getAttribute('aria-expanded'),'false');
+  await sidebarToggle.click();await page.getByRole('link',{name:/Switch to/}).first().click();await sidebarToggle.waitFor({state:'visible'});
+  await page.setViewportSize({width:1440,height:1000});await page.locator('#sidebar').waitFor({state:'visible'});assert.equal(await sidebarToggle.isVisible(),false);
   await page.locator('#page-title').fill('Saved before reopening');
   const saved=await page.evaluate(async()=>{
     const store=window.omdStartupApp.getStore();await store.idle();return store.export();

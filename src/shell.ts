@@ -20,11 +20,12 @@ export function setupShell(store:NotebookStore,{beforeNavigate,openPalette,confi
   async function run<K extends CommandName>(name:K,input:CommandInput<K>){try{await beforeNavigate();return await store.dispatch(name,input);}catch(error){onError(errorOf(error));return null;}}
   function closeMobile(){if(media.matches){drawerOpen=false;if(sidebar.open)sidebar.close();sync();}}
   function sync(){
-    const state=view.get(),open=media.matches?drawerOpen:state.sidebarOpen;
+    const state=view.get(),open=media.matches?drawerOpen:state.sidebarOpen,fromToggle=document.activeElement===toggle;
     onThemeChange(state.theme);
-    document.body.classList.toggle('sidebar-open',!media.matches&&open);document.body.dataset.contentWidth=state.contentWidth;toggle.setAttribute('aria-expanded',String(open));
+    document.body.classList.toggle('sidebar-open',!media.matches&&open);document.body.dataset.contentWidth=state.contentWidth;toggle.setAttribute('aria-expanded',String(open));toggle.hidden=open;
     const fluid=state.contentWidth==='wide';widthLabel.textContent=fluid?'Fluid':'Fixed';widthToggle.setAttribute('aria-pressed',String(fluid));widthToggle.title=`Page width: ${fluid?'Fluid':'Fixed'}. Switch to ${fluid?'Fixed':'Fluid'}.`;
     if(sidebar.open!==open){if(open){if(media.matches)sidebar.showModal();else{const active=document.activeElement as HTMLElement|null;sidebar.show();active?.focus({preventScroll:true});}}else sidebar.close();}
+    if(open&&fromToggle)domId('sidebar-close').focus();
     window.dispatchEvent(new Event('resize'));
   }
   function getView(){return {...view.get(),sidebarOpen:!document.body.classList.contains('canvas-focused')&&sidebar.open};}
@@ -99,7 +100,7 @@ export function setupShell(store:NotebookStore,{beforeNavigate,openPalette,confi
   domId('page-parent-apply').addEventListener('click',()=>{domId('page-parent-dialog').close();const parentId=domId('page-parent-target').value;if(parentId!==store.listPages().find(p=>p.pageId===movingPageId)?.parentId)run('page_move',{pageId:movingPageId!,parentId});});
   domId('sidebar-search').addEventListener('click',()=>{closeMobile();openPalette();});
   widthToggle.addEventListener('click',()=>safeView({contentWidth:view.get().contentWidth==='wide'?'reading':'wide'}));
-  sidebar.addEventListener('close',()=>{if(media.matches&&!sidebar.open){drawerOpen=false;toggle.setAttribute('aria-expanded','false');}});
+  sidebar.addEventListener('close',()=>{if(sidebar.open)return;if(media.matches)drawerOpen=false;else if(view.get().sidebarOpen){try{view.set({sidebarOpen:false});}catch(error){onError(errorOf(error));}}sync();if(document.activeElement===document.body)toggle.focus({preventScroll:true});});
   sidebar.addEventListener('keydown',event=>{
     if(!media.matches||!sidebar.open||(event as KeyboardEvent).key!=='Tab')return;
     const buttons=[...sidebar.querySelectorAll<HTMLElement>('button:not(:disabled),a[href]')],first=buttons[0],last=buttons.at(-1);

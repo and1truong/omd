@@ -38,7 +38,7 @@ try {
   for (const b of notebook.blocks) await call('remove_block', { blockId: b.id });
   await call('set_page', { title: 'My verified day', notificationMode: 'toast' });
   assert.equal(await page.locator('#page-title').inputValue(), 'My verified day');
-  assert.ok(await page.locator('#sidebar').isVisible());
+  assert.ok(await page.locator('#sidebar').isVisible());assert.ok(await page.locator('#sidebar-toggle').isHidden());
   const table=(await call('add_block',{type:'table',rowCount:2,columnCount:2,pinnedColumns:1})).block;
   await call('table_cell_update',{blockId:table.id,rowId:table.rows[1].id,columnId:table.columns[1].id,text:'Native WebMCP table'});
   const tableRow=(await call('table_row_add',{blockId:table.id,index:1})).rowId,tableColumn=(await call('table_column_add',{blockId:table.id,index:1})).columnId;
@@ -47,8 +47,8 @@ try {
   assert.equal(await page.locator(`[data-block-id="${table.id}"]`).getByRole('textbox',{name:'Table row 2, column 2',exact:true}).inputValue(),'Native WebMCP table');
   await call('remove_block',{blockId:table.id});
   const contentRevision=(await call('get_notebook')).revision;
-  await page.locator('#sidebar-toggle').click();await settle();assert.deepEqual(await call('get_view'),{sidebarOpen:false,contentWidth:'reading',collapsedPageIds:[],theme:'system'});
-  await call('set_view',{sidebarOpen:true,contentWidth:'wide'});assert.ok(await page.locator('#sidebar').isVisible());
+  assert.ok(await page.locator('#sidebar-toggle').isHidden());await page.locator('#sidebar-close').click();await settle();assert.ok(await page.locator('#sidebar-toggle').isVisible());assert.deepEqual(await call('get_view'),{sidebarOpen:false,contentWidth:'reading',collapsedPageIds:[],theme:'system'});
+  await call('set_view',{sidebarOpen:true,contentWidth:'wide'});assert.ok(await page.locator('#sidebar').isVisible());assert.ok(await page.locator('#sidebar-toggle').isHidden());
   assert.equal(await page.locator('body').getAttribute('data-content-width'),'wide');
   assert.equal(await page.locator('#page-width').innerText(),'Fluid');assert.equal(await page.locator('#page-width').getAttribute('aria-pressed'),'true');
   assert.equal((await call('get_notebook')).revision,contentRevision,'Layout preferences must not edit notebook content.');
@@ -253,7 +253,7 @@ try {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.locator('#sidebar').waitFor({state:'hidden'});
   assert.deepEqual(await call('get_view'),{sidebarOpen:false,contentWidth:'reading',collapsedPageIds:[],theme:'system'});
-  await page.locator('#sidebar-toggle').click();await settle();assert.ok(await page.locator('#sidebar').isVisible());
+  await page.locator('#sidebar-toggle').click();await settle();assert.ok(await page.locator('#sidebar').isVisible());assert.ok(await page.locator('#sidebar-toggle').isHidden());
   assert.ok(await page.evaluate(()=>document.getElementById('sidebar').contains(document.activeElement)),'Drawer opening must move keyboard focus inside.');
   await page.screenshot({path:`${root}/test-results/mobile-drawer.png`});
   await page.keyboard.press('Shift+Tab');assert.ok(await page.evaluate(()=>document.getElementById('sidebar').contains(document.activeElement)),'Native modal must trap focus.');
@@ -263,7 +263,7 @@ try {
   await page.keyboard.press('Control+k');await page.locator('#page-search').fill('Mobile subpage');await page.locator('#page-create-parent').selectOption(createdPage);await settle();await page.getByRole('button',{name:'+ Create “Mobile subpage”',exact:true}).click();await settle();const mobileChild=(await call('get_notebook')).id;
   assert.equal((await call('list_pages')).find(p=>p.pageId===mobileChild).parentId,createdPage);
   await call('set_view',{sidebarOpen:true});await page.screenshot({path:`${root}/test-results/mobile-page-tree.png`});await call('set_view',{sidebarOpen:false});await call('page_remove',{pageId:mobileChild});await call('page_select',{pageId:firstPage});
-  await call('set_view',{sidebarOpen:true});await page.keyboard.press('Escape');assert.ok(await page.locator('#sidebar').isHidden());
+  await call('set_view',{sidebarOpen:true});await page.keyboard.press('Escape');await page.locator('#sidebar-toggle').waitFor({state:'visible'});assert.ok(await page.locator('#sidebar').isHidden());
   await page.locator('#page-width').click();await settle();assert.equal((await call('get_view')).contentWidth,'wide');await page.locator('#page-width').click();await settle();
   // A failed localStorage preference write must leave the visible layout unchanged.
   await page.evaluate(async()=>{const {VIEW_KEY}=await import(new URL('./src/view.js',document.baseURI).href);window.omdOriginalSet=Storage.prototype.setItem;Storage.prototype.setItem=function(key,value){if(key===VIEW_KEY)throw new DOMException('quota','QuotaExceededError');return window.omdOriginalSet.call(this,key,value);};});
