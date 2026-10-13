@@ -1,4 +1,6 @@
-import type {Notebook,Page,NotebookStore,StoreOptions,StorageLike,Records,RecordChange,ChangeEvent,Journal,CommandName,CommandInput,MutationResult,InternalInput,ActionResult,SaveStatus} from './types.js';
+import type {Notebook,Page,NotebookStore,StoreOptions,StorageLike,Records,RecordChange,ChangeEvent,Journal,CommandName,CommandInput,MutationResult,InternalInput,ActionResult,SaveStatus,BridgeWrite} from './types.js';
+import {BridgeError} from './bridge-error.js';
+import {success,withinMessageCap} from './bridge-engine.js';
 import {errorOf} from './dom.js';
 import { STORAGE_KEY, mutatePage, validateNotebook } from './model.js';
 import { initialNotebook, validateBook, parseBook, listPages, applyBookAction } from './notebook.js';
@@ -35,10 +37,11 @@ export async function createStore(storage:StorageLike,options:StoreOptions = {})
       if(!before||!after||before.kind!==after.kind)draft.value=after;
       else {const previous=before.data as unknown as Record<string,unknown>,data=draft.value!.data as unknown as Record<string,unknown>;for(const field of Object.keys(previous))if(!Object.hasOwn(after.data,field))delete data[field];for(const [field,value]of Object.entries(after.data))if(previous[field]!==value)data[field]=value;}
     });return {key,forward,inverse};});}
-  async function commit(next:Notebook,changes:RecordChange[],event:ChangeEvent,{history=true}:{history?:boolean}={}) {
+  async function commit(next:Notebook,changes:RecordChange[],event:ChangeEvent,{history=true,bridge}:{history?:boolean;bridge?:(BridgeWrite&{data:unknown})}={}) {
     const current=state.getState();const id=history?crypto.randomUUID():null;
     const entry=history?{owner,before:current.meta,after:next,changes:patchChanges(changes)}:null;
-    const hydrated=await repository.commit(current.meta,next,changes,{journal:history?entry:null,journalId:id,deleteHistory:history?[...redoStack]:[]});
+    const {records:hydrated,replay}=await repository.commit(current.meta,next,changes,{journal:history?entry:null,journalId:id,deleteHistory:history?[...redoStack]:[],bridge});
+    if(replay)return replay;
     lastError=null;
     if(history){undoStack.push(id!);redoStack.length=0;}
     let records;
@@ -49,6 +52,7 @@ export async function createStore(storage:StorageLike,options:StoreOptions = {})
   channel=typeof window!=='undefined'&&typeof BroadcastChannel!=='undefined'?new BroadcastChannel(`${repository.name}.changes`):null;
   const api:NotebookStore={
     databaseName:()=>repository.name,
+    getNotebookId:()=>state.getState().meta.id,
     getRevision:()=>state.getState().meta.revision,
     getActivePageId:()=>state.getState().meta.activePageId,
     getState:()=>structuredClone(state.getState().page),
@@ -60,11 +64,15 @@ export async function createStore(storage:StorageLike,options:StoreOptions = {})
     async getPage(pageId=api.getActivePageId()){await queue;if(pageId===api.getActivePageId())return api.getState();return structuredClone(makeMaterializer()(await repository.page(pageId),pageId));},
     async getNotebook(){await queue;const book=await repository.export();if(book.pages.some(p=>p.id===api.getActivePageId()))book.activePageId=api.getActivePageId();return book;},
     listPages:()=>listPages(state.getState().meta),
-    dispatch<K extends CommandName>(action:K,input:CommandInput<K>,options:ChangeEvent={}) {
+    dispatch<K extends CommandName>(action:K,input:CommandInput<K>,options:ChangeEvent={},bridge?:BridgeWrite) {
       const payload=structuredClone(input) as InternalInput;const target=payload.pageId??api.getActivePageId();
       return enqueue(async()=>{
+        // A completed deletion/addition must replay before trying to resolve its old IDs.
+        if(bridge){const replay=await repository.bridgeReceipt(bridge);if(replay)return structuredClone(replay.data) as MutationResult<K>;}
         const current=state.getState();let next:Notebook,changes:RecordChange[],result:ActionResult;
+        if(bridge&&(current.meta.id!==bridge.notebookId||current.meta.revision!==bridge.expectedRevision))throw new BridgeError('STALE_CONTEXT','The notebook revision changed. Get fresh context and approve again.');
         if(action==='page_select') {
+          if(bridge)throw new BridgeError('UNSUPPORTED','Agent navigation is not a durable notebook mutation.');
           const out=applyBookAction(current.meta,action,payload);
           const records=out.state.activePageId!==current.meta.activePageId?await repository.page(out.state.activePageId):current.records;
           lastError=null;publish({...current.meta,activePageId:out.state.activePageId},records,{actionName:action,...options});
@@ -87,8 +95,11 @@ export async function createStore(storage:StorageLike,options:StoreOptions = {})
           const {blocks,...metadata}=edited;
           next={...current.meta,pages:current.meta.pages.map(p=>p.id===target?{...metadata,blocks:[]}:p),revision:current.meta.revision+1,updatedAt:new Date().toISOString()};validateBook(next);
         }
-        await commit(next,changes,{actionName:action,changedBlockId:payload.blockId,changedPageId:target,...options},{history:options.history??!['reminder_fired','page_select'].includes(action)});
-        return {...result,revision:next.revision} as MutationResult<K>;
+        const data={...result,revision:next.revision};
+        if(bridge&&!Number.isSafeInteger(next.revision))throw new BridgeError('UNSUPPORTED','The notebook revision cannot be advanced safely. No edit was saved.');
+        if(bridge&&!withinMessageCap(success(data,next.revision)))throw new BridgeError('INVALID_ARGUMENT','The result exceeds the Bridge message limit. No edit was saved.');
+        const replay=await commit(next,changes,{actionName:action,changedBlockId:payload.blockId,changedPageId:target,...options},{history:options.history??!['reminder_fired','page_select'].includes(action),bridge:bridge?{...bridge,data}:undefined});
+        return (replay?structuredClone(replay.data):data) as MutationResult<K>;
       },['page_select','page_add','page_remove','import_notebook'].includes(action));
     },
     subscribe(fn){return state.subscribe(s=>s.meta,()=>{const s=state.getState();fn(s.page,s.options);});},
@@ -110,7 +121,7 @@ export async function createStore(storage:StorageLike,options:StoreOptions = {})
     const current=state.getState(),entry=await repository.history(from.at(-1)!);
     const records=await repository.records(entry.changes.map(p=>p.key)),changes=entry.changes.map(p=>({key:p.key,before:records.get(recordKey(...p.key))??null,after:applyPatches({value:records.get(recordKey(...p.key))??null},p[direction]).value}));
     let next=structuredClone(direction==='inverse'?entry.before:entry.after);next.revision=current.meta.revision+1;next.updatedAt=new Date().toISOString();if(next.pages.some(p=>p.id===current.meta.activePageId))next.activePageId=current.meta.activePageId;
-    validateBook(next);const hydrated=await repository.commit(current.meta,next,changes);lastError=null;const id=from.pop()!;to.push(id);let resident;
+    validateBook(next);const {records:hydrated}=await repository.commit(current.meta,next,changes);lastError=null;const id=from.pop()!;to.push(id);let resident;
     if(next.activePageId===current.meta.activePageId){resident=new Map(current.records);for(const c of changes)if((c.after??c.before)?.pageId===next.activePageId){if(c.after)resident.set(recordKey(...c.key),c.after);else resident.delete(recordKey(...c.key));}}
     else resident=hydrated!;
     publish(next,resident);channel?.postMessage(next.revision);return true;
