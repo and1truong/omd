@@ -81,7 +81,7 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
     const toolbar=document.createElement('div');toolbar.className='markdown-toolbar';toolbar.setAttribute('role','toolbar');toolbar.setAttribute('aria-label','Text formatting');
     const surface=document.createElement('div');surface.className='markdown-surface';if(!item)host.append(toolbar);host.append(surface);
     const editor=new Editor({element:surface,injectCSS:false,extensions:[StarterKit.configure({undoRedo:false,underline:false,trailingNode:false,link:{openOnClick:false}}),Markdown],content:source,contentType:'markdown',
-      editorProps:{attributes:{id:item?.id??`${block.id}-text`,class:'markdown-editor',role:'textbox','aria-label':item?'Checklist item':'text content','aria-multiline':'true','aria-keyshortcuts':item?'Enter Shift+Enter Tab Shift+Tab':'Shift+Enter','data-placeholder':item?'A little thing to do':'Write something…'},
+      editorProps:{attributes:{id:item?.id??`${block.id}-text`,class:'markdown-editor',role:'textbox','aria-label':item?'Checklist item':'text content','aria-multiline':'true','aria-keyshortcuts':item?'Enter Shift+Enter Tab Shift+Tab':'Shift+Enter Alt+F10','data-placeholder':item?'A little thing to do':'Write something…'},
         handleClick:(view,_pos,event)=>{
           if(event.button!==0||event.shiftKey||event.altKey||view.composing||composition.isComposing(view.dom))return false;
           const link=event.target instanceof Element?event.target.closest<HTMLAnchorElement>('a[href]'):null;
@@ -97,6 +97,7 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
         handleKeyDown:(_view,event)=>{
           if(event.isComposing||event.keyCode===229||editor.view.composing)return false;
           if(composition.isComposing(editor.view.dom))return event.key==='Enter'||event.key==='Tab';
+          if(!item&&event.altKey&&event.key==='F10') {toolbar.dataset.keyboardOpen='true';toolbar.querySelector<HTMLButtonElement>('button')?.focus();return true;}
           if(entry?.onKeyDown?.(event))return true;
           if(item&&event.key==='Tab')return false;
           if(!item&&event.key==='Enter'&&event.shiftKey&&!event.ctrlKey&&!event.metaKey&&!event.altKey) {
@@ -157,6 +158,8 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
       button.addEventListener('click',()=>{if(selection)editor.commands.setTextSelection(selection);selection=null;run(editor);});toolbar.append(button);return button;
     });
     const sync=()=>{buttons.forEach((button,index)=>button.setAttribute('aria-pressed',String(controls[index][3]())));host.dataset.empty=String(editor.isEmpty);};
+    toolbar.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();delete toolbar.dataset.keyboardOpen;editor.view.focus();}});
+    toolbar.addEventListener('focusout',()=>queueMicrotask(()=>{if(!toolbar.contains(document.activeElement))delete toolbar.dataset.keyboardOpen;}));
     editor.on('transaction',sync);sync();return host;
   }
   const manager={mount,

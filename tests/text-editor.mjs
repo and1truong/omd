@@ -73,6 +73,14 @@ try {
   const pageId=(await state()).id;
   const first=(await call('add_block',{type:'text',text:'Keep the whole original paragraph'})).blockId;
   const following=(await call('add_block',{type:'text',text:'Already here'})).blockId;
+  const formatting=host(first).getByRole('toolbar',{name:'Text formatting'});
+  await page.mouse.move(0,0);await box(first).focus();assert.equal(await formatting.isVisible(),false,'Editing with the mouse outside must keep the toolbar hidden.');
+  await host(first).hover();assert.equal(await formatting.isVisible(),true);
+  await formatting.getByRole('button',{name:'Bold',exact:true}).hover();assert.equal(await formatting.isVisible(),true,'Moving from text into the toolbar must keep it open.');
+  await page.mouse.move(0,0);assert.equal(await formatting.isVisible(),false);
+  await box(first).press('Alt+F10');assert.equal(await formatting.isVisible(),true);
+  assert.equal(await formatting.getByRole('button',{name:'Bold',exact:true}).evaluate(el=>el===document.activeElement),true);
+  await page.keyboard.press('Escape');await focused(first);assert.equal(await formatting.isVisible(),false);
 
   // Shift+Enter works in the middle of a paragraph without splitting its content.
   await box(first).focus();await page.keyboard.press('Home');await page.keyboard.press('ArrowRight');
@@ -116,11 +124,11 @@ try {
   // Typed autolinks open just like Markdown links, including through nested formatting.
   await box(following).fill('Visit ');await box(following).press('End');await page.keyboard.type('https://example.com/auto ');
   await box(following).locator('a[href="https://example.com/auto"]').waitFor();await openLink(following);
-  await box(following).press('Control+a');await host(following).getByRole('button',{name:'Bold',exact:true}).click();
+  await box(following).press('Control+a');await host(following).hover();await host(following).getByRole('button',{name:'Bold',exact:true}).click();
   await box(following).locator('a strong, strong a').waitFor();await openLink(following);
 
   await box(next).fill('Format this');await saved(next,'Format this');await box(next).press('Control+a');
-  await host(next).getByRole('button',{name:'Bold',exact:true}).click();await saved(next,'**Format this**');
+  await host(next).hover();await host(next).getByRole('button',{name:'Bold',exact:true}).click();await saved(next,'**Format this**');
   assert.equal(await box(next).locator('strong').innerText(),'Format this');
   await box(next).press('Control+z');await saved(next,'Format this');await box(next).press('Control+Shift+z');await saved(next,'**Format this**');
   await call('update_block',{blockId:next,patch:{text:''}});await box(next).pressSequentially('## A thought');await saved(next,'## A thought');
@@ -217,6 +225,8 @@ try {
   const mobile=await browser.newContext({viewport:{width:320,height:844},isMobile:true,hasTouch:true});mobile.setDefaultTimeout(10000);
   page=await mobile.newPage();await ready();await call('page_add',{title:'Mobile Markdown'});
   const small=(await call('add_block',{type:'text',text:'Write on a small screen'})).blockId;
+  await page.locator('#page-title').focus();assert.equal(await host(small).getByRole('toolbar').isVisible(),false);
+  await box(small).tap();assert.equal(await host(small).getByRole('toolbar').isVisible(),true,'Touch users reveal formatting by tapping the editor.');
   const mobileNext=await nextBlock(small);await box(mobileNext).fill('Mobile text');await saved(mobileNext,'Mobile text');
   await box(mobileNext).evaluate(el=>{el.editor.commands.selectAll();el.editor.view.focus();});
   assert.equal(await page.evaluate(()=>getSelection().toString().trimEnd()),'Mobile text');
