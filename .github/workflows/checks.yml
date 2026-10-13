@@ -86,5 +86,6 @@ jobs:
       - run: npm run test:transition
       - run: npm run test:diagrams
       - run: npm run test:table
+      - run: npm run test:table-rich
       - run: npm run test:tabs
       - run: npm run test:page-drag
