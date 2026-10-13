@@ -13,6 +13,7 @@
     "test:migration": "node tests/record-migration.mjs",
     "test:theme": "node tests/theme-browser.mjs",
     "test:insertion": "node tests/block-insertion.mjs",
+    "test:heading": "node tests/heading-browser.mjs",
     "test:checklist": "node tests/checklist-browser.mjs",
     "test:editor": "node tests/text-editor.mjs",
     "test:table": "node tests/table-browser.mjs",
@@ -22,8 +23,7 @@
     "package:release": "node scripts/package-release.mjs",
     "test:release": "node tests/release-package.mjs",
     "test:transition": "node tests/editor-transition.mjs",
-    "test:diagrams": "node tests/diagram-dependencies.mjs",
-    "test:heading": "node tests/heading-browser.mjs"
+    "test:diagrams": "node tests/diagram-dependencies.mjs"
   },
   "engines": {
     "node": ">=22"
