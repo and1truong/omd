@@ -68,6 +68,15 @@ dialog.sidebar[open] { display: flex; flex-direction: column; }
 .sidebar-pages { min-height: 0; overflow-y: auto; flex: 1; padding: 0 9px 15px; scrollbar-width: thin; }
 .sidebar-page { display: flex; align-items: center; gap: 0; border-radius: 5px; }
 .sidebar-page { padding-left: calc(var(--page-depth,0) * 12px); }
+.page-drag-handle { min-width: 18px; width: 18px; min-height: 26px; padding: 2px; opacity: 0; cursor: grab; }
+.page-drag-handle .ui-icon { width: 12px; height: 12px; }
+.sidebar-page:hover>.page-drag-handle, .page-drag-handle:focus-visible { opacity: 1; }
+.page-dragging .page-drag-handle { cursor: grabbing; }
+.sidebar-page[data-page-drop=before] { box-shadow: 0 -2px var(--accent); }
+.sidebar-page[data-page-drop=after] { box-shadow: 0 2px var(--accent); }
+.sidebar-page[data-page-drop=inside] { background: var(--soft); outline: 2px solid var(--accent); outline-offset: -2px; }
+.sidebar-pages[data-page-drop-root=true] { box-shadow: inset 0 -2px var(--accent); }
+@media (hover: none) { .page-drag-handle { display: none; } }
 .page-tree-toggle { min-width: 19px; width: 19px; min-height: 26px; padding: 2px; }
 .page-tree-toggle .ui-icon { width: 12px; height: 12px; }
 .page-ancestors { display: flex; align-items: center; max-width: 45%; overflow-x: auto; scrollbar-width: none; flex-shrink: 1; }

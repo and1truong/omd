@@ -22,7 +22,8 @@
     "package:release": "node scripts/package-release.mjs",
     "test:release": "node tests/release-package.mjs",
     "test:transition": "node tests/editor-transition.mjs",
-    "test:diagrams": "node tests/diagram-dependencies.mjs"
+    "test:diagrams": "node tests/diagram-dependencies.mjs",
+    "test:page-drag": "node tests/page-drag.mjs"
   },
   "engines": {
     "node": ">=22"
