@@ -14,6 +14,7 @@ Your notebook stays in your browser. No account, analytics or AI API key is requ
 - **Diagrams:** Mermaid with live preview and Excalidraw with an editable full-page canvas.
 - **Everyday controls:** undo/redo, JSON import/export, keyboard and touch-friendly reordering, and system-aware light/dark themes.
 - **WebMCP:** supported browsers can let agents read and edit the notebook through the same validated commands as the UI.
+- **Desktop preview:** OMD with a Coconut agent sidebar, plus the same Bridge tools for Lime in Chrome/Edge. [Build and data guide](docs/desktop.md).
 
 ## Run locally
 

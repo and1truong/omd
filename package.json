@@ -28,13 +28,19 @@
     "test:release": "node tests/release-package.mjs",
     "test:transition": "node tests/editor-transition.mjs",
     "test:diagrams": "node tests/diagram-dependencies.mjs",
-    "test:page-drag": "node tests/page-drag.mjs"
+    "test:page-drag": "node tests/page-drag.mjs",
+    "desktop:prepare": "node --use-env-proxy desktop/prepare.mjs",
+    "desktop:dev": "node desktop/run.mjs dev",
+    "desktop:build": "node desktop/run.mjs build",
+    "test:bridge:browser": "node tests/bridge-browser.mjs",
+    "test:desktop": "node desktop/test-native.mjs"
   },
   "engines": {
     "node": ">=22"
   },
   "dependencies": {
     "@excalidraw/excalidraw": "0.18.1",
+    "@orchard/bridge-contract": "https://github.com/and1truong/orchad/releases/download/orchard-v0.1.0/orchard-bridge-contract-0.1.0.tgz",
     "@tiptap/core": "3.31.4",
     "@tiptap/markdown": "3.31.4",
     "@tiptap/pm": "3.31.4",

@@ -1,5 +1,6 @@
 import {errorOf} from './dom.js';
-import type {StorageLike,StoreOptions,Notebook,StoredRecord,Records,RecordChange,Journal,DueReminder,RecordKey} from './types.js';
+import type {StorageLike,StoreOptions,Notebook,StoredRecord,Records,RecordChange,Journal,DueReminder,RecordKey,BridgeWrite,BridgeReceipt} from './types.js';
+import {BridgeError} from './bridge-error.js';
 import { bookRecords, makeMaterializer, metadataBook, recordKey, nativeRecordKey, recordsMap, equalValue } from './records.js';
 import { parseBook, validateBook, wrapPage } from './notebook.js';
 import { STORAGE_KEY } from './model.js';
@@ -101,6 +102,13 @@ export async function openRepository(storage:StorageLike,{key=STORAGE_KEY,name='
   });let obsolete=false;db.onversionchange=()=>{obsolete=true;db.close();};
   const stores=['meta','records','reminders','history','delivery'];
   function transaction(mode:IDBTransactionMode='readonly'){if(obsolete)throw new Error('The notebook database was upgraded in another window. Reload before editing.');const tx=db.transaction(stores,mode);return {tx,done:completion(tx)};}
+  const receiptKey=(bridge:BridgeWrite)=>['agent-bridge',bridge.notebookId,bridge.idempotencyKey];
+  async function receipt(tx:IDBTransaction,bridge:BridgeWrite,latest:Notebook|undefined){
+    if(!latest||latest.id!==bridge.notebookId)throw new BridgeError('STALE_CONTEXT','The notebook changed. Get fresh context and consent.');
+    const saved=await request<BridgeReceipt|undefined>(tx.objectStore('meta').get(receiptKey(bridge)));
+    if(saved&&saved.semantic!==bridge.semantic)throw new BridgeError('IDEMPOTENCY_CONFLICT','This key was already used for a different request.');
+    return saved;
+  }
   function reminder(tx:IDBTransaction,record:StoredRecord) {
     if(record?.kind==='block'&&record.data.type==='reminder') {
       const block=record.data;tx.objectStore('reminders').put({pageId:record.pageId,...block,due:reminderDue(block)});
@@ -129,15 +137,25 @@ export async function openRepository(storage:StorageLike,{key=STORAGE_KEY,name='
   }catch(error){db.close();throw error;}
   return {
     name,read,
+    async bridgeReceipt(bridge:BridgeWrite){
+      const {tx,done}=transaction();
+      try{const latest=await request<Notebook|undefined>(tx.objectStore('meta').get('book'));const saved=await receipt(tx,bridge,latest);await done;return saved;}
+      catch(error){await done.catch(()=>{});throw error;}
+    },
     async records(keys:RecordKey[]){const {tx,done}=transaction();const rows=await Promise.all(keys.map(key=>request<StoredRecord|undefined>(tx.objectStore('records').get(key))));await done;return new Map(keys.map((key,i)=>[recordKey(...key),rows[i]??null]));},
     async page(pageId:string){const {tx,done}=transaction();const rows=await request<StoredRecord[]>(tx.objectStore('records').index('pageId').getAll(pageId));await done;if(!rows.length)throw new Error('Page not found.');return recordsMap(rows);},
     async export(){const {tx,done}=transaction();const meta=await request<Notebook|undefined>(tx.objectStore('meta').get('book'));const rows=await request<StoredRecord[]>(tx.objectStore('records').getAll());await done;const records=recordsMap(rows);return {...meta!,pages:meta!.pages.map(p=>makeMaterializer()(records,p.id))};},
     async due(now:number){const {tx,done}=transaction();const rows=await request<DueReminder[]>(tx.objectStore('reminders').index('due').getAll(IDBKeyRange.upperBound(now)));const delivered=await Promise.all(rows.map(r=>request(tx.objectStore('delivery').getKey([r.pageId,r.id,r.dueAt]))));await done;return rows.filter((_,i)=>delivered[i]===undefined);},
     async history(id:string){const {tx,done}=transaction();const value=await request<Journal>(tx.objectStore('history').get(id));await done;return value;},
-    async commit(expected:Notebook,meta:Notebook,changes:RecordChange[],{journal,journalId,deleteHistory=[]}:{journal?:Journal|null;journalId?:string|null;deleteHistory?:string[]}={}) {
+    async commit(expected:Notebook,meta:Notebook,changes:RecordChange[],{journal,journalId,deleteHistory=[],bridge}:{journal?:Journal|null;journalId?:string|null;deleteHistory?:string[];bridge?:(BridgeWrite&{data:unknown})}={}):Promise<{records?:Records;replay?:BridgeReceipt}> {
       const {tx,done}=transaction('readwrite');let resident:Records|undefined;
       try {
         const latest=await request<Notebook|undefined>(tx.objectStore('meta').get('book'));
+        if(bridge){
+          // Dedup precedes revision and every write, in the SAME transaction as the edit.
+          const replay=await receipt(tx,bridge,latest);if(replay){await done;return {replay};}
+          if(latest!.revision!==bridge.expectedRevision)throw new BridgeError('STALE_CONTEXT','The notebook revision changed. Get fresh context and approve again.');
+        }
         if(!latest||latest.id!==expected.id||latest.revision!==expected.revision)throw new Error('Another window changed this notebook. Reload before editing.');
         for(const change of changes){let value=change.after;if(value?.kind==='block'&&value.data.type==='reminder'){
           const b=value.data,deliveryKey=[value.pageId,b.id,b.dueAt];
@@ -149,10 +167,12 @@ export async function openRepository(storage:StorageLike,{key=STORAGE_KEY,name='
         // The schema retains a default page for old clients/exports, not a live tab selection.
         const activePageId=meta.pages.some(p=>p.id===latest.activePageId)?latest.activePageId:meta.activePageId;
         tx.objectStore('meta').put({...meta,activePageId},'book');
+        // Receipts survive reload, undo and transient-history cleanup; exports contain only domain data.
+        if(bridge)tx.objectStore('meta').put({semantic:bridge.semantic,data:bridge.data,revision:meta.revision},receiptKey(bridge));
         for(const id of deleteHistory)tx.objectStore('history').delete(id);
         if(journal)tx.objectStore('history').put(journal,journalId!);
         if(meta.activePageId!==expected.activePageId){const rows=await request<StoredRecord[]>(tx.objectStore('records').index('pageId').getAll(meta.activePageId));resident=recordsMap(rows);}
-      } catch(error){tx.abort();await done.catch(()=>{});throw error;}await done;return resident;
+      } catch(error){tx.abort();await done.catch(()=>{});throw error;}await done;return {records:resident};
     },
     async historyOwners(){
       const tx=db.transaction('history'),done=completion(tx),owners=new Set<string>();

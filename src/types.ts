@@ -63,10 +63,12 @@ export type InternalInput = Partial<BlockOptions & {type:BlockType;theme:Theme;n
 export type ActionResult = Partial<{blockId:ID;block:Block;itemId:ID;tabId:ID;rowId:ID;columnId:ID;cardId:ID;pageId:ID;removedPageIds:ID[];imported:boolean}>;
 export interface ChangeEvent {actionName?:CommandName;changedBlockId?:ID;changedPageId?:ID;quiet?:boolean;reset?:boolean;reminderBlockId?:ID;reminderPageId?:ID;history?:boolean}
 export interface SaveStatus {pending:number;navigating:boolean;error:Error|null}
+export interface BridgeWrite {notebookId:ID;expectedRevision:number;idempotencyKey:string;semantic:string}
+export interface BridgeReceipt {semantic:string;data:unknown;revision:number}
 export interface NotebookStore {
-  databaseName():string;getActivePageId():ID;getRevision():number;getState():Page;getRenderState():Readonly<Page>;getLastEvent():ChangeEvent;
+  databaseName():string;getNotebookId():ID;getActivePageId():ID;getRevision():number;getState():Page;getRenderState():Readonly<Page>;getLastEvent():ChangeEvent;
   getPageMetadata(id:ID):Page|undefined;getPage(id?:ID):Promise<Page>;getNotebook():Promise<Notebook>;listPages():PageRow[];
-  dispatch<K extends CommandName>(action:K,input:CommandInput<K>,options?:ChangeEvent):Promise<MutationResult<K>>;
+  dispatch<K extends CommandName>(action:K,input:CommandInput<K>,options?:ChangeEvent,bridge?:BridgeWrite):Promise<MutationResult<K>>;
   subscribe(fn:(page:Page,event:ChangeEvent)=>void):()=>void;
   subscribeBlock(id:ID,fn:(page:Page,event:ChangeEvent)=>void):()=>void;subscribeContainer(id:ID,fn:(page:Page,event:ChangeEvent)=>void):()=>void;
   afterChange(fn:()=>void):()=>void;subscribeStatus(fn:(status:SaveStatus)=>void):()=>void;
