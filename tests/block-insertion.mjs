@@ -46,7 +46,7 @@ try {
   // Keyboard users can insert above the first block, then undo and redo.
   await page.locator(`[data-before-block="${first}"]`).focus();await page.keyboard.press('Enter');await choose('heading');
   const heading=(await order())[0];assert.deepEqual(await order(),[heading,...original]);await focused(heading);
-  await page.locator(`[data-block-id="${heading}"] textarea`).fill('A section at the top');
+  await page.locator(`[data-block-id="${heading}"] input`).fill('A section at the top');
   await page.evaluate(async()=>(await import(new URL('./src/app.js',document.baseURI).href)).getStore().idle());
   await call('undo');await call('undo');assert.deepEqual(await order(),original);
   await call('redo');assert.deepEqual(await order(),[heading,...original]);await call('undo');

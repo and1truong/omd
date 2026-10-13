@@ -143,8 +143,13 @@ function renderBlock(b:Block,containerId:string,index:number,count:number) {
   switch (b.type) {
     case 'text': shell.append(textEditors!.mount(b,renderPageId));break;
     case 'heading': {
-      const pageId=renderPageId,text=editable(b.text,'heading content',(value,pageId)=>action('update_block',{pageId,blockId:b.id,patch:{text:value}},{quiet:true}),{multiline:true,placeholder:'A new section',id:`${b.id}-text`});
-      text.addEventListener('keydown',event=>{const key=event as KeyboardEvent;if(key.key==='Enter'&&key.shiftKey&&!key.ctrlKey&&!key.metaKey&&!key.altKey&&!key.isComposing&&!composition.isComposing(text)){key.preventDefault();if(!key.repeat)void createTextAfter(b.id,pageId).catch(error=>notify(errorOf(error).message,'error',true));}});shell.append(text);break;
+      const pageId=renderPageId,text=editable(b.text.replace(/[\r\n]+/g,' '),'heading content',(value,pageId)=>action('update_block',{pageId,blockId:b.id,patch:{text:value}},{quiet:true}),{placeholder:'A new section',id:`${b.id}-text`});
+      let finishing=false;
+      text.addEventListener('keydown',event=>{
+        const key=event as KeyboardEvent;if(key.key!=='Enter'||key.isComposing||key.keyCode===229||composition.isComposing(text))return;
+        key.preventDefault();if(key.repeat||finishing)return;finishing=true;
+        void action('update_block',{pageId,blockId:b.id,patch:{text:text.value}},{quiet:true}).then(result=>{if(result&&document.activeElement===text)text.blur();}).finally(()=>{finishing=false;});
+      });shell.append(text);break;
     }
     case 'divider': shell.append(element('hr')); break;
     case 'checklist': renderChecklist(shell, b); break;

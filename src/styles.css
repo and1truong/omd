@@ -23,6 +23,8 @@ a { color: inherit; }
 textarea, input[type=text] { border: 0; background: transparent; outline: 0; border-radius: 4px; }
 textarea { resize: none; width: 100%; display: block; overflow: hidden; line-height: 1.65; }
 input[type=text] { width: 100%; min-width: 0; }
+.block-type-heading>input { width: 100%; font-size: 24px; font-weight: 600; line-height: 1.4; text-overflow: ellipsis; background: transparent; outline: 0; border-radius: 0; }
+@media (max-width: 760px) { .block-type-heading>input { padding-right: 34px; } }
 textarea:hover, input[type=text]:hover { background: var(--wash); }
 textarea:focus, input[type=text]:focus { background: var(--wash); }
 button:focus-visible, summary:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
