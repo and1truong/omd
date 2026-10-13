@@ -3,6 +3,7 @@ import type {NotebookStore,Block,BlockType,BlockOf,CommandName,CommandInput,Muta
 import {byId as domId} from './dom.js';
 import { createCompositionGuard } from './composition.js';
 import { createStore } from './store.js';
+import {completedDate} from './completed-time.js';
 import { STORAGE_KEY, allowedTypes, findBlock, findContainer, MAX_CHECKLIST_LEVELS, checklistHeight } from './model.js';
 import { startReminders } from './reminders.js';
 import { setupPalette } from './palette.js';
@@ -173,6 +174,7 @@ function renderBlock(b:Block,containerId:string,index:number,count:number) {
   return shell;
 }
 function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
+  const completedFormat=new Intl.DateTimeFormat(undefined,{dateStyle:'medium',timeStyle:'short'}),completedDetail=new Intl.DateTimeFormat(undefined,{dateStyle:'full',timeStyle:'long'});
   let total=0,done=0;
   async function addItem(parentId?:string,index?:number) {const result=await action('checklist_add',{blockId:b.id,parentId,index});if(result)requestAnimationFrame(()=>domId(result.itemId)?.focus());}
   function renderItems(items:ChecklistItem[],ancestors:ChecklistItem[]=[]):HTMLElement {
@@ -201,7 +203,10 @@ function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
         {label:'Indent checklist item',icon:'right',disabled:!canIndent,run:indent},
         {label:'Outdent checklist item',icon:'left',disabled:!parent,run:outdent}
       ],more));more.id=`${item.id}-menu`;controls.prepend(more);
-      row.append(check,text,controls);entry.append(row);if(item.children?.length)entry.append(renderItems(item.children,[...ancestors,item]));list.append(entry);
+      const content=element('div','checklist-content');content.append(text);
+      const completed=item.done?completedDate(item.completedAt):null;
+      if(completed){const time=element('time','checklist-completed-time');time.dateTime=completed.toISOString();time.textContent=`Completed ${completedFormat.format(completed)}`;time.title=`Completed ${completedDetail.format(completed)}`;content.append(time);}
+      row.append(check,content,controls);entry.append(row);if(item.children?.length)entry.append(renderItems(item.children,[...ancestors,item]));list.append(entry);
     });return list;
   }
   const head=title(b,'☑'),progress=element('span','checklist-progress'),items=renderItems(b.items);progress.textContent=`${done} / ${total}`;head.append(progress);shell.append(head,items);

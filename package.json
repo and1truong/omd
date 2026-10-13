@@ -16,6 +16,7 @@
     "test:insertion": "node tests/block-insertion.mjs",
     "test:heading": "node tests/heading-browser.mjs",
     "test:checklist": "node tests/checklist-browser.mjs",
+    "test:checklist-time": "node tests/checklist-time.mjs",
     "test:editor": "node tests/text-editor.mjs",
     "test:table": "node tests/table-browser.mjs",
     "test:table-rich": "node tests/table-rich.mjs",

@@ -12,7 +12,7 @@ export interface TextBlock {id:ID;type:'text' | 'heading';text:string}
 export interface DividerBlock {id:ID;type:'divider'}
 export interface TableRow {id:ID;cells:string[]}
 export interface TableBlock {id:ID;type:'table';title:string;headerRow:boolean;pinnedHeader:boolean;pinnedColumns:number;columns:{id:ID}[];rows:TableRow[]}
-export interface ChecklistItem {id:ID;text:string;done:boolean;children?:ChecklistItem[]}
+export interface ChecklistItem {id:ID;text:string;done:boolean;completedAt?:string|null;children?:ChecklistItem[]}
 export interface ChecklistBlock {id:ID;type:'checklist';title:string;items:ChecklistItem[]}
 export interface Tab {id:ID;title:string;blocks:Block[]}
 export interface TabsBlock {id:ID;type:'tabs';title:string;orientation:Orientation;activeTabId:ID;tabs:Tab[]}
