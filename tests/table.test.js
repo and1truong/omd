@@ -49,7 +49,7 @@ test('nested tables persist, import/export, immutable snapshots, undo/redo and f
   const toggle=(await store.dispatch('add_block',{type:'toggle',containerId:tabs.tabs[1].id})).block;
   const accordion=(await store.dispatch('add_block',{type:'accordion',containerId:toggle.id})).block;
   const table=(await store.dispatch('add_block',{type:'table',containerId:accordion.items[0].id,rowCount:1,columnCount:1})).block;
-  const input={blockId:table.id,rowId:table.rows[0].id,columnId:table.columns[0].id,text:'Việt 日本語'};
+  const input={blockId:table.id,rowId:table.rows[0].id,columnId:table.columns[0].id,text:'**Việt** *日本語* [link](https://example.com)\n\n- first\n- `second`'};
   await store.dispatch('table_cell_update',input);
   const original=await store.export(),snapshot=store.getRenderState();assert.ok(Object.isFrozen(snapshot));
   await store.dispatch('table_column_add',{blockId:table.id,index:0});await store.undo();assert.deepEqual(content(await store.export()),content(original));await store.redo();await store.undo();
@@ -58,7 +58,7 @@ test('nested tables persist, import/export, immutable snapshots, undo/redo and f
   await store.dispatch('move_block',{blockId:table.id,containerId:'page'});await store.undo();assert.deepEqual(content(await store.export()),content(original));
   await store.dispatch('remove_block',{blockId:table.id});await store.undo();assert.deepEqual(content(await store.export()),content(original));
   const beforeClose=await store.export();await store.close();store=await createStore(storage);assert.equal(await store.export(),beforeClose);
-  await store.import(original);assert.deepEqual((await store.getNotebook()).pages[0].blocks[0].tabs[1].blocks[0].blocks[0].items[0].blocks[0],table.type==='table'?{...table,rows:[{...table.rows[0],cells:['Việt 日本語']}]}:table);
+  await store.import(original);assert.deepEqual((await store.getNotebook()).pages[0].blocks[0].tabs[1].blocks[0].blocks[0].items[0].blocks[0],table.type==='table'?{...table,rows:[{...table.rows[0],cells:[input.text]}]}:table);
   await store.close();
 });
 

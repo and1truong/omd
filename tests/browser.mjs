@@ -44,7 +44,7 @@ try {
   const tableRow=(await call('table_row_add',{blockId:table.id,index:1})).rowId,tableColumn=(await call('table_column_add',{blockId:table.id,index:1})).columnId;
   assert.equal((await call('get_notebook')).blocks.find(b=>b.id===table.id).rows[2].cells[2],'Native WebMCP table');
   await call('table_row_remove',{blockId:table.id,rowId:tableRow});await call('table_column_remove',{blockId:table.id,columnId:tableColumn});
-  assert.equal(await page.locator(`[data-block-id="${table.id}"]`).getByRole('textbox',{name:'Table row 2, column 2',exact:true}).inputValue(),'Native WebMCP table');
+  assert.equal(await page.locator(`[data-block-id="${table.id}"]`).getByRole('textbox',{name:'Table row 2, column 2',exact:true}).innerText(),'Native WebMCP table');
   await call('remove_block',{blockId:table.id});
   const contentRevision=(await call('get_notebook')).revision;
   await page.locator('#sidebar-toggle').click();await settle();assert.deepEqual(await call('get_view'),{sidebarOpen:false,contentWidth:'reading',collapsedPageIds:[],theme:'system'});

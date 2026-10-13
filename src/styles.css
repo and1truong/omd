@@ -117,6 +117,12 @@ body[data-content-width=wide] .paper { max-width: none; }
 .data-table { --table-divider: color-mix(in srgb, var(--secondary) 45%, var(--paper)); border-spacing: 0; table-layout: fixed; width: calc(var(--table-column-count) * 160px + 32px); font-size: 13px; }
 .data-table th, .data-table td { position: relative; width: 160px; min-width: 160px; max-width: 160px; padding: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--paper); vertical-align: top; text-align: left; }
 .data-table .table-cell { width: 100%; min-width: 0; min-height: 44px; padding: 11px 12px; border-radius: 0; overflow-wrap: anywhere; }
+.table-cell-editor { min-width: 0; }
+.data-table .table-cell { font-size: 13px; line-height: 1.55; }
+.data-table .table-cell p { margin-bottom: 5px; }
+.data-table .table-cell ul, .data-table .table-cell ol { padding-left: 18px; margin: 4px 0; }
+.table-cell-toolbar { display: flex; flex-wrap: wrap; gap: 2px; flex-basis: 100%; border-top: 1px solid var(--line); padding-top: 4px; }
+.table-cell-toolbar .markdown-tool { min-width: 28px; min-height: 28px; }
 .data-table .table-top-cell .table-cell { padding-right: 32px; }
 .data-table .table-row-tools { width: 32px; min-width: 32px; max-width: 32px; text-align: center; border-right: 0; }
 .data-table .table-column-action { position: absolute; right: 3px; top: 7px; }

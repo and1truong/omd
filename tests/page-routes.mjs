@@ -9,6 +9,7 @@ export async function verifyPageRoutes({browser,appURL,call,root}) {
     await target.evaluate(async()=>{window.omdRouteStore=(await import(new URL('./src/app.js',document.baseURI).href)).getStore();});
     await target.waitForFunction(revision=>window.omdRouteStore.getRevision()>=revision,revision);
   };
+  const selected=async(target,id)=>{await target.evaluate(async()=>{window.omdRouteStore=(await import(new URL('./src/app.js',document.baseURI).href)).getStore();});await target.waitForFunction(id=>window.omdRouteStore.getActivePageId()===id,id);};
   try {
     if(process.env.OMD_ROUTE_CPU_SLOWDOWN){const session=await context.newCDPSession(b);await session.send('Emulation.setCPUThrottlingRate',{rate:Number(process.env.OMD_ROUTE_CPU_SLOWDOWN)});}
     await a.goto(appURL);await ready(a);const first=await active(a);
@@ -57,10 +58,10 @@ export async function verifyPageRoutes({browser,appURL,call,root}) {
     await link.click();await b.waitForURL(path(second));
     const text=(await call('add_block',{type:'text',text:'Before browser history'},b)).block;
     await b.getByRole('textbox',{name:'text content',exact:true}).fill('Saved before navigating back');
-    await b.goBack();await b.waitForURL(path(first));await ready(b);
+    await b.goBack();await b.waitForURL(path(first));await ready(b);await selected(b,first);
     assert.equal(await active(b),first);
     assert.equal((await call('get_page',{pageId:second},b)).blocks.find(block=>block.id===text.id).text,'Saved before navigating back');
-    await b.goForward();await b.waitForURL(path(second));assert.equal(await active(b),second);
+    await b.goForward();await b.waitForURL(path(second));await selected(b,second);assert.equal(await active(b),second);
     await synchronized(a,(await call('get_notebook',{},b)).revision);
     await call('page_select',{pageId:first},a);
     await a.screenshot({path:`${root}/test-results/routes-left.png`});await b.screenshot({path:`${root}/test-results/routes-right.png`});

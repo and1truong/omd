@@ -6,7 +6,7 @@ import {chromium,webkit} from 'playwright';
 
 const root=fileURLToPath(new URL('..',import.meta.url)),engine=process.env.OMD_BROWSER??'chromium',base=process.env.OMD_BASE_PATH??'';
 const url=`http://localhost:4323${base}/`,source=new URL('src/',url).href;
-const server=spawn(process.execPath,['scripts/serve.mjs'],{cwd:root,env:{...process.env,OMD_PORT:'4323',OMD_STATIC_DIR:'dist'},stdio:['ignore','pipe','pipe']});
+const startServer=()=>spawn(process.execPath,['scripts/serve.mjs'],{cwd:root,env:{...process.env,OMD_PORT:'4323',OMD_STATIC_DIR:'dist'},stdio:['ignore','pipe','pipe']});let server=startServer();
 let browser,page,id;const errors=[];
 const ready=async()=>{page.on('pageerror',e=>errors.push(e.message));await page.goto(url);await page.evaluate(async source=>{window.tableApp=await import(`${source}app.js`);await tableApp.ready;},source);};
 const call=(name,input={})=>page.evaluate(async({name,input})=>{const store=tableApp.getStore();await tableApp.flushPending();return name==='undo'?store.undo():name==='redo'?store.redo():store.dispatch(name,input);},{name,input});
@@ -26,8 +26,8 @@ try{
   await page.locator('.block-type-table').waitFor();id=await page.locator('.block-type-table').getAttribute('data-block-id');await shape(3,3);
   await block().getByRole('textbox',{name:'table title',exact:true}).fill('Kế hoạch tuần');
   const values=[['Công việc','Phụ trách','Ghi chú'],['Viết tài liệu','Hồng','Tiếng Việt / 日本語'],['Kiểm thử','Devin','<script>plain text</script>']];
-  for(let r=0;r<3;r++)for(let c=0;c<3;c++)await cell(r+1,c+1).fill(values[r][c]);await settled();assert.deepEqual((await grid()).rows.map(r=>r.cells),values);
-  await cell(2,1).click();await cell(2,1).press('Tab');await focus(2,2);await cell(2,2).press('Shift+Tab');await focus(2,1);await cell(2,1).press('Enter');await focus(3,1);await cell(3,1).press('Control+ArrowRight');await focus(3,2);await cell(3,2).press('Shift+Enter');await settled();assert.equal((await grid()).rows[2].cells[1],'Devin\n');
+  for(let r=0;r<3;r++)for(let c=0;c<3;c++)await cell(r+1,c+1).fill(values[r][c]);await settled();const expected=structuredClone(values);expected[2][2]='&lt;script&gt;plain text&lt;/script&gt;';assert.deepEqual((await grid()).rows.map(r=>r.cells),expected);assert.equal(await cell(3,3).innerText(),values[2][2]);assert.equal(await cell(3,3).locator('script').count(),0);
+  await cell(2,1).click();await cell(2,1).press('Tab');await focus(2,2);await cell(2,2).press('Shift+Tab');await focus(2,1);await cell(2,1).press('Enter');await focus(3,1);await cell(3,1).press('Control+ArrowRight');await focus(3,2);await cell(3,2).press('Shift+Enter');await settled();assert.equal((await grid()).rows[2].cells[1],'Devin  \n');
   // Explicit before/after positions preserve every untouched cell and identity.
   const original=await grid();await (await menu('Row',2)).getByRole('button',{name:'Insert row below',exact:true}).click();await shape(4,3);await focus(3,1);
   assert.deepEqual((await grid()).rows.map(r=>r.id),[original.rows[0].id,original.rows[1].id,(await grid()).rows[2].id,original.rows[2].id]);
@@ -40,18 +40,18 @@ try{
   await (await menu('Column',4)).getByRole('button',{name:'Insert column after',exact:true}).click();await shape(4,5);await call('undo');await shape(4,4);
   await block().getByRole('button',{name:'Add table row',exact:true}).click();await shape(5,4);await block().getByRole('button',{name:'Add table column',exact:true}).click();await shape(5,5);await call('undo');await call('undo');await shape(4,4);
   // Synthetic composition regression only: not an actual OS IME test.
-  await cell(2,1).evaluate(el=>{el.focus();el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.value='Tiếng Việt 日本語';el.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertCompositionText',isComposing:true}));el.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',bubbles:true,isComposing:true}));});await focus(2,1);
+  await cell(2,1).evaluate(el=>{el.focus();el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.replaceChildren(Object.assign(document.createElement('p'),{textContent:'Tiếng Việt 日本語'}));el.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertCompositionText',isComposing:true}));el.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',bubbles:true,isComposing:true}));});await focus(2,1);
   assert.equal((await grid()).rows[1].cells[0],'Viết tài liệu');await cell(2,1).evaluate(el=>el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'Tiếng Việt 日本語'})));await settled();assert.equal((await grid()).rows[1].cells[0],'Tiếng Việt 日本語');
   // Failed actual IndexedDB writes retain the draft; navigation is prevented until retry.
   const current=await page.evaluate(()=>tableApp.getStore().getActivePageId()),other=(await call('page_add',{title:'Other page'})).pageId;await call('page_select',{pageId:current});
   await page.evaluate(()=>{window.tablePut=IDBObjectStore.prototype.put;const name=tableApp.getStore().databaseName();IDBObjectStore.prototype.put=function(...args){if(this.transaction.db.name===name)throw new DOMException('Table quota test','QuotaExceededError');return tablePut.apply(this,args);};});
   await cell(2,1).fill('Bản nháp còn nguyên');await page.locator('.notice.error').filter({hasText:'Table quota test'}).first().waitFor();
-  await page.evaluate(async()=>{try{await tableApp.setView({sidebarOpen:true});}catch{}});assert.equal(await cell(2,1).inputValue(),'Bản nháp còn nguyên');assert.equal(await page.evaluate(()=>tableApp.getStore().getActivePageId()),current);assert.notEqual((await grid()).rows[1].cells[0],'Bản nháp còn nguyên');
+  await page.evaluate(async()=>{try{await tableApp.setView({sidebarOpen:true});}catch{}});assert.equal(await cell(2,1).innerText(),'Bản nháp còn nguyên');assert.equal(await page.evaluate(()=>tableApp.getStore().getActivePageId()),current);assert.notEqual((await grid()).rows[1].cells[0],'Bản nháp còn nguyên');
   await page.evaluate(()=>{IDBObjectStore.prototype.put=tablePut;});await settled();assert.equal((await grid()).rows[1].cells[0],'Bản nháp còn nguyên');
   for(const notice of await page.locator('.notice.error button').all())await notice.click();
   // Navigation through the real palette waits for the final composing cell and its captured page.
   await page.evaluate(()=>tableApp.openPalette());await page.locator('#page-search').fill('Other page');
-  await cell(2,1).evaluate(el=>{el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.value='最後の文字';});
+  await cell(2,1).evaluate(el=>{el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.replaceChildren(Object.assign(document.createElement('p'),{textContent:'最後の文字'}));});
   await page.locator('#palette-pages').getByRole('option',{name:'Other page',exact:true}).evaluate(el=>el.click());assert.equal(await page.evaluate(()=>tableApp.getStore().getActivePageId()),current);
   await cell(2,1).evaluate(el=>el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'最後の文字'})));
   await page.waitForFunction(other=>tableApp.getStore().getActivePageId()===other,other);await call('page_select',{pageId:current});assert.equal((await grid()).rows[1].cells[0],'最後の文字');
@@ -75,18 +75,15 @@ try{
   await page.locator('#page-menu summary').click();const downloadEvent=page.waitForEvent('download');await page.locator('#export-button').click();const download=await downloadEvent,json=await readFile(await download.path(),'utf8');
   await cell(2,1).fill('Changed after backup');await settled();await page.locator('#import-file').setInputFiles({name:'tables.json',mimeType:'application/json',buffer:Buffer.from(json)});await page.locator('#confirm-ok').click();await page.locator('.notice').filter({hasText:'Notebook imported.'}).waitFor();assert.deepEqual(await grid(),saved);
   await page.evaluate(()=>navigator.serviceWorker.ready);await page.waitForFunction(()=>!!navigator.serviceWorker.controller);
-  await context.setOffline(true);await cell(2,1).fill('Offline table');await settled();
-  // Playwright WebKit's offline navigation fails internally even with an active SW.
-  // Still verify disconnected IndexedDB writes there; Chromium covers offline boot.
-  if(engine==='webkit')await context.setOffline(false);
-  await page.reload();await page.evaluate(async source=>{window.tableApp=await import(`${source}app.js`);await tableApp.ready;},source);assert.equal((await grid()).rows[1].cells[0],'Offline table');await context.setOffline(false);
+  const stopped=new Promise(resolve=>server.once('exit',resolve));server.kill();await stopped;await cell(2,1).fill('Offline table');await settled();
+  await page.reload();await page.evaluate(async source=>{window.tableApp=await import(`${source}app.js`);await tableApp.ready;},source);assert.equal((await grid()).rows[1].cells[0],'Offline table');server=startServer();await new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.once('error',reject);});
   // Hidden tab/toggle/accordion branches do not mount cell editors.
   const tabs=(await call('add_block',{type:'tabs'})).block,toggle=(await call('add_block',{type:'toggle',containerId:tabs.tabs[1].id})).block,accordion=(await call('add_block',{type:'accordion',containerId:toggle.id})).block;
   const nested=(await call('add_block',{type:'table',containerId:accordion.items[0].id})).blockId;assert.equal(await page.locator(`[data-block-id="${nested}"]`).count(),0);
   await call('tab_select',{blockId:tabs.id,tabId:tabs.tabs[1].id});await page.locator(`[data-block-id="${nested}"]`).waitFor();
   await call('update_block',{blockId:toggle.id,patch:{open:false}});assert.equal(await page.locator(`[data-block-id="${nested}"]`).count(),0);await call('update_block',{blockId:toggle.id,patch:{open:true}});
   await call('accordion_update',{blockId:accordion.id,itemId:accordion.items[0].id,patch:{open:false}});assert.equal(await page.locator(`[data-block-id="${nested}"]`).count(),0);await call('accordion_update',{blockId:accordion.id,itemId:accordion.items[0].id,patch:{open:true}});
-  await page.locator(`[data-block-id="${nested}"]`).getByRole('textbox',{name:'Table row 2, column 2',exact:true}).fill('Nested');await settled();await call('tab_select',{blockId:tabs.id,tabId:tabs.tabs[0].id});assert.equal(await page.locator(`[data-block-id="${nested}"]`).count(),0);await call('tab_select',{blockId:tabs.id,tabId:tabs.tabs[1].id});assert.equal(await page.locator(`[data-block-id="${nested}"]`).getByRole('textbox',{name:'Table row 2, column 2',exact:true}).inputValue(),'Nested');
+  await page.locator(`[data-block-id="${nested}"]`).getByRole('textbox',{name:'Table row 2, column 2',exact:true}).fill('Nested');await settled();await call('tab_select',{blockId:tabs.id,tabId:tabs.tabs[0].id});assert.equal(await page.locator(`[data-block-id="${nested}"]`).count(),0);await call('tab_select',{blockId:tabs.id,tabId:tabs.tabs[1].id});assert.equal(await page.locator(`[data-block-id="${nested}"]`).getByRole('textbox',{name:'Table row 2, column 2',exact:true}).innerText(),'Nested');
   // Mobile wide/tall table: pinned header/first columns remain fixed in local scrolling.
   await page.setViewportSize({width:320,height:844});await page.evaluate(async()=>await tableApp.setView({contentWidth:'reading',sidebarOpen:false,theme:'light'}));
   const nestedOptions=page.locator(`[data-block-id="${nested}"] .table-options`);await nestedOptions.locator('summary').click();const panelBounds=await nestedOptions.locator('.table-options-panel').boundingBox();assert.ok(panelBounds.x>=0&&panelBounds.x+panelBounds.width<=320,'Nested table options must fit the mobile viewport');await nestedOptions.locator('summary').click();
@@ -103,5 +100,5 @@ try{
   await page.setViewportSize({width:1280,height:900});await block().locator('.table-options summary').click();await block().getByRole('combobox',{name:'Pinned first columns',exact:true}).selectOption('2');await settled();await block().locator('.table-options summary').click();
   await block().locator('.table-scroll').evaluate(scroll=>{scroll.scrollLeft=160;scroll.scrollTop=132;});await page.evaluate(()=>{document.activeElement?.blur();window.scrollTo(0,0);});await shot('desktop-pinned');
   await block().locator('.table-options summary').click();await shot('options');await page.keyboard.press('Escape');
-  await context.close();assert.deepEqual(errors,[]);console.log(`${engine} ${base||'/'}: table UI, keyboard, dimensions, pinning, synthetic composition, failure/retry, nested visibility, JSON, reload, disconnected writes and mobile passed. Offline boot: ${engine==='webkit'?'not tested (Playwright internal navigation error)':'passed'}.`);
+  await context.close();assert.deepEqual(errors,[]);console.log(`${engine} ${base||'/'}: table UI, keyboard, dimensions, pinning, synthetic composition, failure/retry, nested visibility, JSON, reload, disconnected writes and mobile passed. Offline boot: passed (real origin shutdown).`);
 }finally{await browser?.close();server.kill();}

@@ -12,6 +12,7 @@ import { setupShell, showMenu } from './shell.js';
 import { icon, labelIcon } from './icons.js';
 import {createTextEditors} from './text-editors.js';
 import {createTableEdits} from './table-edits.js';
+import {createTableEditors} from './table-editors.js';
 import {MAX_TABLE_ROWS,MAX_TABLE_COLUMNS} from './model.js';
 import {appBase,routePageId,setupRoutes} from './routes.js';
 
@@ -19,6 +20,7 @@ function $<T extends HTMLElement=HTMLElement>(selector:string):T {if(selector.st
 let store:NotebookStore,palette:ReturnType<typeof setupPalette>|undefined,diagrams:ReturnType<typeof createDiagramManager>|undefined,renderer:ReturnType<typeof createRenderCache>,shell:ReturnType<typeof setupShell>|undefined,dragData:DragData|null|undefined;
 let textEditors:ReturnType<typeof createTextEditors>|undefined;
 let tableEdits:ReturnType<typeof createTableEdits>|undefined;
+let tableEditors:ReturnType<typeof createTableEditors>|undefined;
 interface InsertionAnchor {blockId:string;side:'before'|'after'}
 interface DragData {containerId?:string;kind:'block'|'card'|'column'|'tab';blockId:string;cardId?:string;columnId?:string;tabId?:string;pageId?:string}
 let suppressTabClick=false;
@@ -26,9 +28,9 @@ let tabTitleEdit:{flush:()=>Promise<unknown>}|undefined;
 export const openPalette = () => {shell?.closeMobile();palette?.open();};
 export const getView = () => shell!.getView();
 export const setView = async (patch:PartialView) => {if(patch.sidebarOpen)await beforeNavigate();return shell!.setView(patch);};
-export async function flushPending({waitForTransitions=true}:{waitForTransitions?:boolean}={}){await tabTitleEdit?.flush();await tableEdits?.flushAll();await textEditors?.flushAll({waitForTransitions});await diagrams?.flushAll();}
+export async function flushPending({waitForTransitions=true}:{waitForTransitions?:boolean}={}){await tabTitleEdit?.flush();await tableEditors?.flushAll();await textEditors?.flushAll({waitForTransitions});await diagrams?.flushAll();}
 export const flushDiagrams=flushPending;
-async function beforeNavigate(){await tabTitleEdit?.flush();await tableEdits?.flushAll();await textEditors?.flushAll();await diagrams?.beforeNavigate();}
+async function beforeNavigate(){await tabTitleEdit?.flush();await tableEditors?.flushAll();await textEditors?.flushAll();await diagrams?.beforeNavigate();}
 export async function openCanvas(blockId:string,pageId?:string) {
   const page=await store.getPage(pageId);findBlock(page,blockId,'excalidraw');await flushPending();
   shell?.closeMobile();
@@ -217,7 +219,7 @@ function renderTable(shell:HTMLElement,b:BlockOf<'table'>) {
   options.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();options.open=false;summary.focus();}});
   const pinHeader=checkbox('Pin header',b.pinnedHeader,'pinnedHeader');pinHeader.querySelector('input')!.disabled=!b.headerRow;
   const help=element('small','muted');help.textContent='Keep headings and leading columns visible while scrolling.';
-  panel.append(checkbox('Header row',b.headerRow,'headerRow'),pinHeader,pins,help);options.append(summary,panel);toolbar.append(size,rowButton,columnButton,options);
+  panel.append(checkbox('Header row',b.headerRow,'headerRow'),pinHeader,pins,help);options.append(summary,panel);toolbar.append(size,rowButton,columnButton,options,tableEditors!.toolbar(b.id,pageId));
   const scroll=element('div','table-scroll'),table=element('table','data-table'),caption=element('caption','sr-only');caption.textContent=b.title||'Table';table.append(caption);
   scroll.tabIndex=0;scroll.setAttribute('role','region');scroll.setAttribute('aria-label',`${b.title||'Table'} — scrollable grid`);
   table.style.setProperty('--table-column-count',String(b.columns.length));
@@ -237,16 +239,15 @@ function renderTable(shell:HTMLElement,b:BlockOf<'table'>) {
     b.columns.forEach((column,c)=>{
       const cell=element(r===0&&b.headerRow?'th':'td');if(cell instanceof HTMLTableCellElement&&cell.tagName==='TH')cell.scope='col';if(r===0)cell.classList.add('table-top-cell');pin(cell,c);
       const saved=tableEdits!.value(pageId,b.id,row.id,column.id,row.cells[c]);
-      const input=editable(saved,`Table row ${r+1}, column ${c+1}`,(value,capturedPageId)=>tableEdits!.write(capturedPageId,b.id,row.id,column.id,value).catch(error=>{notify(errorOf(error).message,'error',true);}),{multiline:true,className:'table-cell',id:cellId(r,c)});
-      input.addEventListener('keydown',event=>{
-        const key=event as KeyboardEvent;if(key.isComposing||key.keyCode===229||composition.isComposing(input)||key.altKey)return;
+      const input=tableEditors!.mount({pageId,blockId:b.id,rowId:row.id,columnId:column.id,source:saved,id:cellId(r,c),label:`Table row ${r+1}, column ${c+1}`,onKeyDown:key=>{
+        if(key.altKey)return false;
         let nextR=r,nextC=c;
-        if(key.key==='Tab'&&!key.ctrlKey&&!key.metaKey){const index=r*b.columns.length+c+(key.shiftKey?-1:1);if(index<0||index>=b.rows.length*b.columns.length)return;nextR=Math.floor(index/b.columns.length);nextC=index%b.columns.length;}
+        if(key.key==='Tab'&&!key.ctrlKey&&!key.metaKey){const index=r*b.columns.length+c+(key.shiftKey?-1:1);if(index<0||index>=b.rows.length*b.columns.length)return false;nextR=Math.floor(index/b.columns.length);nextC=index%b.columns.length;}
         else if(key.key==='Enter'&&!key.shiftKey&&!key.ctrlKey&&!key.metaKey)nextR=r+1;
         else if((key.ctrlKey||key.metaKey)&&key.key.startsWith('Arrow')){if(key.key==='ArrowUp')nextR--;if(key.key==='ArrowDown')nextR++;if(key.key==='ArrowLeft')nextC--;if(key.key==='ArrowRight')nextC++;}
-        else return;
-        key.preventDefault();if(nextR>=0&&nextR<b.rows.length&&nextC>=0&&nextC<b.columns.length)document.getElementById(cellId(nextR,nextC))?.focus();
-      });cell.append(input);if(r===0)cell.append(columnAction(column.id,c));tr.append(cell);
+        else return false;
+        if(nextR>=0&&nextR<b.rows.length&&nextC>=0&&nextC<b.columns.length)document.getElementById(cellId(nextR,nextC))?.focus();return true;
+      }});cell.append(input);if(r===0)cell.append(columnAction(column.id,c));tr.append(cell);
     });
     const tools=element('td','table-row-tools');if(r===0&&b.headerRow&&b.pinnedHeader)tools.classList.add('table-header-tool');
     const more=button('…',`Row ${r+1} actions`,()=>showMenu('block-actions-dialog',`Row ${r+1}`,[
@@ -449,15 +450,15 @@ function render(state:Page, { quiet = false, reminderBlockId, reminderPageId, ch
   if(domId('page-actions-dialog').open)domId('page-actions-dialog').close();
   // Preserve cursor and scroll when a command updates the rest of the page.
   const focused=document.activeElement as HTMLInputElement|HTMLTextAreaElement|null; const focusId = focused?.id; const selection = focused?.selectionStart == null ? null : [focused.selectionStart, focused.selectionEnd!] as const;
-  const editorFocus=textEditors?.captureFocus()??null;
+  const editorFocus=textEditors?.captureFocus()??null,tableFocus=tableEditors?.captureFocus()??null;
   const scroll=[scrollX,scrollY] as const;
   for(const [selector,value] of [['#page-title',state.title],['#page-subtitle',state.subtitle]]){const el=$<HTMLInputElement|HTMLTextAreaElement>(selector);if(el.value!==value){el.value=value;fit(el);}}
   if(renderPageId===state.id&&!reset)return;
   renderPageId=state.id;diagrams?.begin();renderer.begin(state.id);
-  reconcile(domId('notebook'),[renderer.list(state.blocks,'page')]);renderer.end();diagrams?.end();textEditors?.end();
+  reconcile(domId('notebook'),[renderer.list(state.blocks,'page')]);renderer.end();diagrams?.end();textEditors?.end();tableEditors?.end();
   for(const el of document.querySelectorAll<HTMLElement>('[data-autofit],.auto-height'))if(!el.dataset.fitted){fit(el);el.dataset.fitted='true';}
-  if (focusId) { const next=document.getElementById(focusId) as HTMLInputElement|HTMLTextAreaElement|null; if (next) { next.focus({ preventScroll: true }); if (selection && next.setSelectionRange) next.setSelectionRange(...selection); } }
-  textEditors?.restoreFocus(editorFocus);
+  if (focusId&&!tableFocus) { const next=document.getElementById(focusId) as HTMLInputElement|HTMLTextAreaElement|null; if (next) { next.focus({ preventScroll: true }); if (selection && next.setSelectionRange) next.setSelectionRange(...selection); } }
+  textEditors?.restoreFocus(editorFocus);tableEditors?.restoreFocus(tableFocus);
   scrollTo(...scroll);
 }
 export async function downloadJson(raw?:string, filename = `omd-${new Date().toISOString().slice(0, 10)}.json`) {
@@ -493,6 +494,7 @@ async function boot() {
   diagrams=createDiagramManager(store,{notify});
   textEditors=createTextEditors(store,{composition,notify,createNext:(blockId,pageId)=>createTextAfter(blockId,pageId,false)});
   tableEdits=createTableEdits(store,{settled:()=>composition.settled(input=>input instanceof Element&&input.classList.contains('table-cell'))});
+  tableEditors=createTableEditors(store,{composition,drafts:tableEdits,notify,flushPending});
   const dirtyContainers=new Set<string>();
   renderer=createRenderCache({makeBlock:renderBlock,makeList:makeBlockList,
     observeBlock:(id,fn)=>store.subscribeBlock(id,fn),observeList:(id,fn)=>store.subscribeContainer(id,fn),
@@ -504,11 +506,11 @@ async function boot() {
   store.afterChange(()=>{
     if(!dirtyContainers.size)return;const state=store.getRenderState(),options=store.getLastEvent(),ids=[...dirtyContainers];dirtyContainers.clear();if(options.reset)return;
     const focused=document.activeElement as HTMLInputElement|HTMLTextAreaElement|null,focusId=focused?.id,selection=focused?.selectionStart==null?null:[focused.selectionStart,focused.selectionEnd!] as const,scroll=[scrollX,scrollY] as const;
-    const editorFocus=textEditors!.captureFocus();
-    diagrams!.begin();for(const id of ids)try{renderer.refresh(findContainer(state,id).blocks,id);}catch(error){if(!/not found/.test(errorOf(error).message))notify(errorOf(error).message,'error',true);}diagrams!.end();textEditors!.end();
+    const editorFocus=textEditors!.captureFocus(),tableFocus=tableEditors?.captureFocus()??null;
+    diagrams!.begin();for(const id of ids)try{renderer.refresh(findContainer(state,id).blocks,id);}catch(error){if(!/not found/.test(errorOf(error).message))notify(errorOf(error).message,'error',true);}diagrams!.end();textEditors!.end();tableEditors?.end();
     for(const el of document.querySelectorAll<HTMLElement>('[data-autofit],.auto-height'))if(!el.dataset.fitted){fit(el);el.dataset.fitted='true';}
-    if(focusId){const next=document.getElementById(focusId) as HTMLInputElement|HTMLTextAreaElement|null;if(next){next.focus({preventScroll:true});if(selection&&next.setSelectionRange)next.setSelectionRange(...selection);}}scrollTo(...scroll);
-    textEditors!.restoreFocus(editorFocus);
+    if(focusId&&!tableFocus){const next=document.getElementById(focusId) as HTMLInputElement|HTMLTextAreaElement|null;if(next){next.focus({preventScroll:true});if(selection&&next.setSelectionRange)next.setSelectionRange(...selection);}}scrollTo(...scroll);
+    textEditors!.restoreFocus(editorFocus);tableEditors?.restoreFocus(tableFocus);
   });
   shell=setupShell(store,{beforeNavigate,openPalette,confirm:confirmAction,onError:error=>notify(errorOf(error).message,'error',true),onThemeChange:applyTheme});
   store.subscribe(render); render(store.getRenderState());
@@ -517,7 +519,7 @@ async function boot() {
   setupRoutes(store,{beforeNavigate,onError:error=>notify(error.message,'error',true)});
   let fitFrame=0;window.addEventListener('resize',()=>{cancelAnimationFrame(fitFrame);fitFrame=requestAnimationFrame(()=>{for(const el of document.querySelectorAll<HTMLElement>('[data-autofit],.auto-height'))fit(el);});});
   domId('canvas-stage-close').addEventListener('click',closeCanvas);domId('canvas-stage-pages').addEventListener('click',openPalette);
-  window.addEventListener('pagehide',event=>{flushPending().then(()=>{if(!event.persisted){textEditors!.destroy();return store.close();}}).catch(error=>notify(errorOf(error).message,'error',true));});window.addEventListener('beforeunload',event=>{if(textEditors?.hasPending()){event.preventDefault();event.returnValue='';}void flushPending().catch(()=>{});});
+  window.addEventListener('pagehide',event=>{flushPending().then(()=>{if(!event.persisted){textEditors!.destroy();tableEditors?.destroy();return store.close();}}).catch(error=>notify(errorOf(error).message,'error',true));});window.addEventListener('beforeunload',event=>{if(textEditors?.hasPending()||tableEditors?.hasPending()){event.preventDefault();event.returnValue='';}void flushPending().catch(()=>{});});
   for (const [selector, key] of [['#page-title', 'title'], ['#page-subtitle', 'subtitle']]) {
     const el=$<HTMLInputElement|HTMLTextAreaElement>(selector);
     const write = (pageId:string) => {const saved=action('set_page', {pageId,[key]:el.value}, {quiet:true});fit(el);return saved;};
