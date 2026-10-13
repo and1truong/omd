@@ -1,4 +1,6 @@
 const paths:Record<string,string[]>={
+  info:['M12 8h.01M12 11v6','M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0'],
+  warning:['m12 3 10 18H2Z','M12 9v5M12 17h.01'],
   notebook:['M4 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H4V3Z','M8 3v18','M2 7h4M2 12h4M2 17h4'],
   page:['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z','M14 2v6h6'],
   panel:['M3 4h18v16H3Z','M9 4v16'],search:['M21 21l-5-5','M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0'],
