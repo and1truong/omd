@@ -16,6 +16,7 @@
     "test:heading": "node tests/heading-browser.mjs",
     "test:checklist": "node tests/checklist-browser.mjs",
     "test:editor": "node tests/text-editor.mjs",
+    "test:paste": "node tests/markdown-paste.mjs",
     "test:table": "node tests/table-browser.mjs",
     "test:table-rich": "node tests/table-rich.mjs",
     "test:tabs": "node tests/tabs-drag.mjs",

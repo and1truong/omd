@@ -30,6 +30,8 @@ Click or tap a link to open it in a new tab without leaving your notebook. To ed
 
 Focus the text or heading editor before using **Shift+Enter**; the shortcut does not create blocks from the formatting toolbar or page title. While an input method is composing text (for example, Vietnamese preedit), block creation is suppressed to protect the unfinished text. Finish composition first, such as by committing the word with Space, then press **Shift+Enter**. With some input methods, the first press only commits composition; press again after it finishes.
 
+Pasting Markdown source applies its headings, bold/italic, code, links, lists and quotes in text blocks, checklist items and table cells. This also works when a browser or code editor adds an HTML clipboard wrapper. Ordinary formatted HTML and copies from the notebook editor use its rich-text paste handling; paste inside a code block stays literal.
+
 Text content is saved as Markdown in JSON backups and WebMCP's `text` field. Existing text loads without a storage migration or automatic rewrite. Editor libraries are bundled and cached for offline writing. Switching pages or hiding a section releases its editor and retains the saved content.
 
 ## Checklists
