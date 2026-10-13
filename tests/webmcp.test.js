@@ -21,7 +21,7 @@ test('checklist tools expose nested parent selection and reject fifth levels and
   assert.equal(await store.export(),before);
   await call(tools,'checklist_update',{blockId,itemId:parentId,patch:{done:true}});
   await call(tools,'checklist_move',{blockId,itemId:parentId,parentId:'',index:1});
-  const page=await call(tools,'get_notebook');assert.equal(page.blocks[0].items[1].done,true);
+  const page=await call(tools,'get_notebook');assert.equal(page.blocks[0].items[1].done,true);const stamp=page.blocks[0].items[1].completedAt;assert.ok(Number.isFinite(Date.parse(stamp)));await call(tools,'checklist_update',{blockId,itemId:parentId,patch:{done:true}});assert.equal((await call(tools,'get_notebook')).blocks[0].items[1].completedAt,stamp);
   await call(tools,'checklist_remove',{blockId,itemId:root});
   assert.equal((await call(tools,'get_notebook')).blocks[0].items.length,1);await store.close();
 });

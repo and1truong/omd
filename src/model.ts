@@ -80,7 +80,8 @@ export function validateNotebook(raw:unknown):Page {
     list(items);
     for(const item of items) {
       assert(level<=MAX_CHECKLIST_LEVELS,`Checklist items are limited to ${MAX_CHECKLIST_LEVELS} levels, including root items.`);
-      fields(item,['id','text','done','children']);id(item.id);string(item.text,'Checklist item');boolean(item.done,'Checked');
+      fields(item,['id','text','done','completedAt','children']);id(item.id);string(item.text,'Checklist item');boolean(item.done,'Checked');
+      if(item.completedAt!==undefined&&item.completedAt!==null&&item.completedAt!=='')date(item.completedAt,'Completion date');
       if(Object.hasOwn(item,'children'))checklist(item.children!,level+1);
     }
   }
@@ -243,7 +244,13 @@ export function mutatePage(doc:Page,action:CommandName,input:InternalInput = {},
       assert(findBlock(doc, b.id), 'Cannot move a block inside itself.'); break;
     }
     case 'checklist_add': fields(input, ['blockId', 'text', 'parentId', 'index']); { const item = { id: uid(), text: input.text ?? '', done: false }; insert(checklistChildren(block('checklist').items,input.parentId), item, input.index); result = { itemId: item.id }; } break;
-    case 'checklist_update': fields(input, ['blockId', 'itemId', 'patch']); fields(input.patch, ['text', 'done']); Object.assign(findChecklistItem(block('checklist').items, input.itemId).item, input.patch); break;
+    case 'checklist_update': {
+      fields(input,['blockId','itemId','patch']);fields(input.patch,['text','done']);
+      const item=findChecklistItem(block('checklist').items,input.itemId).item,completing=input.patch!.done===true&&!item.done;
+      Object.assign(item,input.patch);
+      if(completing)item.completedAt=new Date().toISOString();else if(input.patch!.done===false)delete item.completedAt;
+      break;
+    }
     case 'checklist_remove': fields(input, ['blockId', 'itemId']); {const source=findChecklistItem(block('checklist').items,input.itemId);remove(source.siblings,input.itemId);} break;
     case 'checklist_move': {
       fields(input,['blockId','itemId','parentId','index']);const items=block('checklist').items,source=findChecklistItem(items,input.itemId);

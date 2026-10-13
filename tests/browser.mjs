@@ -100,10 +100,10 @@ try {
   const checklist = (await call('add_block', { type: 'checklist', title: 'Test tasks' })).block;
   await call('checklist_add', { blockId: checklist.id, text: 'An agent-created task' });
   await page.getByRole('checkbox', { name: 'Complete An agent-created task', exact: true }).check();await settle();
-  notebook = await call('get_notebook'); assert.ok(notebook.blocks[0].items[0].done);
+  notebook = await call('get_notebook'); assert.ok(notebook.blocks[0].items[0].done);assert.ok(Number.isFinite(Date.parse(notebook.blocks[0].items[0].completedAt)));assert.equal(await page.locator(`[data-item-id="${notebook.blocks[0].items[0].id}"] > .check-row time`).getAttribute('datetime'),notebook.blocks[0].items[0].completedAt);
   const nestedTask=(await call('checklist_add',{blockId:checklist.id,parentId:notebook.blocks[0].items[0].id,text:'A nested agent task'})).itemId;
   await call('checklist_update',{blockId:checklist.id,itemId:nestedTask,patch:{done:true}});
-  assert.ok((await call('get_notebook')).blocks[0].items[0].children[0].done);
+  const completedChild=(await call('get_notebook')).blocks[0].items[0].children[0];assert.ok(completedChild.done);assert.equal(await page.locator(`[data-item-id="${nestedTask}"] > .check-row time`).getAttribute('datetime'),completedChild.completedAt);
   await call('checklist_move',{blockId:checklist.id,itemId:nestedTask,parentId:'',index:1});
   assert.equal((await call('get_notebook')).blocks[0].items[1].id,nestedTask);
   await call('checklist_remove',{blockId:checklist.id,itemId:nestedTask});
