@@ -130,9 +130,9 @@ body[data-content-width=wide] .paper { max-width: none; }
 .data-table .table-header-pinned th, .data-table .table-header-tool { position: sticky; top: 0; z-index: 2; }
 .data-table .table-header-pinned .table-pinned { z-index: 3; }
 @media (hover: none) { .data-table .table-column-action, .data-table .table-row-tools button { opacity: 1; } }
-.block-type-heading textarea { font-size: 24px; font-weight: 600; line-height: 1.4; }
+.block-type-heading>input { width: 100%; font-size: 24px; font-weight: 600; line-height: 1.4; text-overflow: ellipsis; }
 .block-type-text textarea { font-size: 14px; line-height: 1.8; min-height: 25px; }
-.block-type-text>textarea, .block-type-heading>textarea { background: transparent; outline: 0; border-radius: 0; }
+.block-type-text>textarea, .block-type-heading>input { background: transparent; outline: 0; border-radius: 0; }
 .text-editor { min-width: 0; position: relative; }
 .markdown-toolbar { position: absolute; left: 0; bottom: 100%; display: flex; flex-wrap: wrap; gap: 3px; padding: 3px; margin-bottom: 4px; border: 1px solid var(--line); border-radius: 5px; background: var(--paper); z-index: 3; opacity: 0; pointer-events: none; transition: opacity .12s ease; }
 .text-editor:hover .markdown-toolbar, .text-editor:focus-within .markdown-toolbar { opacity: 1; pointer-events: auto; }
@@ -332,7 +332,7 @@ h3 { font-size: 13px; margin: 0 0 12px; }
   .block-controls .block-drag { display: none; }
   .block-controls .icon-button { min-width: 32px; min-height: 30px; }
   .block>.block-heading, .block>.toggle-head { padding-right: 34px; }
-  .block-type-text>textarea, .block-type-heading>textarea { padding-right: 34px; }
+  .block-type-text>textarea, .block-type-heading>input { padding-right: 34px; }
   .markdown-toolbar { position: static; opacity: 1; pointer-events: auto; padding-right: 34px; border: 0; margin-bottom: 5px; }
   .markdown-tool { min-width: 32px; min-height: 34px; }
   .block-type-reminder>.block-controls { top: 8px; right: 5px; }

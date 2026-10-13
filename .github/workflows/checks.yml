@@ -82,6 +82,7 @@ jobs:
       - run: npm run test:insertion
       - run: npm run test:checklist
       - run: npm run test:editor
+      - run: npm run test:heading
       - run: npm run test:transition
       - run: npm run test:diagrams
       - run: npm run test:table
