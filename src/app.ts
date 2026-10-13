@@ -43,9 +43,10 @@ let deferredRender=false;
 const composition=createCompositionGuard({onSettled:()=>{if(deferredRender){deferredRender=false;render(store.getRenderState(),{reset:true});}}});
 const themeQuery = matchMedia('(prefers-color-scheme: dark)');
 export function notify(message:string,kind = '', persistent = false) {
-  const el = element('div', `notice ${kind}`); const text = element('span'); text.textContent = message;
-  const close = button('×', 'Dismiss message', () => el.remove()); el.append(text, close); domId('notices').append(el);
-  if (!persistent) setTimeout(() => el.remove(), kind === 'error' ? 12000 : 5000);
+  const el=element('div',`notice ${kind}`),badge=element('span','notice-icon'),text=element('span','notice-message');
+  badge.append(icon(kind==='error'?'warning':kind==='reminder'?'reminder':'info'));text.textContent=message;el.setAttribute('aria-atomic','true');
+  const close=button('×','Dismiss message',()=>el.remove(),'icon-button notice-close');el.append(badge,text,close);domId('notices').append(el);
+  if(!persistent)setTimeout(()=>el.remove(),kind==='error'?12000:5000);
 }
 function element<T extends keyof HTMLElementTagNameMap>(tag:T,className = '') { const el = document.createElement(tag); el.className = className; return el; }
 function button(label:string,aria:string,fn:(event:MouseEvent)=>unknown,className = 'icon-button') {

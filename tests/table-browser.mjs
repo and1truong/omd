@@ -13,7 +13,7 @@ const call=(name,input={})=>page.evaluate(async({name,input})=>{const store=tabl
 const grid=()=>page.evaluate(async({id,source})=>{const store=tableApp.getStore();await store.idle();return (await import(`${source}model.js`)).findBlock(store.getState(),id,'table').block;},{id,source});
 const block=()=>page.locator(`[data-block-id="${id}"]`),cell=(r,c)=>block().getByRole('textbox',{name:`Table row ${r}, column ${c}`,exact:true});
 const menu=async(axis,index)=>{await block().getByRole('button',{name:`${axis} ${index} actions`,exact:true}).click();return page.locator('#block-actions-dialog');};
-const focus=async(r,c)=>assert.equal(await cell(r,c).evaluate(el=>el===document.activeElement),true);
+const focus=async(r,c)=>{const target=await cell(r,c).getAttribute('id');await page.waitForFunction(id=>document.activeElement?.id===id,target);assert.equal(await cell(r,c).evaluate(el=>el===document.activeElement),true);};
 const settled=()=>page.evaluate(async()=>{await tableApp.flushPending();});
 const shape=async(rows,columns)=>{await page.waitForFunction(({id,rows,columns})=>{const block=document.querySelector(`[data-block-id="${id}"]`);return block?.querySelectorAll('.table-cell').length===rows*columns&&block.querySelector('.table-toolbar span')?.textContent===`${rows} rows × ${columns} columns`;},{id,rows,columns});};
 const shot=async(name)=>page.screenshot({path:`${root}/test-results/table-${engine}-${base?'omd':'root'}-${name}.png`});
