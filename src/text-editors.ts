@@ -43,7 +43,7 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
     const id=crypto.randomUUID(),host=mount({id,type:'text',text:''},source.pageId),next=entries.get(key(source.pageId,id))!;
     next.provisional=true;next.creating=true;host.dataset.pendingBlock='true';source.host.append(host);
     next.editor.view.focus();host.scrollIntoView({block:'nearest'});
-    const retry=document.createElement('button');retry.type='button';retry.textContent='Retry creating block';retry.hidden=true;host.querySelector('.markdown-toolbar')!.append(retry);
+    const retry=document.createElement('button');retry.type='button';retry.textContent='Retry creating block';retry.hidden=true;host.append(retry);
     let running=false,created:string|undefined;
     async function finish() {
       if(running)return;running=true;retry.hidden=true;
