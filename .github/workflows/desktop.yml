@@ -75,7 +75,7 @@ jobs:
       - run: npm run test:bridge:browser
       - name: Prepare pinned Lime extension
         if: matrix.engine == 'chromium'
-        run: npm run desktop:prepare
+        run: apt-get update && apt-get install -y xz-utils unzip && npm run desktop:prepare
       - name: Released Lime against OMD
         if: matrix.engine == 'chromium'
-        run: apt-get update && apt-get install -y unzip && node desktop/test-lime.mjs
+        run: node desktop/test-lime.mjs
