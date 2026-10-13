@@ -17,7 +17,7 @@ export function pasteMarkdown(editor:Editor,event:ClipboardEvent):boolean {
   }
   const parsed=editor.markdown?.parse(text);if(!parsed)return false;
   if(html){
-    const markdownLinks=/\]\s*(?:\(|\[|:)|<(?:https?:\/\/|mailto:)[^>]+>/i.test(text);
+    const markdownLinks=/\]\s*(?:\(|\[|:)|<[^>\s]+>/.test(text);
     const escapes=/\\[\\`*{}\[\]()>#+.!_-]/.test(text);
     if(!hasFormatting(parsed,markdownLinks)&&!escapes)return false;
   }
