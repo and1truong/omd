@@ -7,7 +7,6 @@ type UI = {
   'page-count':HTMLElementTagNameMap['span'];
   'sidebar-pages':HTMLElementTagNameMap['nav'];
   'sidebar-settings':HTMLElementTagNameMap['button'];
-  'offline-status':HTMLElementTagNameMap['span'];
   'sidebar-toggle':HTMLElementTagNameMap['button'];
   'page-ancestors':HTMLElementTagNameMap['span'];
   'pages-button':HTMLElementTagNameMap['button'];
