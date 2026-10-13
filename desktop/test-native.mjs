@@ -45,6 +45,10 @@ async function close(){
 }
 try{
   let target=await start();
+  const layout=await smoke('layout');
+  assert.equal(layout.guest.width+layout.host.width,layout.window.width);
+  assert.equal(layout.guest.height,layout.window.height);
+  assert.equal(layout.host.height,layout.window.height);
   assert.equal((await fetch('http://127.0.0.1:33182/mcp')).status,401);
   const description=await tool('host_list_tools',target);assert.equal(description.ok,true);assert(description.data.tools.some(t=>t.name==='omd_add_block'));
   const context=(await tool('host_get_context',target)).data;

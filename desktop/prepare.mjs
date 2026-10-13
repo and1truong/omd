@@ -58,7 +58,10 @@ for(const path of ['src-tauri/Cargo.toml','src-tauri/Cargo.lock']){
   let text=await readFile(join(kit,path),'utf8');
   const old='name = "coconut"\nversion = "0.1.0"';
   if(!text.includes(old))throw Error(`Kit package identity changed: ${path}`);
-  await writeFile(join(kit,path),text.replace(old,`name = "omd-desktop"\nversion = "${app.version}"`));
+  text=text.replace(old,`name = "omd-desktop"\nversion = "${app.version}"`);
+  if(path.endsWith('.toml'))text+='\n[target.\'cfg(target_os = "linux")\'.dependencies]\ngtk = "=0.18.2"\n';
+  else text=text.replace(`name = "omd-desktop"\nversion = "${app.version}"\ndependencies = [`,`name = "omd-desktop"\nversion = "${app.version}"\ndependencies = [\n "gtk",`);
+  await writeFile(join(kit,path),text);
 }
 await cp(join(root,'desktop/native.rs'),join(kit,'src-tauri/src/omd.rs'));
 await cp(join(root,'desktop/server.mjs'),join(kit,'host/omd-server.mjs'));

@@ -2,6 +2,36 @@
 use super::*;
 const SIDEBAR: f64 = 360.0;
 
+pub fn layout(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    let window = app.get_window("host").ok_or("Host missing")?;
+    // Tauri's Linux multiwebview backend packs children in GtkBox and ignores
+    // absolute bounds. Give GTK the same horizontal layout as the other engines.
+    #[cfg(target_os = "linux")]
+    {
+        use gtk::prelude::*;
+        let container = window.default_vbox()?;
+        container.set_orientation(gtk::Orientation::Horizontal);
+        for child in container.children() {
+            container.set_child_packing(&child, false, true, 0, gtk::PackType::End);
+            child.set_size_request(SIDEBAR as i32, -1);
+        }
+    }
+    if let Some(host) = app.get_webview("host") { host.set_auto_resize(false)?; }
+    resize(&window);
+    Ok(())
+}
+
+fn resize(window: &tauri::Window) {
+    let app = window.app_handle();
+    if let Ok(size) = guest_size(window) {
+        if let Some(host) = app.get_webview("host") {
+            let _ = host.set_position(tauri::LogicalPosition::new(size.width, 0.0));
+            let _ = host.set_size(tauri::LogicalSize::new(SIDEBAR, size.height));
+        }
+        if let Some(guest) = app.get_webview("guest") { let _ = guest.set_size(size); }
+    }
+}
+
 pub fn runtime(app: &tauri::AppHandle) -> Result<(std::path::PathBuf, std::path::PathBuf), Box<dyn std::error::Error>> {
     let root = if cfg!(debug_assertions) {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..")
@@ -64,7 +94,7 @@ pub fn close_reply(webview: &Webview, state: &Native, id: &str, result: &Value) 
 pub fn window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
     let app = window.app_handle();
     if matches!(event, tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. }) {
-        if let (Some(guest), Ok(size)) = (app.get_webview("guest"), guest_size(window)) { let _ = guest.set_size(size); }
+        resize(window);
     }
     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
         let state = window.state::<Arc<Native>>();
