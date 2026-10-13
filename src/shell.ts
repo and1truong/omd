@@ -6,6 +6,7 @@ import {createView,validateView,VIEW_KEY} from './view.js';
 import {reconcile} from './render-cache.js';
 import {pageAncestors,MAX_PAGE_LEVELS} from './notebook.js';
 import {pagePath,followPageLink} from './routes.js';
+import {createPageDrag} from './page-drag.js';
 
 interface MenuAction {label:string;icon:string;disabled?:boolean;danger?:boolean;run:()=>unknown}
 export function showMenu(id:'block-actions-dialog'|'page-actions-dialog',title:string,actions:MenuAction[],anchor:HTMLElement) {
@@ -36,6 +37,7 @@ export function setupShell(store:NotebookStore,{beforeNavigate,openPalette,confi
     sync();if(patch.collapsedPageIds)render(store.getRenderState());return getView();
   }
   function safeView(patch:PartialView){try{setView(patch);}catch(error){sync();onError(errorOf(error));}}
+  const pageDrag=createPageDrag(pages,{rows:()=>store.listPages(),beforeMove:beforeNavigate,move:input=>store.dispatch('page_move',input),onError,expand:id=>safeView({collapsedPageIds:view.get().collapsedPageIds.filter(pageId=>pageId!==id)})});
   function render(state:Page,{actionName}:ChangeEvent={}){
     const focused=pages.contains(document.activeElement)?document.activeElement as HTMLElement:null;
     const pageList=store.listPages(),byId=new Map(pageList.map(p=>[p.pageId,p])),ancestors=pageAncestors(pageList,state.id),activePath=JSON.stringify([...ancestors.map(p=>p.pageId),state.id]);
@@ -48,6 +50,7 @@ export function setupShell(store:NotebookStore,{beforeNavigate,openPalette,confi
       let row=rows.get(page.pageId);
       if(!row){
         const node=document.createElement('div');node.className='sidebar-page';node.dataset.pageId=page.pageId;
+        const drag=document.createElement('button');drag.type='button';drag.className='icon-button page-drag-handle';drag.append(icon('drag'));drag.setAttribute('aria-label',`Drag page ${page.title||'Untitled page'}`);drag.title='Drag above/below to reorder, or onto a page to nest';pageDrag.attach(drag,page.pageId);node.append(drag);
         const expand=document.createElement('button');expand.type='button';expand.className='icon-button page-tree-toggle';
         expand.addEventListener('click',()=>{const ids=new Set(view.get().collapsedPageIds);if(ids.has(page.pageId))ids.delete(page.pageId);else ids.add(page.pageId);safeView({collapsedPageIds:[...ids]});});
         const select=document.createElement('a');select.href=pagePath(page.pageId);select.className='sidebar-page-select';select.append(icon('page'));const label=document.createElement('span');select.append(label);
@@ -66,6 +69,7 @@ export function setupShell(store:NotebookStore,{beforeNavigate,openPalette,confi
         });node.append(expand,select,more);row={node,select,label,more,expand};rows.set(page.pageId,row);
       }
       const name=page.title||'Untitled page';if(row.label.textContent!==name)row.label.textContent=name;row.select.title=name;row.select.setAttribute('aria-label',`Switch to ${name}`);row.more.setAttribute('aria-label',`Page actions for ${name}`);
+      row.node.querySelector('.page-drag-handle')!.setAttribute('aria-label',`Drag page ${name}`);
       if(page.active)row.select.setAttribute('aria-current','page');else row.select.removeAttribute('aria-current');nodes.push(row.node);
       row.node.style.setProperty('--page-depth',String(Math.min(page.depth,6)));row.select.setAttribute('aria-description',page.parentId?`Subpage of ${byId.get(page.parentId)!.title||'Untitled page'}`:'Notebook root page');
       row.expand.disabled=!page.childCount;row.expand.style.visibility=page.childCount?'visible':'hidden';
