@@ -1,3 +1,4 @@
+import {pasteMarkdown} from './markdown-paste.js';
 import {Editor,StarterKit,Markdown} from './text-editor-engine.js';
 import type {NotebookStore,TextBlock,ChecklistItem,Notify} from './types.js';
 import type {createCompositionGuard} from './composition.js';
@@ -89,11 +90,7 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
           // Tiptap's built-in opener does not pass security features to window.open.
           window.open(link.href,'_blank','noopener,noreferrer');return true;
         },
-        handlePaste:(view,event)=>{
-          const clipboard=event.clipboardData,text=clipboard?.getData('text/plain');
-          if(!text||clipboard?.getData('text/html')||view.state.selection.$from.parent.type.name==='codeBlock')return false;
-          editor.commands.insertContent(text,{contentType:'markdown'});return true;
-        },
+        handlePaste:(_view,event)=>pasteMarkdown(editor,event),
         handleKeyDown:(_view,event)=>{
           if(event.isComposing||event.keyCode===229||editor.view.composing)return false;
           if(composition.isComposing(editor.view.dom))return event.key==='Enter'||event.key==='Tab';

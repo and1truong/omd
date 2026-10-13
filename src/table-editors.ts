@@ -1,3 +1,4 @@
+import {pasteMarkdown} from './markdown-paste.js';
 import {Editor,StarterKit,Markdown} from './text-editor-engine.js';
 import type {NotebookStore,Notify} from './types.js';
 import type {createCompositionGuard} from './composition.js';
@@ -37,7 +38,7 @@ export function createTableEditors(store:NotebookStore,{composition,drafts,notif
     const host=document.createElement('div');host.className='table-cell-editor';
     const editor=new Editor({element:host,injectCSS:false,extensions:[StarterKit.configure({undoRedo:false,underline:false,trailingNode:false,link:{openOnClick:false}}),Markdown],content:source,contentType:'markdown',editorProps:{attributes:{id,class:'markdown-editor table-cell',role:'textbox','aria-label':label,'aria-multiline':'true','aria-keyshortcuts':'Tab Shift+Tab Enter Shift+Enter Alt+F10'},
       handleClick:(view,_pos,event)=>{if(event.button!==0||event.shiftKey||event.altKey||view.composing||composition.isComposing(view.dom))return false;const link=event.target instanceof Element?event.target.closest<HTMLAnchorElement>('a[href]'):null;if(!link||!view.dom.contains(link)||!link.getAttribute('href'))return false;window.open(link.href,'_blank','noopener,noreferrer');return true;},
-      handlePaste:(view,event)=>{const text=event.clipboardData?.getData('text/plain');if(!text||event.clipboardData?.getData('text/html')||view.state.selection.$from.parent.type.name==='codeBlock')return false;editor.commands.insertContent(text,{contentType:'markdown'});return true;},
+      handlePaste:(_view,event)=>pasteMarkdown(editor,event),
       handleKeyDown:(_view,event)=>{
         if(event.isComposing||event.keyCode===229||editor.view.composing)return false;
         if(composition.isComposing(editor.view.dom))return event.key==='Enter'||event.key==='Tab';
