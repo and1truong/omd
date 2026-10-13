@@ -79,8 +79,10 @@ jobs:
       - run: npm run test:startup
       - run: npm run test:migration
       - run: npm run test:theme
+      - run: npm run test:notifications
       - run: npm run test:insertion
       - run: npm run test:checklist
+      - run: npm run test:checklist-time
       - run: npm run test:editor
       - run: npm run test:paste
       - run: npm run test:heading

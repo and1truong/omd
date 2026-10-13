@@ -10,8 +10,6 @@ export function setupPWA({notify,openSettings}:{notify:Notify;openSettings:()=>u
     await installPrompt.prompt(); await installPrompt.userChoice; installPrompt = null; install.hidden = true;
   });
   window.addEventListener('appinstalled', () => { installPrompt = null; install.hidden = true; notify('omd is installed. A little space of your own.'); });
-  function connectivity() { domId('offline-status').textContent = navigator.onLine ? 'Saved on this device' : 'Offline · saved on this device'; }
-  window.addEventListener('online', connectivity); window.addEventListener('offline', connectivity); connectivity();
   if ('serviceWorker' in navigator && window.isSecureContext) {
     navigator.serviceWorker.register(new URL('../service-worker.js', import.meta.url), { scope: new URL('../', import.meta.url).pathname }).catch(() => notify('Offline caching could not start. Your notebook still saves in this browser.', 'error', true));
   } else help.textContent += ' Offline caching requires HTTPS or localhost.';
