@@ -1,0 +1,36 @@
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+import {chromium,webkit} from 'playwright';
+const root=new URL('..',import.meta.url).pathname,engine=process.env.OMD_BROWSER??'chromium',base=process.env.OMD_BASE_PATH??'';
+const server=spawn(process.execPath,['scripts/serve.mjs'],{cwd:root,env:{...process.env,OMD_PORT:'4340',OMD_STATIC_DIR:'dist'},stdio:['ignore','pipe','pipe']});let browser;
+try {
+  await new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.once('error',reject);});
+  browser=await({chromium,webkit}[engine]).launch();const page=await browser.newPage(),errors=[];page.on('pageerror',error=>errors.push(error.message));
+  const boot=()=>page.evaluate(async()=>{window.app=await import(new URL('./src/app.js',document.baseURI).href);await app.ready;window.store=app.getStore();});
+  const call=(name,input)=>page.evaluate(async({name,input})=>{await app.flushPending();return store.dispatch(name,input);},{name,input});
+  await page.goto(`http://localhost:4340${base}/`);await boot();await call('page_add',{title:'Callout browser'});
+  await page.getByRole('button',{name:'Add a block here',exact:true}).click();await page.getByRole('button',{name:'Add callout',exact:true}).click();
+  const block=page.locator('.block-type-callout'),editor=page.getByRole('textbox',{name:'callout content',exact:true});
+  const color=page.getByLabel('Callout color',{exact:true});
+  await page.getByRole('textbox',{name:'Page title',exact:true}).focus();await page.mouse.move(0,0);
+  assert.equal(await color.evaluate(el=>getComputedStyle(el).opacity),'0');
+  await block.hover();assert.equal(await color.evaluate(el=>getComputedStyle(el).opacity),'1');
+  await page.mouse.move(0,0);assert.equal(await color.evaluate(el=>getComputedStyle(el).opacity),'0');
+  await editor.focus();assert.equal(await color.evaluate(el=>getComputedStyle(el).opacity),'0');
+  await editor.press('Tab');assert.equal(await color.evaluate(el=>el===document.activeElement),true);assert.equal(await color.evaluate(el=>getComputedStyle(el).opacity),'1');
+  await editor.fill('Remember this');await page.waitForFunction(()=>store.getState().blocks[0].text==='Remember this');await page.evaluate(()=>app.flushPending());
+  await page.getByRole('textbox',{name:'Callout icon',exact:true}).fill('📌');await block.hover();await color.selectOption('warning');
+  await page.waitForFunction(()=>store.getState().blocks[0].tone==='warning'&&store.getState().blocks[0].icon==='📌');
+  assert.equal(await block.locator('.callout-body').getAttribute('data-tone'),'warning');
+  await editor.focus();await editor.press('Control+a');await block.locator('.text-editor').hover();await block.getByRole('button',{name:'Bold',exact:true}).click();await editor.press('End');
+  await page.waitForFunction(()=>store.getState().blocks[0].text==='**Remember this**');await page.evaluate(()=>app.flushPending());assert.equal(await page.evaluate(()=>store.getState().blocks[0].text),'**Remember this**');
+  await editor.press('Shift+Enter');await page.waitForFunction(()=>store.getState().blocks.length===2);
+  assert.equal(await page.evaluate(()=>document.activeElement?.id===`${store.getState().blocks[1].id}-text`),true);
+  await page.evaluate(async()=>{await app.flushPending();await store.undo();});assert.equal(await page.locator('.block-type-text').count(),0);
+  await page.reload();await boot();assert.equal(await editor.locator('strong').textContent(),'Remember this');assert.equal(await page.getByLabel('Callout color',{exact:true}).inputValue(),'warning');
+  const parent=(await call('add_block',{type:'tabs'})).block;await call('add_block',{type:'callout',containerId:parent.tabs[0].id,text:'Nested **note**',tone:'info'});
+  assert.equal(await page.locator('.tab-panel .block-type-callout').count(),1);
+  await page.evaluate(()=>app.setView({theme:'dark'}));assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');
+  await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  assert.deepEqual(errors,[]);console.log(`${engine} ${base||'/'}: callout picker, Markdown, icon/color, Shift+Enter, undo, reload, nested, dark and mobile passed.`);
+} finally {await browser?.close();server.kill();}

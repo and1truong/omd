@@ -11,6 +11,7 @@ const paths:Record<string,string[]>={
   download:['M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5'],upload:['M12 16V4m-5 5 5-5 5 5M4 16v5h16v-5'],
   width:['M3 5v14M21 5v14M5 12h14m-11-3-3 3 3 3m8-6 3 3-3 3'],fullscreen:['M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5'],
   text:['M4 5h16M12 5v15M8 20h8'],heading:['M5 4v16M19 4v16M5 12h14'],checklist:['m3 6 2 2 4-4M12 6h9m-18 8 2 2 4-4M12 14h9'],
+  callout:['M9 18h6M10 21h4','M8 14a6 6 0 1 1 8 0l-1 4H9Z'],
   table:['M3 3h18v18H3Z','M3 9h18M3 15h18M9 3v18M15 3v18'],tabs:['M3 5h6v4h12v12H3Z','M9 5h6v4M15 5h6v4'],vertical:['M3 3h18v18H3Z','M9 3v18M3 9h6M3 15h6'],
   toggle:['m8 5 7 7-7 7'],accordion:['M4 4h16v16H4Z','M4 10h16M4 15h16'],reminder:['M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4'],
   kanban:['M3 4h18v16H3Z','M9 4v16M15 4v16M5 8h2M11 8h2M17 8h2M5 12h2M11 12h2'],divider:['M3 12h18'],

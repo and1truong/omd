@@ -32,6 +32,8 @@ Focus the text or heading editor before using **Shift+Enter**; the shortcut does
 
 Pasting Markdown source applies its headings, bold/italic, code, links, lists and quotes in text blocks, checklist items and table cells. This also works when a browser or code editor adds an HTML clipboard wrapper. Ordinary formatted HTML and copies from the notebook editor use its rich-text paste handling; paste inside a code block stays literal.
 
+Callout blocks highlight a note with an editable icon and a background color (Neutral, Info, Success, Warning or Danger). Choose **Callout** in the block picker, edit its Markdown content like a text block, and change the icon or color beside it. The color selector appears when you hover over the callout; keyboard focus also reveals it. On touch devices, tap into the callout to reveal the selector. Callouts work inside tabs and collapsible sections, and retain their content, icon and color in backups, undo/redo and offline storage.
+
 Text content is saved as Markdown in JSON backups and WebMCP's `text` field. Existing text loads without a storage migration or automatic rewrite. Editor libraries are bundled and cached for offline writing. Switching pages or hiding a section releases its editor and retains the saved content.
 
 ## Checklists

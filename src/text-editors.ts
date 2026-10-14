@@ -1,6 +1,6 @@
 import {pasteMarkdown} from './markdown-paste.js';
 import {Editor,StarterKit,Markdown} from './text-editor-engine.js';
-import type {NotebookStore,TextBlock,ChecklistItem,Notify} from './types.js';
+import type {NotebookStore,TextBlock,CalloutBlock,ChecklistItem,Notify} from './types.js';
 import type {createCompositionGuard} from './composition.js';
 import {errorOf} from './dom.js';
 
@@ -67,7 +67,7 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
     }
     retry.addEventListener('click',()=>{next.creation=Promise.resolve().then(finish);});next.creation=Promise.resolve().then(finish);
   }
-  function mount(block:TextBlock,pageId:string,item?:ChecklistItem,onKeyDown?:ItemKeyDown) {
+  function mount(block:TextBlock|CalloutBlock,pageId:string,item?:ChecklistItem,onKeyDown?:ItemKeyDown) {
     const source=item?.text??block.text,id=key(pageId,block.id,item?.id);let entry=entries.get(id);
     if(entry) {
       entry.onKeyDown=onKeyDown;
@@ -82,7 +82,7 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
     const toolbar=document.createElement('div');toolbar.className='markdown-toolbar';toolbar.setAttribute('role','toolbar');toolbar.setAttribute('aria-label','Text formatting');
     const surface=document.createElement('div');surface.className='markdown-surface';if(!item)host.append(toolbar);host.append(surface);
     const editor=new Editor({element:surface,injectCSS:false,extensions:[StarterKit.configure({undoRedo:false,underline:false,trailingNode:false,link:{openOnClick:false}}),Markdown],content:source,contentType:'markdown',
-      editorProps:{attributes:{id:item?.id??`${block.id}-text`,class:'markdown-editor',role:'textbox','aria-label':item?'Checklist item':'text content','aria-multiline':'true','aria-keyshortcuts':item?'Enter Shift+Enter Tab Shift+Tab':'Shift+Enter Alt+F10','data-placeholder':item?'A little thing to do':'Write something…'},
+      editorProps:{attributes:{id:item?.id??`${block.id}-text`,class:'markdown-editor',role:'textbox','aria-label':item?'Checklist item':block.type==='callout'?'callout content':'text content','aria-multiline':'true','aria-keyshortcuts':item?'Enter Shift+Enter Tab Shift+Tab':'Shift+Enter Alt+F10','data-placeholder':item?'A little thing to do':'Write something…'},
         handleClick:(view,_pos,event)=>{
           if(event.button!==0||event.shiftKey||event.altKey||view.composing||composition.isComposing(view.dom))return false;
           const link=event.target instanceof Element?event.target.closest<HTMLAnchorElement>('a[href]'):null;
