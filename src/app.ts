@@ -421,7 +421,7 @@ async function convertTextBlock(blockId:string,pageId:string,option:SlashOption,
   await store.dispatch('convert_block',{pageId,blockId,type:option.type,orientation:option.orientation,expectedText});
   if(store.getActivePageId()!==pageId)return;
   const block=document.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(blockId)}"]`);
-  (block?.querySelector<HTMLElement>('[contenteditable="true"],input,textarea')??block?.querySelector<HTMLElement>('.block-controls button:not(.block-drag)'))?.focus();
+  (block?.querySelector<HTMLElement>('[contenteditable="true"]')??block?.querySelector<HTMLElement>('input,textarea')??block?.querySelector<HTMLElement>('.block-controls button:not(.block-drag)'))?.focus();
 }
 export function openPicker(containerId = 'page',anchor?:InsertionAnchor) {
   const pageId=store.getActivePageId(),allowed = allowedTypes(store.getRenderState(), containerId);

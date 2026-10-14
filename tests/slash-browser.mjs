@@ -41,6 +41,12 @@ try {
   await page.waitForFunction(()=>store.getState().blocks.at(-1).type==='heading');
   const text=(await call('add_block',{type:'text',text:'`/table`'})).blockId;await box(text).focus();assert.equal(await menu.isVisible(),false);
   const checklist=(await call('add_block',{type:'checklist'})).blockId;await call('checklist_add',{blockId:checklist,text:'/table'});await page.getByRole('textbox',{name:'Checklist item',exact:true}).focus();assert.equal(await menu.isVisible(),false);
+  // The shared picker catalog also includes Callout when its separate PR is merged.
+  if(await page.evaluate(()=>model.BLOCK_TYPES.includes('callout'))){
+    const calloutId=(await call('add_block',{type:'text'})).blockId;await box(calloutId).fill('/callout');await menu.waitFor({state:'visible'});await box(calloutId).press('Enter');await saved(calloutId,'callout');
+    const content=page.getByRole('textbox',{name:'callout content',exact:true});await page.waitForFunction(()=>document.activeElement?.getAttribute('aria-label')==='callout content');await content.fill('Created with slash');await page.evaluate(()=>app.flushPending());
+    assert.equal(await page.evaluate(id=>model.findBlock(store.getState(),id).block.text,calloutId),'Created with slash');
+  }
   // Pointer choice, dismissal, page teardown and mobile viewport placement.
   const click=(await call('add_block',{type:'text'})).blockId;await box(click).fill('/heading');await menu.getByRole('option').click();await saved(click,'heading');await focused(click);
   const mobile=(await call('add_block',{type:'text'})).blockId;await page.setViewportSize({width:390,height:844});await box(mobile).fill('/');await menu.waitFor({state:'visible'});const rect=await menu.boundingBox();assert.ok(rect.x>=0&&rect.x+rect.width<=390&&rect.y>=0&&rect.y+rect.height<=844);
