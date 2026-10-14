@@ -29,34 +29,35 @@ interface InsertionAnchor {blockId:string;side:'before'|'after'}
 interface DragData {containerId?:string;kind:'block'|'card'|'column'|'tab';blockId:string;cardId?:string;columnId?:string;tabId?:string;pageId?:string}
 let suppressTabClick=false;
 let tabTitleEdit:{flush:()=>Promise<unknown>}|undefined;
-const inputEdits=new Map<HTMLElement,{pageId:string;value:string;write:()=>Promise<unknown>}>();
+const inputEdits=new Map<string|HTMLElement,{input:HTMLElement;pageId:string;value:string;write:()=>Promise<unknown>}>();
+const inputEditKey=(input:HTMLElement,pageId:string)=>['page-title','page-subtitle'].includes(input.id)?JSON.stringify([pageId,input.id]):input;
 let refreshInputStatus=()=>{},deferredInputRender=false;
 function settleInputRender(){if(deferredInputRender&&!inputEdits.size&&!tabTitleEdit&&!composition.hasActive()){deferredInputRender=false;render(store.getRenderState(),{reset:true});}}
 function trackInput(input:HTMLInputElement|HTMLTextAreaElement,save:(value:string,pageId:string)=>unknown,getPageId:()=>string){
-  let pending:{value:string;task:Promise<unknown>}|undefined;
-  function write(pageId:string):Promise<unknown>{
-    const value=input.value;if(pending?.value===value)return pending.task;
-    const edit={pageId,value,write:()=>write(pageId)};inputEdits.set(input,edit);refreshInputStatus();
+  let pending:{pageId:string;value:string;task:Promise<unknown>}|undefined;
+  function write(pageId:string,value=input.value):Promise<unknown>{
+    if(pending?.pageId===pageId&&pending.value===value)return pending.task;
+    const key=inputEditKey(input,pageId),edit={input,pageId,value,write:()=>write(pageId,value)};inputEdits.set(key,edit);refreshInputStatus();
     const task=Promise.resolve(save(value,pageId)).then(result=>{
-      if(result!==null&&inputEdits.get(input)===edit){inputEdits.delete(input);settleInputRender();}
+      if(result!==null&&inputEdits.get(key)===edit){inputEdits.delete(key);settleInputRender();}
       return result;
     }).finally(()=>{if(pending?.task===task)pending=undefined;refreshInputStatus();});
-    pending={value,task};return task;
+    pending={pageId,value,task};return task;
   }
   composition.track(input,write,getPageId);
-  input.addEventListener('input',()=>{const pageId=getPageId();if(composition.isComposing(input)){inputEdits.set(input,{pageId,value:input.value,write:()=>write(pageId)});refreshInputStatus();}else void write(pageId).catch(()=>{});});
+  input.addEventListener('input',()=>{const pageId=getPageId(),value=input.value;if(composition.isComposing(input)){inputEdits.set(inputEditKey(input,pageId),{input,pageId,value,write:()=>write(pageId,value)});refreshInputStatus();}else void write(pageId,value).catch(()=>{});});
   return write;
 }
-async function flushInputEdits(){
+async function flushInputEdits(pageId?:string){
   // Composition owns its final save; unrelated tools can run while its DOM stays connected.
-  for(const [input,edit] of [...inputEdits])if(!composition.isComposing(input)&&await edit.write()===null)throw new Error('Could not save this edit. Your draft is still here; retry before leaving.');
+  for(const [key,edit] of [...inputEdits])if(inputEdits.get(key)===edit&&(!pageId||edit.pageId===pageId)&&!composition.isComposing(edit.input)&&await edit.write()===null)throw new Error('Could not save this edit. Your draft is still here; retry before leaving.');
 }
 export const openPalette = () => {shell?.closeMobile();palette?.open();};
 export const getView = () => shell!.getView();
 export const setView = async (patch:PartialView) => {if(patch.sidebarOpen)await beforeNavigate();return shell!.setView(patch);};
 export async function flushPending({waitForTransitions=true}:{waitForTransitions?:boolean}={}){await flushInputEdits();await tabTitleEdit?.flush();await tableEditors?.flushAll();await textEditors?.flushAll({waitForTransitions});await diagrams?.flushAll();}
 export const flushDiagrams=flushPending;
-async function beforeNavigate(){await flushInputEdits();await tabTitleEdit?.flush();await tableEditors?.flushAll();await textEditors?.flushAll();await diagrams?.beforeNavigate();}
+async function beforeNavigate(){await flushInputEdits(store.getActivePageId());await tabTitleEdit?.flush();await tableEditors?.flushAll();await textEditors?.flushAll();await diagrams?.beforeNavigate();}
 export async function openCanvas(blockId:string,pageId?:string) {
   const page=await store.getPage(pageId);findBlock(page,blockId,'excalidraw');await flushPending();
   shell?.closeMobile();
@@ -508,9 +509,9 @@ function render(state:Page, { quiet = false, reminderBlockId, reminderPageId, ch
   const focused=document.activeElement as HTMLInputElement|HTMLTextAreaElement|null; const focusId = focused?.id; const selection = focused?.selectionStart == null ? null : [focused.selectionStart, focused.selectionEnd!] as const;
   const editorFocus=textEditors?.captureFocus()??null,tableFocus=tableEditors?.captureFocus()??null;
   const scroll=[scrollX,scrollY] as const;
-  for(const [selector,value] of [['#page-title',state.title],['#page-subtitle',state.subtitle]]){const el=$<HTMLInputElement|HTMLTextAreaElement>(selector);if(inputEdits.get(el)?.pageId===state.id)continue;if(el.value!==value){el.value=value;fit(el);}}
+  for(const [selector,value] of [['#page-title',state.title],['#page-subtitle',state.subtitle]]){const el=$<HTMLInputElement|HTMLTextAreaElement>(selector),shown=inputEdits.get(inputEditKey(el,state.id))?.value??value;if(el.value!==shown){el.value=shown;fit(el);}}
   if(renderPageId===state.id&&!reset)return;
-  if(renderPageId===state.id&&(tabTitleEdit||[...inputEdits.keys()].some(input=>input.closest('#notebook')))){deferredInputRender=true;return;}
+  if(renderPageId===state.id&&(tabTitleEdit||[...inputEdits.values()].some(edit=>edit.input.closest('#notebook')))){deferredInputRender=true;return;}
   renderPageId=state.id;diagrams?.begin();renderer.begin(state.id);
   reconcile(domId('notebook'),[renderer.list(state.blocks,'page')]);renderer.end();diagrams?.end();textEditors?.end();tableEditors?.end();
   for(const el of document.querySelectorAll<HTMLElement>('[data-autofit],.auto-height'))if(!el.dataset.fitted){fit(el);el.dataset.fitted='true';}
@@ -563,7 +564,7 @@ async function boot() {
   });
   store.afterChange(()=>{
     if(!dirtyContainers.size)return;const state=store.getRenderState(),options=store.getLastEvent(),ids=[...dirtyContainers];dirtyContainers.clear();if(options.reset)return;
-    if([...inputEdits.keys()].some(input=>input.closest('#notebook'))){deferredInputRender=true;return;}
+    if([...inputEdits.values()].some(edit=>edit.input.closest('#notebook'))){deferredInputRender=true;return;}
     const focused=document.activeElement as HTMLInputElement|HTMLTextAreaElement|null,focusId=focused?.id,selection=focused?.selectionStart==null?null:[focused.selectionStart,focused.selectionEnd!] as const,scroll=[scrollX,scrollY] as const;
     const editorFocus=textEditors!.captureFocus(),tableFocus=tableEditors?.captureFocus()??null;
     diagrams!.begin();for(const id of ids)try{renderer.refresh(findContainer(state,id).blocks,id);}catch(error){if(!/not found/.test(errorOf(error).message))notify(errorOf(error).message,'error',true);}diagrams!.end();textEditors!.end();tableEditors?.end();
@@ -594,7 +595,7 @@ async function boot() {
         finishing=true;const pageId=store.getActivePageId(),title=el.value;
         try {
           await store.idle();
-          if(store.getPageMetadata(pageId)?.title!==title||inputEdits.has(el)){if(!await write(pageId))return;}
+          if(store.getPageMetadata(pageId)?.title!==title||inputEdits.has(inputEditKey(el,pageId))){if(!await write(pageId))return;}
           if(store.getActivePageId()===pageId&&el.value===title&&!composition.isComposing(el))el.blur();
         } finally {finishing=false;}
       });

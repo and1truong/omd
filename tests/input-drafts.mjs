@@ -19,6 +19,15 @@ try{
   assert.equal(await input.inputValue(),'Unsaved local heading');assert.equal(await page.evaluate(()=>store.getState().blocks[0].text),'Original heading');assert.equal(await unload(page),true);
   await context.close();
 
+  const navigation=await browser.newContext(),nav=await navigation.newPage();await boot(nav);
+  const ids=await nav.evaluate(async()=>{const first=(await store.dispatch('page_add',{title:'Original page'})).pageId,second=(await store.dispatch('page_add',{title:'Destination page'})).pageId;await store.dispatch('page_select',{pageId:first});const dispatch=store.dispatch;window.restoreDispatch=()=>store.dispatch=dispatch;store.dispatch=(name,input,options)=>name==='set_page'&&input.title==='Composed original-page draft'?Promise.reject(new Error('Injected navigated IME failure')):dispatch(name,input,options);return {first,second};});
+  await nav.locator('#page-title').evaluate(el=>{el.focus();el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.value='Composed original-page draft';el.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));});
+  await nav.evaluate(async({first,second})=>{await app.flushPending();await store.dispatch('set_page',{pageId:second,subtitle:'Background change'});await app.flushPending();await store.dispatch('page_select',{pageId:second});},ids);
+  await nav.locator('#page-title').dispatchEvent('compositionend');await nav.waitForFunction(()=>document.getElementById('notices').textContent.includes('Injected navigated IME failure'));assert.equal(await nav.locator('#page-title').inputValue(),'Destination page');
+  // Returning through real page navigation exposes the retained original-page draft.
+  await nav.getByRole('link',{name:'Switch to Original page',exact:true}).click();await nav.waitForFunction(id=>store.getActivePageId()===id,ids.first);assert.equal(await nav.locator('#page-title').inputValue(),'Composed original-page draft');
+  await nav.evaluate(async()=>{restoreDispatch();await app.flushPending();});assert.equal(await nav.evaluate(async id=>(await store.getPage(id)).title,ids.first),'Composed original-page draft');assert.equal(await nav.evaluate(async id=>(await store.getPage(id)).title,ids.second),'Destination page');await navigation.close();
+
   const composing=await browser.newContext(),ime=await composing.newPage();await boot(ime);
   await ime.evaluate(async()=>{await store.dispatch('page_add',{title:'IME protection'});await store.dispatch('add_block',{type:'text',text:'Before IME'});});
   const text=ime.getByRole('textbox',{name:'text content',exact:true});
