@@ -11,8 +11,15 @@ try {
   await page.goto(`http://localhost:4340${base}/`);await boot();await call('page_add',{title:'Callout browser'});
   await page.getByRole('button',{name:'Add a block here',exact:true}).click();await page.getByRole('button',{name:'Add callout',exact:true}).click();
   const block=page.locator('.block-type-callout'),editor=page.getByRole('textbox',{name:'callout content',exact:true});
+  const color=page.getByLabel('Callout color',{exact:true});
+  await page.getByRole('textbox',{name:'Page title',exact:true}).focus();await page.mouse.move(0,0);
+  assert.equal(await color.evaluate(el=>getComputedStyle(el).opacity),'0');
+  await block.hover();assert.equal(await color.evaluate(el=>getComputedStyle(el).opacity),'1');
+  await page.mouse.move(0,0);assert.equal(await color.evaluate(el=>getComputedStyle(el).opacity),'0');
+  await editor.focus();assert.equal(await color.evaluate(el=>getComputedStyle(el).opacity),'0');
+  await editor.press('Tab');assert.equal(await color.evaluate(el=>el===document.activeElement),true);assert.equal(await color.evaluate(el=>getComputedStyle(el).opacity),'1');
   await editor.fill('Remember this');await page.waitForFunction(()=>store.getState().blocks[0].text==='Remember this');await page.evaluate(()=>app.flushPending());
-  await page.getByRole('textbox',{name:'Callout icon',exact:true}).fill('📌');await page.getByLabel('Callout color',{exact:true}).selectOption('warning');
+  await page.getByRole('textbox',{name:'Callout icon',exact:true}).fill('📌');await block.hover();await color.selectOption('warning');
   await page.waitForFunction(()=>store.getState().blocks[0].tone==='warning'&&store.getState().blocks[0].icon==='📌');
   assert.equal(await block.locator('.callout-body').getAttribute('data-tone'),'warning');
   await editor.focus();await editor.press('Control+a');await block.locator('.text-editor').hover();await block.getByRole('button',{name:'Bold',exact:true}).click();await editor.press('End');
