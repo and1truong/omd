@@ -134,11 +134,12 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
       getOptions:()=>slash.options(entry!.blockId,pageId),canOpen:()=>!entry!.creating&&!entry!.provisional&&!composition.isComposing(editor.view.dom),
       select:option=>{
         if(entry!.creating||entry!.provisional||composition.isComposing(editor.view.dom))return;
+        const selection={from:editor.state.selection.from,to:editor.state.selection.to};
         entry!.creating=true;editor.setEditable(false);
         entry!.creation=(async()=>{
           try {capture(entry!);await flush(entry!);await slash.convert(entry!.blockId,pageId,option,entry!.source);}
           catch(error){notify(errorOf(error).message,'error',true);}
-          finally{entry!.creating=false;if(!editor.isDestroyed){editor.setEditable(true);editor.view.focus();}}
+          finally{entry!.creating=false;if(!editor.isDestroyed){editor.setEditable(true);editor.commands.setTextSelection(selection);editor.view.focus();entry!.slash?.update();}}
         })();
       }
     });

@@ -1,8 +1,9 @@
+import {waitForServer} from './server-ready.mjs';
 import assert from 'node:assert/strict';import {spawn} from 'node:child_process';import {chromium,webkit} from 'playwright';
 const root=new URL('..',import.meta.url).pathname,engine=process.env.OMD_BROWSER??'chromium',base=process.env.OMD_BASE_PATH??'',url=`http://localhost:4332${base}/`;
 const server=spawn(process.execPath,['scripts/serve.mjs'],{cwd:root,env:{...process.env,OMD_PORT:'4332',OMD_STATIC_DIR:'dist'},stdio:['ignore','pipe','pipe']});let browser;
 try{
- await new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.once('error',reject);});browser=await({chromium,webkit}[engine]).launch();const context=await browser.newContext(),page=await context.newPage();
+ await waitForServer(server);browser=await({chromium,webkit}[engine]).launch();const context=await browser.newContext(),page=await context.newPage();
  await page.goto(url);await page.evaluate(async()=>{window.app=await import(new URL('./src/app.js',document.baseURI).href);await app.ready;window.store=app.getStore();});
  const call=(name,input)=>page.evaluate(async({name,input})=>{await app.flushPending();return store.dispatch(name,input);},{name,input});await call('page_add',{title:'Heading regression'});
  const id=(await call('add_block',{type:'heading',text:'Original\nlegacy heading'})).blockId,box=page.getByRole('textbox',{name:'heading content',exact:true});

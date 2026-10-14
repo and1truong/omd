@@ -24,7 +24,7 @@ try{
   const text=ime.getByRole('textbox',{name:'text content',exact:true});
   await text.evaluate(el=>{el.focus();el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.replaceChildren(Object.assign(document.createElement('p'),{textContent:'Tiếng Việt đang nhập'}));el.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));});
   assert.equal(await unload(ime),true);assert.equal(await ime.evaluate(()=>store.getState().blocks[0].text),'Before IME');
-  await text.evaluate(el=>el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));await ime.evaluate(()=>app.flushPending());assert.match(await ime.evaluate(()=>store.getState().blocks[0].text),/Tiếng Việt đang nhập/);
+  await text.evaluate(el=>el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true})));await ime.waitForFunction(()=>store.getState().blocks[0].text.includes('Tiếng Việt đang nhập'));await ime.evaluate(()=>app.flushPending());
 
   const reminder=await ime.evaluate(()=>store.dispatch('add_block',{type:'reminder',title:'Reminder before IME',dueAt:'2099-01-01T00:00:00Z'}));
   await ime.evaluate(()=>{const dispatch=store.dispatch;window.restoreDispatch=()=>store.dispatch=dispatch;store.dispatch=(name,input,options)=>name==='update_block'&&input.patch?.title==='Keep the composed draft'?Promise.reject(new Error('Injected composed write failure')):dispatch(name,input,options);});

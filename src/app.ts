@@ -48,8 +48,8 @@ function trackInput(input:HTMLInputElement|HTMLTextAreaElement,save:(value:strin
   return write;
 }
 async function flushInputEdits(){
-  await composition.settled(input=>inputEdits.has(input as HTMLElement));
-  for(const edit of [...inputEdits.values()])if(await edit.write()===null)throw new Error('Could not save this edit. Your draft is still here; retry before leaving.');
+  // Composition owns its final save; unrelated tools can run while its DOM stays connected.
+  for(const [input,edit] of [...inputEdits])if(!composition.isComposing(input)&&await edit.write()===null)throw new Error('Could not save this edit. Your draft is still here; retry before leaving.');
 }
 export const openPalette = () => {shell?.closeMobile();palette?.open();};
 export const getView = () => shell!.getView();

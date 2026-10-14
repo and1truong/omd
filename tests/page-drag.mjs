@@ -1,8 +1,9 @@
+import {waitForServer} from './server-ready.mjs';
 import assert from 'node:assert/strict';import {spawn} from 'node:child_process';import {chromium,webkit} from 'playwright';
 const root=new URL('..',import.meta.url).pathname,engine=process.env.OMD_BROWSER??'chromium',base=process.env.OMD_BASE_PATH??'',url=`http://localhost:4331${base}/`;
 const server=spawn(process.execPath,['scripts/serve.mjs'],{cwd:root,env:{...process.env,OMD_PORT:'4331',OMD_STATIC_DIR:'dist'},stdio:['ignore','pipe','pipe']});let browser;
 try{
- await new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.once('error',reject);});browser=await({chromium,webkit}[engine]).launch();const context=await browser.newContext({viewport:{width:1280,height:900}}),page=await context.newPage();
+ await waitForServer(server);browser=await({chromium,webkit}[engine]).launch();const context=await browser.newContext({viewport:{width:1280,height:900}}),page=await context.newPage();
  await page.goto(url);await page.evaluate(async()=>{window.app=await import(new URL('./src/app.js',document.baseURI).href);await app.ready;window.store=app.getStore();window.dragEvents=[];for(const type of ['dragstart','dragover','drop'])document.addEventListener(type,e=>dragEvents.push({type,trusted:e.isTrusted}),true);});
  const call=(name,input)=>page.evaluate(async({name,input})=>{await app.flushPending();return store.dispatch(name,input);},{name,input});const rows=()=>page.evaluate(()=>store.listPages()),row=id=>page.locator('.sidebar-page').filter({has:page.locator(`[data-page-id="${id}"]`)});
  const node=id=>page.locator(`.sidebar-page[data-page-id="${id}"]`);

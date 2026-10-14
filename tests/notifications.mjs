@@ -1,3 +1,4 @@
+import {waitForServer} from './server-ready.mjs';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {mkdir} from 'node:fs/promises';
@@ -5,7 +6,7 @@ import {chromium,webkit} from 'playwright';
 const root=new URL('..',import.meta.url).pathname,engine=process.env.OMD_BROWSER??'chromium',base=process.env.OMD_BASE_PATH??'';
 const server=spawn(process.execPath,['scripts/serve.mjs'],{cwd:root,env:{...process.env,OMD_PORT:'4334',OMD_STATIC_DIR:'dist'},stdio:['ignore','pipe','pipe']});let browser;
 try{
-  await new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.once('error',reject);});browser=await({chromium,webkit}[engine]).launch();
+  await waitForServer(server);browser=await({chromium,webkit}[engine]).launch();
   const context=await browser.newContext({viewport:{width:1280,height:900}}),page=await context.newPage(),errors=[];page.on('pageerror',error=>errors.push(error.message));
   await page.goto(`http://localhost:4334${base}/`);await page.evaluate(async()=>{window.toastApp=await import(new URL('./src/app.js',document.baseURI).href);await toastApp.ready;});
   await mkdir(`${root}/test-results`,{recursive:true});

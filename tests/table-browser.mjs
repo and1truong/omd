@@ -1,3 +1,4 @@
+import {waitForServer} from './server-ready.mjs';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {mkdir,readFile} from 'node:fs/promises';
@@ -76,7 +77,7 @@ try{
   await cell(2,1).fill('Changed after backup');await settled();await page.locator('#import-file').setInputFiles({name:'tables.json',mimeType:'application/json',buffer:Buffer.from(json)});await page.locator('#confirm-ok').click();await page.locator('.notice').filter({hasText:'Notebook imported.'}).waitFor();assert.deepEqual(await grid(),saved);
   await page.evaluate(()=>navigator.serviceWorker.ready);await page.waitForFunction(()=>!!navigator.serviceWorker.controller);
   const stopped=new Promise(resolve=>server.once('exit',resolve));server.kill();await stopped;await cell(2,1).fill('Offline table');await settled();
-  await page.reload();await page.evaluate(async source=>{window.tableApp=await import(`${source}app.js`);await tableApp.ready;},source);assert.equal((await grid()).rows[1].cells[0],'Offline table');server=startServer();await new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.once('error',reject);});
+  await page.reload();await page.evaluate(async source=>{window.tableApp=await import(`${source}app.js`);await tableApp.ready;},source);assert.equal((await grid()).rows[1].cells[0],'Offline table');server=startServer();await waitForServer(server);
   // Hidden tab/toggle/accordion branches do not mount cell editors.
   const tabs=(await call('add_block',{type:'tabs'})).block,toggle=(await call('add_block',{type:'toggle',containerId:tabs.tabs[1].id})).block,accordion=(await call('add_block',{type:'accordion',containerId:toggle.id})).block;
   const nested=(await call('add_block',{type:'table',containerId:accordion.items[0].id})).blockId;assert.equal(await page.locator(`[data-block-id="${nested}"]`).count(),0);

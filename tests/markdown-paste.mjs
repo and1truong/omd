@@ -1,10 +1,11 @@
+import {waitForServer} from './server-ready.mjs';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {chromium,webkit} from 'playwright';
 const root=new URL('..',import.meta.url).pathname,engine=process.env.OMD_BROWSER??'chromium',base=process.env.OMD_BASE_PATH??'',url=`http://localhost:4337${base}/`;
 const startServer=()=>spawn(process.execPath,['scripts/serve.mjs'],{cwd:root,env:{...process.env,OMD_PORT:'4337',OMD_STATIC_DIR:'dist'},stdio:['ignore','pipe','pipe']});let server=startServer(),browser,page;
-const listening=()=>new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.once('error',reject);});const errors=[],evidence=[];
+const listening=()=>waitForServer(server);const errors=[],evidence=[];
 const ready=()=>page.evaluate(async()=>{window.pasteApp=await import(new URL('./src/app.js',document.baseURI).href);await pasteApp.ready;});
 const call=(name,input={})=>page.evaluate(async({name,input})=>{await pasteApp.flushPending();return pasteApp.getStore().dispatch(name,input);},{name,input});
 const flush=()=>page.evaluate(()=>pasteApp.flushPending());

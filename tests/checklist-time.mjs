@@ -1,10 +1,11 @@
+import {waitForServer} from './server-ready.mjs';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {mkdir} from 'node:fs/promises';
 import {chromium,webkit} from 'playwright';
 const root=new URL('..',import.meta.url).pathname,engine=process.env.OMD_BROWSER??'chromium',base=process.env.OMD_BASE_PATH??'',url=`http://localhost:4335${base}/`;
 const startServer=()=>spawn(process.execPath,['scripts/serve.mjs'],{cwd:root,env:{...process.env,OMD_PORT:'4335',OMD_STATIC_DIR:'dist'},stdio:['ignore','pipe','pipe']});let server=startServer(),browser,page,blockId;
-const listening=()=>new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.once('error',reject);});
+const listening=()=>waitForServer(server);
 const ready=()=>page.evaluate(async()=>{window.timeApp=await import(new URL('./src/app.js',document.baseURI).href);await timeApp.ready;});
 const call=(name,input={})=>page.evaluate(async({name,input})=>{await timeApp.flushPending();const store=timeApp.getStore();return name==='undo'?store.undo():name==='redo'?store.redo():store.dispatch(name,input);},{name,input});
 const items=()=>page.evaluate(async blockId=>{await timeApp.flushPending();const {findBlock}=await import(new URL('./src/model.js',document.baseURI).href);return findBlock(timeApp.getStore().getState(),blockId,'checklist').block.items;},blockId);

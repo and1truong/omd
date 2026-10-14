@@ -1,3 +1,4 @@
+import {waitForServer} from './server-ready.mjs';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {mkdir,writeFile} from 'node:fs/promises';
@@ -6,7 +7,7 @@ const root=new URL('..',import.meta.url).pathname,engine=process.env.OMD_BROWSER
 const server=spawn(process.execPath,['scripts/serve.mjs'],{cwd:root,env:{...process.env,OMD_STATIC_DIR:'dist',OMD_PORT:'4328'},stdio:['ignore','pipe','pipe']});
 let browser;const evidence=[];
 try {
-  await new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.once('error',reject);});
+  await waitForServer(server);
   browser=await ({chromium,webkit}[engine]).launch({headless:true});
   const context=await browser.newContext(),page=await context.newPage();
   await page.goto(`http://localhost:4328${base}/`);
