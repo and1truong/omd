@@ -4,7 +4,7 @@ import {byId as domId} from './dom.js';
 import { createCompositionGuard } from './composition.js';
 import { createStore } from './store.js';
 import {completedDate} from './completed-time.js';
-import { STORAGE_KEY, allowedTypes, findBlock, findContainer, MAX_CHECKLIST_LEVELS, checklistHeight } from './model.js';
+import { STORAGE_KEY, CALLOUT_TONES, allowedTypes, findBlock, findContainer, MAX_CHECKLIST_LEVELS, checklistHeight } from './model.js';
 import { startReminders } from './reminders.js';
 import { setupPalette } from './palette.js';
 import { createDiagramManager } from './diagrams.js';
@@ -146,6 +146,14 @@ function renderBlock(b:Block,containerId:string,index:number,count:number) {
   shell.append(controls);
   switch (b.type) {
     case 'text': shell.append(textEditors!.mount(b,renderPageId));break;
+    case 'callout': {
+      const body=element('div','callout-body');body.dataset.tone=b.tone;
+      const symbol=editable(b.icon,'Callout icon',(value,pageId)=>action('update_block',{pageId,blockId:b.id,patch:{icon:value}},{quiet:true}),{className:'callout-icon',id:`${b.id}-icon`,placeholder:'💡'});symbol.maxLength=32;
+      const tone=element('select','callout-tone');tone.id=`${b.id}-tone`;tone.setAttribute('aria-label','Callout color');
+      for(const value of CALLOUT_TONES){const option=element('option');option.value=value;option.textContent=value[0].toUpperCase()+value.slice(1);tone.append(option);}tone.value=b.tone;
+      const pageId=renderPageId;tone.addEventListener('change',()=>{void action('update_block',{pageId,blockId:b.id,patch:{tone:tone.value as typeof b.tone}},{quiet:true}).then(result=>{if(result)body.dataset.tone=tone.value;});});
+      body.append(symbol,textEditors!.mount(b,renderPageId),tone);shell.append(body);break;
+    }
     case 'heading': {
       const pageId=renderPageId,text=editable(b.text.replace(/[\r\n]+/g,' '),'heading content',(value,pageId)=>action('update_block',{pageId,blockId:b.id,patch:{text:value}},{quiet:true}),{placeholder:'A new section',id:`${b.id}-text`});
       let finishing=false;
@@ -402,6 +410,7 @@ function renderKanban(shell:HTMLElement,b:BlockOf<'kanban'>) {
 
 const options: [BlockType,'horizontal'|'vertical'|null,string,string,string][] = [
   ['text', null, 'T', 'Text', 'An idea, a note, anything'], ['heading', null, 'H', 'Heading', 'Give a thought its own space'],
+  ['callout',null,'💡','Callout','Make a note stand out'],
   ['checklist', null, '☑', 'Checklist', 'Little things, checked off'], ['tabs', 'horizontal', '▤', 'Horizontal tabs', 'Chapters, side by side'],
   ['table',null,'▦','Table','A grid for your notes'],
   ['tabs', 'vertical', '▥', 'Vertical tabs', 'A tidy list of spaces'], ['toggle', null, '▸', 'Expandable block', 'Tuck a thought away'],

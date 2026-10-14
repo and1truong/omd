@@ -4,7 +4,8 @@ import { emptyScene, validateScene } from './scene.js';
 export const FORMAT_VERSION = 1;
 export const STORAGE_KEY = 'omd.notebook.v1';
 export const MAX_CHECKLIST_LEVELS = 4;
-export const BLOCK_TYPES = ['text', 'heading', 'checklist', 'table', 'tabs', 'toggle', 'accordion', 'reminder', 'kanban', 'divider', 'mermaid', 'excalidraw'];
+export const BLOCK_TYPES = ['text', 'heading', 'callout', 'checklist', 'table', 'tabs', 'toggle', 'accordion', 'reminder', 'kanban', 'divider', 'mermaid', 'excalidraw'];
+export const CALLOUT_TONES = ['neutral','info','success','warning','danger'] as const;
 export const MAX_TABLE_ROWS = 100;
 export const MAX_TABLE_COLUMNS = 20;
 export const MAX_TABLE_CELL_LENGTH = 10000;
@@ -39,6 +40,7 @@ export function makeBlock(type:BlockType, options:BlockOptions = {}):Block {
   const base={id:uid()};
   switch (type) {
     case 'text': return { ...base,type:'text', text: options.text ?? '' };
+    case 'callout': return {...base,type:'callout',text:options.text??'',icon:options.icon??'💡',tone:options.tone??'neutral'};
     case 'heading': return { ...base,type:'heading', text: options.text ?? 'A new section' };
     case 'divider': return {...base,type:'divider'};
     case 'table': {
@@ -92,6 +94,8 @@ export function validateNotebook(raw:unknown):Page {
       assert(BLOCK_TYPES.includes(b.type), 'Unknown block type.');
       switch (b.type) {
         case 'text': case 'heading': fields(b, ['id', 'type', 'text']); string(b.text, 'Block text'); break;
+        case 'callout':
+          fields(b,['id','type','text','icon','tone']);string(b.text,'Callout text');string(b.icon,'Callout icon');assert(b.icon.length<=32&&!/[\r\n]/.test(b.icon),'Callout icon must be at most 32 characters on one line.');assert(CALLOUT_TONES.includes(b.tone),'Invalid callout tone.');break;
         case 'divider': fields(b, ['id', 'type']); break;
         case 'table':
           fields(b,['id','type','title','headerRow','pinnedHeader','pinnedColumns','columns','rows']);string(b.title,'Table title');boolean(b.headerRow,'Header row');boolean(b.pinnedHeader,'Pinned header');
@@ -209,13 +213,13 @@ export function mutatePage(doc:Page,action:CommandName,input:InternalInput = {},
     case 'set_page':
       fields(input, ['title', 'subtitle', 'theme', 'notificationMode']); Object.assign(doc, input); break;
     case 'add_block': {
-      fields(input, ['type', 'containerId', 'index', 'text', 'title', 'orientation', 'dueAt','source','scene','rowCount','columnCount','headerRow','pinnedHeader','pinnedColumns']);
+      fields(input, ['type', 'containerId', 'index', 'icon', 'tone', 'text', 'title', 'orientation', 'dueAt','source','scene','rowCount','columnCount','headerRow','pinnedHeader','pinnedColumns']);
       const container = findContainer(doc, input.containerId);
       const b = makeBlock(input.type!, input); insert(container.blocks, b, input.index); result = { blockId: b.id, block: copy(b) }; break;
     }
     case 'update_block': {
       fields(input, ['blockId', 'patch']); const b = block();
-      const allowed = { text: ['text'], heading: ['text'], checklist: ['title'], table:['title','headerRow','pinnedHeader','pinnedColumns'], tabs: ['title', 'orientation'], toggle: ['title', 'open'], accordion: ['title'], reminder: ['title', 'dueAt', 'enabled'], kanban: ['title'], divider: [], mermaid:['title','source'], excalidraw:['title','scene'] };
+      const allowed = { text: ['text'], heading: ['text'], callout:['text','icon','tone'], checklist: ['title'], table:['title','headerRow','pinnedHeader','pinnedColumns'], tabs: ['title', 'orientation'], toggle: ['title', 'open'], accordion: ['title'], reminder: ['title', 'dueAt', 'enabled'], kanban: ['title'], divider: [], mermaid:['title','source'], excalidraw:['title','scene'] };
       fields(input.patch, allowed[b.type]); Object.assign(b, input.patch);
       if (b.type === 'reminder' && ('dueAt' in input.patch! || input.patch!.enabled === true)) b.firedAt = null;
       result = { blockId: b.id }; break;

@@ -9,6 +9,8 @@ export interface SceneElement extends JsonObject {id:ID;type:string;x:number;y:n
 export interface SceneFile extends JsonObject {id:ID;dataURL:string}
 export interface Scene {elements:SceneElement[];appState:JsonObject;files:Record<ID,SceneFile>}
 export interface TextBlock {id:ID;type:'text' | 'heading';text:string}
+export type CalloutTone = 'neutral' | 'info' | 'success' | 'warning' | 'danger';
+export interface CalloutBlock {id:ID;type:'callout';text:string;icon:string;tone:CalloutTone}
 export interface DividerBlock {id:ID;type:'divider'}
 export interface TableRow {id:ID;cells:string[]}
 export interface TableBlock {id:ID;type:'table';title:string;headerRow:boolean;pinnedHeader:boolean;pinnedColumns:number;columns:{id:ID}[];rows:TableRow[]}
@@ -25,7 +27,7 @@ export interface Column {id:ID;title:string;cards:Card[]}
 export interface KanbanBlock {id:ID;type:'kanban';title:string;columns:Column[]}
 export interface MermaidBlock {id:ID;type:'mermaid';title:string;source:string}
 export interface ExcalidrawBlock {id:ID;type:'excalidraw';title:string;scene:Scene}
-export type Block = TextBlock | DividerBlock | TableBlock | ChecklistBlock | TabsBlock | ToggleBlock | AccordionBlock | ReminderBlock | KanbanBlock | MermaidBlock | ExcalidrawBlock;
+export type Block = TextBlock | CalloutBlock | DividerBlock | TableBlock | ChecklistBlock | TabsBlock | ToggleBlock | AccordionBlock | ReminderBlock | KanbanBlock | MermaidBlock | ExcalidrawBlock;
 export type BlockType = Block['type'];
 export type BlockOf<T extends BlockType> = Extract<Block,{type:T}> | (T extends 'text' | 'heading' ? TextBlock : never);
 export interface Page {format:'omd';version:1;id:ID;revision:number;title:string;subtitle:string;theme:Theme;notificationMode:NotificationMode;updatedAt:string;blocks:Block[]}
@@ -35,7 +37,7 @@ export interface PageRow {pageId:ID;title:string;subtitle:string;index:number;ac
 export type PartialView = Partial<View>;
 export interface View {sidebarOpen:boolean;contentWidth:'reading'|'wide';collapsedPageIds:ID[];theme:Theme}
 export interface StorageLike {getItem(key:string):string|null;setItem(key:string,value:string):unknown}
-export interface BlockOptions {text?:string;title?:string;orientation?:Orientation;dueAt?:string;source?:string;scene?:Scene;rowCount?:number;columnCount?:number;headerRow?:boolean;pinnedHeader?:boolean;pinnedColumns?:number}
+export interface BlockOptions {icon?:string;tone?:CalloutTone;text?:string;title?:string;orientation?:Orientation;dueAt?:string;source?:string;scene?:Scene;rowCount?:number;columnCount?:number;headerRow?:boolean;pinnedHeader?:boolean;pinnedColumns?:number}
 export interface BlockPatch extends BlockOptions {open?:boolean;enabled?:boolean}
 export interface CommandInputs {
   set_page:Partial<Pick<Page,'title'|'subtitle'|'theme'|'notificationMode'>>;

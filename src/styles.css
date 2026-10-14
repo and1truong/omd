@@ -414,3 +414,14 @@ h3 { font-size: 13px; margin: 0 0 12px; }
   .paper { max-width: none; padding: 0; }
   .kanban-board { overflow: visible; flex-wrap: wrap; }
 }
+
+/* Callouts retain the same Markdown editor and keyboard controls as text. */
+.callout-body { display:flex; align-items:flex-start; gap:12px; padding:16px; border:1px solid var(--line); border-radius:8px; background:var(--wash); }
+.callout-body[data-tone=info] { background:color-mix(in srgb, #438acb 14%, var(--paper)); }
+.callout-body[data-tone=success] { background:color-mix(in srgb, #41966a 14%, var(--paper)); }
+.callout-body[data-tone=warning] { background:color-mix(in srgb, #d99c28 16%, var(--paper)); }
+.callout-body[data-tone=danger] { background:color-mix(in srgb, #cf5353 14%, var(--paper)); }
+.callout-body > .text-editor { flex:1; min-width:0; }
+.callout-body > .callout-icon { flex:0 0 42px; width:42px; font-size:24px; text-align:center; }
+.callout-tone { font-size:11px; max-width:100px; }
+@media(max-width:760px) { .callout-body { flex-wrap:wrap; gap:8px; padding:12px; } .callout-body > .text-editor { flex-basis:calc(100% - 50px); } .callout-tone { margin-left:50px; } }
