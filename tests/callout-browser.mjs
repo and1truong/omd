@@ -11,12 +11,12 @@ try {
   await page.goto(`http://localhost:4340${base}/`);await boot();await call('page_add',{title:'Callout browser'});
   await page.getByRole('button',{name:'Add a block here',exact:true}).click();await page.getByRole('button',{name:'Add callout',exact:true}).click();
   const block=page.locator('.block-type-callout'),editor=page.getByRole('textbox',{name:'callout content',exact:true});
-  await editor.fill('Remember this');await page.evaluate(()=>app.flushPending());
+  await editor.fill('Remember this');await page.waitForFunction(()=>store.getState().blocks[0].text==='Remember this');await page.evaluate(()=>app.flushPending());
   await page.getByRole('textbox',{name:'Callout icon',exact:true}).fill('📌');await page.getByLabel('Callout color',{exact:true}).selectOption('warning');
   await page.waitForFunction(()=>store.getState().blocks[0].tone==='warning'&&store.getState().blocks[0].icon==='📌');
   assert.equal(await block.locator('.callout-body').getAttribute('data-tone'),'warning');
-  await editor.focus();await editor.press('ControlOrMeta+a');await editor.press('ControlOrMeta+b');await editor.press('End');
-  await page.evaluate(()=>app.flushPending());assert.equal(await page.evaluate(()=>store.getState().blocks[0].text),'**Remember this**');
+  await editor.focus();await editor.press('Control+a');await block.locator('.text-editor').hover();await block.getByRole('button',{name:'Bold',exact:true}).click();await editor.press('End');
+  await page.waitForFunction(()=>store.getState().blocks[0].text==='**Remember this**');await page.evaluate(()=>app.flushPending());assert.equal(await page.evaluate(()=>store.getState().blocks[0].text),'**Remember this**');
   await editor.press('Shift+Enter');await page.waitForFunction(()=>store.getState().blocks.length===2);
   assert.equal(await page.evaluate(()=>document.activeElement?.id===`${store.getState().blocks[1].id}-text`),true);
   await page.evaluate(async()=>{await app.flushPending();await store.undo();});assert.equal(await page.locator('.block-type-text').count(),0);
