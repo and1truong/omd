@@ -30,7 +30,7 @@ interface DragData {containerId?:string;kind:'block'|'card'|'column'|'tab';block
 let suppressTabClick=false;
 let tabTitleEdit:{flush:()=>Promise<unknown>}|undefined;
 const inputEdits=new Map<string|HTMLElement,{input:HTMLElement;pageId:string;value:string;write:()=>Promise<unknown>}>();
-const inputEditKey=(input:HTMLElement,pageId:string)=>['page-title','page-subtitle'].includes(input.id)?JSON.stringify([pageId,input.id]):input;
+const inputEditKey=(input:HTMLElement,pageId:string)=>input.dataset.draftKey||['page-title','page-subtitle'].includes(input.id)?JSON.stringify([pageId,input.dataset.draftKey??input.id]):input;
 let refreshInputStatus=()=>{},deferredInputRender=false;
 function settleInputRender(){if(deferredInputRender&&!inputEdits.size&&!tabTitleEdit&&!composition.hasActive()){deferredInputRender=false;render(store.getRenderState(),{reset:true});}}
 function trackInput(input:HTMLInputElement|HTMLTextAreaElement,save:(value:string,pageId:string)=>unknown,getPageId:()=>string){
@@ -57,7 +57,7 @@ export const getView = () => shell!.getView();
 export const setView = async (patch:PartialView) => {if(patch.sidebarOpen)await beforeNavigate();return shell!.setView(patch);};
 export async function flushPending({waitForTransitions=true}:{waitForTransitions?:boolean}={}){await flushInputEdits();await tabTitleEdit?.flush();await tableEditors?.flushAll();await textEditors?.flushAll({waitForTransitions});await diagrams?.flushAll();}
 export const flushDiagrams=flushPending;
-async function beforeNavigate(){await flushInputEdits(store.getActivePageId());await tabTitleEdit?.flush();await tableEditors?.flushAll();await textEditors?.flushAll();await diagrams?.beforeNavigate();}
+async function beforeNavigate(){await flushInputEdits(store.getActivePageId());await tabTitleEdit?.flush();await tableEditors?.flushAll();await textEditors?.flushAll({pageId:store.getActivePageId()});await diagrams?.beforeNavigate();}
 export async function openCanvas(blockId:string,pageId?:string) {
   const page=await store.getPage(pageId);findBlock(page,blockId,'excalidraw');await flushPending();
   shell?.closeMobile();
@@ -83,10 +83,12 @@ async function action<K extends CommandName>(name:K,input:CommandInput<K>,{quiet
   try { input={...input,pageId:input.pageId??store.getActivePageId()}; domId('save-status').textContent='Saving…'; if(!quiet)await flushPending(); const result = await store.dispatch(name, input, { quiet }); if (focus) requestAnimationFrame(()=>document.getElementById(focus)?.focus()); return result; }
   catch (error) { domId('save-status').textContent = 'Not saved'; notify(errorOf(error).message, 'error', true); return null; }
 }
-function editable(value:string,aria:string,fn:(value:string,pageId:string)=>unknown,{multiline=false,className='',placeholder='',id}: {multiline?:boolean;className?:string;placeholder?:string;id?:string}={}) {
+function editable(value:string,aria:string,fn:(value:string,pageId:string)=>unknown,{multiline=false,className='',placeholder='',id,draftId}: {multiline?:boolean;className?:string;placeholder?:string;id?:string;draftId?:string}={}) {
   const input=multiline?element('textarea',className):element('input',className);if(input instanceof HTMLInputElement)input.type='text';else input.rows=1;
   input.value = value; input.placeholder = placeholder; input.setAttribute('aria-label', aria); if (id) input.id = id;
   const pageId=store.getActivePageId();
+  input.dataset.draftKey=draftId??JSON.stringify([id??aria]);
+  const draft=inputEdits.get(inputEditKey(input,pageId));if(draft){input.value=draft.value;draft.input=input;}
   trackInput(input,(value,pageId)=>{const result=fn(value,pageId);if(multiline)fit(input);return result;},()=>pageId);
   if (multiline) input.dataset.autofit = 'true'; return input;
 }
@@ -102,7 +104,7 @@ async function createTextAfter(blockId:string,pageId:string,focus=true) {
 }
 function title(b:Extract<Block,{title:string}>,glyph:string) {
   const head = element('div', 'block-heading'); const glyphIcon=icon(b.type);glyphIcon.classList.add('type-glyph');
-  head.append(glyphIcon, editable(b.title, `${b.type} title`, (value,pageId) => action('update_block', { pageId, blockId: b.id, patch: { title: value } }, { quiet: true }), { className: 'block-title', placeholder: 'Untitled' })); return head;
+  head.append(glyphIcon, editable(b.title, `${b.type} title`, (value,pageId) => action('update_block', { pageId, blockId: b.id, patch: { title: value } }, { quiet: true }), { className: 'block-title', placeholder: 'Untitled',draftId:JSON.stringify([b.id,'title']) })); return head;
 }
 function rowsControls(onUp:()=>unknown,onDown:()=>unknown,onRemove:()=>unknown,upDisabled:boolean,downDisabled:boolean,label:string) {
   const tools = element('div', 'row-controls');
@@ -384,21 +386,21 @@ function renderTabs(shell:HTMLElement,b:BlockOf<'tabs'>) {
 }
 function renderToggle(shell:HTMLElement,b:BlockOf<'toggle'>) {
   const head = element('div', 'toggle-head'); const arrow = button(b.open ? '▾' : '▸', `${b.open ? 'Collapse' : 'Expand'} ${b.title}`, () => action('update_block', { blockId: b.id, patch: { open: !b.open } }), 'toggle-arrow'); arrow.setAttribute('aria-expanded', String(b.open)); arrow.setAttribute('aria-controls', `${b.id}-content`);
-  head.append(arrow, editable(b.title, 'Expandable block title', (value,pageId) => action('update_block', { pageId, blockId: b.id, patch: { title: value } }, { quiet: true }), { className: 'block-title' })); shell.append(head);
+  head.append(arrow, editable(b.title, 'Expandable block title', (value,pageId) => action('update_block', { pageId, blockId: b.id, patch: { title: value } }, { quiet: true }), { className: 'block-title',draftId:JSON.stringify([b.id,'title']) })); shell.append(head);
   if (b.open) { const content = element('div', 'toggle-content'); content.id = `${b.id}-content`; content.append(renderer.childList(b.id)); shell.append(content); }
 }
 function renderAccordion(shell:HTMLElement,b:BlockOf<'accordion'>) {
   shell.append(title(b, '≡')); const group = element('div', 'accordion');
   b.items.forEach((item, i) => {
     const part = element('div', 'accordion-item'); const head = element('div', 'accordion-head'); const arrow = button(item.open ? '▾' : '▸', `${item.open ? 'Collapse' : 'Expand'} ${item.title}`, () => action('accordion_update', { blockId: b.id, itemId: item.id, patch: { open: !item.open } }), 'toggle-arrow'); arrow.setAttribute('aria-expanded', String(item.open)); arrow.setAttribute('aria-controls', `${item.id}-content`);
-    head.append(arrow, editable(item.title, 'Accordion item title', (value,pageId) => action('accordion_update', { pageId, blockId: b.id, itemId: item.id, patch: { title: value } }, { quiet: true }), { className: 'block-title' }), rowsControls(() => action('accordion_move', { blockId: b.id, itemId: item.id, index: i - 1 }), () => action('accordion_move', { blockId: b.id, itemId: item.id, index: i + 1 }), async () => { if (await confirmAction('Remove this section?', 'Its contents will be removed too. You can undo it.', 'Remove')) action('accordion_remove', { blockId: b.id, itemId: item.id }); }, i === 0, i === b.items.length - 1, 'accordion section'));
+    head.append(arrow, editable(item.title, 'Accordion item title', (value,pageId) => action('accordion_update', { pageId, blockId: b.id, itemId: item.id, patch: { title: value } }, { quiet: true }), { className: 'block-title',draftId:JSON.stringify([b.id,item.id,'title']) }), rowsControls(() => action('accordion_move', { blockId: b.id, itemId: item.id, index: i - 1 }), () => action('accordion_move', { blockId: b.id, itemId: item.id, index: i + 1 }), async () => { if (await confirmAction('Remove this section?', 'Its contents will be removed too. You can undo it.', 'Remove')) action('accordion_remove', { blockId: b.id, itemId: item.id }); }, i === 0, i === b.items.length - 1, 'accordion section'));
     part.append(head); if (item.open) { const content = element('div', 'accordion-content'); content.id = `${item.id}-content`; content.append(renderer.childList(item.id)); part.append(content); } group.append(part);
   }); shell.append(group, button('+ Add a section', 'Add accordion section', () => action('accordion_add', { blockId: b.id }), 'add-inline'));
 }
 function toLocalDateTime(iso:string) { if (!iso) return ''; const d = new Date(iso); const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000); return local.toISOString().slice(0, 16); }
 function renderReminder(shell:HTMLElement,b:BlockOf<'reminder'>) {
   const box = element('div', 'reminder-box'); const reminderIcon=icon('reminder');reminderIcon.classList.add('reminder-icon');
-  const body = element('div', 'reminder-body'); body.append(editable(b.title, 'Reminder text', (value,pageId) => action('update_block', { pageId, blockId: b.id, patch: { title: value } }, { quiet: true }), { className: 'block-title' }));
+  const body = element('div', 'reminder-body'); body.append(editable(b.title, 'Reminder text', (value,pageId) => action('update_block', { pageId, blockId: b.id, patch: { title: value } }, { quiet: true }), { className: 'block-title',draftId:JSON.stringify([b.id,'title']) }));
   const dateRow = element('div', 'reminder-date'); const input = element('input'); input.type = 'datetime-local'; input.value = toLocalDateTime(b.dueAt); input.setAttribute('aria-label', 'Reminder date and time');
   input.addEventListener('change', () => { const dueAt = input.value ? new Date(input.value).toISOString() : ''; action('update_block', { blockId: b.id, patch: { dueAt, enabled: !!dueAt } }); });
   const status = element('span', 'reminder-status'); status.textContent = b.firedAt ? 'Delivered' : !b.enabled ? 'Off' : Date.parse(b.dueAt) <= Date.now() ? 'Due' : 'Scheduled'; dateRow.append(input, status); body.append(dateRow);
@@ -413,12 +415,12 @@ function renderKanban(shell:HTMLElement,b:BlockOf<'kanban'>) {
     const header = element('div', 'column-header'); const dot = element('span', 'column-dot'); dot.setAttribute('aria-hidden', 'true');
     const handle = button('⠿', 'Drag column', () => {}, 'icon-button block-drag'); handle.style.fontSize = '12px'; handle.style.minWidth = '17px'; draggable(handle, { kind: 'column', blockId: b.id, columnId: col.id });
     const count = element('span', 'card-count'); count.textContent=String(col.cards.length);
-    header.append(dot, editable(col.title, 'Column title', (value,pageId) => action('column_update', { pageId, blockId: b.id, columnId: col.id, title: value }, { quiet: true }), { className: 'column-title' }), count, handle,
+    header.append(dot, editable(col.title, 'Column title', (value,pageId) => action('column_update', { pageId, blockId: b.id, columnId: col.id, title: value }, { quiet: true }), { className: 'column-title',draftId:JSON.stringify([b.id,col.id,'title']) }), count, handle,
       rowsControls(() => action('column_move', { blockId: b.id, columnId: col.id, index: ci - 1 }), () => action('column_move', { blockId: b.id, columnId: col.id, index: ci + 1 }), async () => { if (await confirmAction('Remove this column?', `${col.cards.length} card(s) in this column will also be removed. You can undo it.`, 'Remove column')) action('column_remove', { blockId: b.id, columnId: col.id }); }, ci === 0, ci === b.columns.length - 1, 'column'));
     column.append(header); const cards = element('div', 'cards');
     col.cards.forEach((card, i) => {
       const el = element('div', 'kanban-card'); el.dataset.cardId = card.id;
-      el.append(editable(card.title, 'Card title', (value,pageId) => action('card_update', { pageId, blockId: b.id, cardId: card.id, patch: { title: value } }, { quiet: true }), { multiline: true, className: 'card-title', placeholder: 'A small next step', id: card.id }), editable(card.description, 'Card description', (value,pageId) => action('card_update', { pageId, blockId: b.id, cardId: card.id, patch: { description: value } }, { quiet: true }), { multiline: true, className: 'card-description', placeholder: 'Add a note…' }));
+      el.append(editable(card.title, 'Card title', (value,pageId) => action('card_update', { pageId, blockId: b.id, cardId: card.id, patch: { title: value } }, { quiet: true }), { multiline: true, className: 'card-title', placeholder: 'A small next step', id: card.id,draftId:JSON.stringify([b.id,card.id,'title']) }), editable(card.description, 'Card description', (value,pageId) => action('card_update', { pageId, blockId: b.id, cardId: card.id, patch: { description: value } }, { quiet: true }), { multiline: true, className: 'card-description', placeholder: 'Add a note…',draftId:JSON.stringify([b.id,card.id,'description']) }));
       const tools = element('div', 'card-tools'); const handle = button('⠿', 'Drag card', () => {}, 'icon-button block-drag'); handle.style.fontSize = '12px'; draggable(handle, { kind: 'card', blockId: b.id, cardId: card.id, columnId: col.id });
       const select = element('select', 'card-move'); select.setAttribute('aria-label', 'Move card to column');
       b.columns.forEach(c => { const o = element('option'); o.value = c.id; o.textContent = `→ ${c.title || 'Untitled'}`; select.append(o); }); select.value = col.id;

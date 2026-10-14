@@ -12,7 +12,9 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
   type ItemKeyDown=(event:KeyboardEvent)=>boolean;
   interface Entry {blockType:BlockType;slash?:ReturnType<typeof createSlashMenu>;host:HTMLDivElement;editor:Editor;pageId:string;blockId:string;itemId?:string;onKeyDown?:ItemKeyDown;source:string;serialized:string;pending:string|null;saving?:Promise<unknown>;creating:boolean;provisional?:boolean;creation?:Promise<void>}
   const entries=new Map<string,Entry>(),key=(pageId:string,blockId:string,itemId?:string)=>JSON.stringify([pageId,blockId,itemId]);
-  function write(entry:Entry,text:string) {
+  interface Draft {pageId:string;blockId:string;itemId?:string;blockType:BlockType;text:string}
+  const drafts=new Map<string,Draft>();
+  function write(entry:Pick<Entry,'pageId'|'blockId'|'itemId'>,text:string) {
     return entry.itemId
       ?store.dispatch('checklist_update',{pageId:entry.pageId,blockId:entry.blockId,itemId:entry.itemId,patch:{text}},{quiet:true})
       :store.dispatch('update_block',{pageId:entry.pageId,blockId:entry.blockId,patch:{text}},{quiet:true});
@@ -72,6 +74,7 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
   }
   function mount(block:TextBlock|CalloutBlock,pageId:string,item?:ChecklistItem,onKeyDown?:ItemKeyDown) {
     const source=item?.text??block.text,id=key(pageId,block.id,item?.id);let entry=entries.get(id);
+    const draft=drafts.get(id),restored=draft?.blockType===block.type&&draft.text!==source?draft.text:null;
     if(entry&&entry.blockType!==block.type){entry.slash?.destroy();entry.editor.destroy();entries.delete(id);entry=undefined;}
     if(entry) {
       entry.onKeyDown=onKeyDown;
@@ -85,7 +88,7 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
     if(item)host.dataset.checklistEditor=item.id;else host.dataset.textEditor=block.id;
     const toolbar=document.createElement('div');toolbar.className='markdown-toolbar';toolbar.setAttribute('role','toolbar');toolbar.setAttribute('aria-label','Text formatting');
     const surface=document.createElement('div');surface.className='markdown-surface';if(!item)host.append(toolbar);host.append(surface);
-    const editor=new Editor({element:surface,injectCSS:false,extensions:[StarterKit.configure({undoRedo:false,underline:false,trailingNode:false,link:{openOnClick:false}}),Markdown],content:source,contentType:'markdown',
+    const editor=new Editor({element:surface,injectCSS:false,extensions:[StarterKit.configure({undoRedo:false,underline:false,trailingNode:false,link:{openOnClick:false}}),Markdown],content:restored??source,contentType:'markdown',
       editorProps:{attributes:{id:item?.id??`${block.id}-text`,class:'markdown-editor',role:'textbox','aria-label':item?'Checklist item':block.type==='callout'?'callout content':'text content','aria-multiline':'true','aria-keyshortcuts':item?'Enter Shift+Enter Tab Shift+Tab':'Shift+Enter Alt+F10','data-placeholder':item?'A little thing to do':'Write something…'},
         handleClick:(view,_pos,event)=>{
           if(event.button!==0||event.shiftKey||event.altKey||view.composing||composition.isComposing(view.dom))return false;
@@ -115,7 +118,7 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
         }
       },onUpdate:()=>{if(entry)changed(entry);}
     });
-    entry={blockType:block.type,host,editor,pageId,blockId:block.id,itemId:item?.id,onKeyDown,source,serialized:editor.getMarkdown(),pending:null,creating:false};entries.set(id,entry);
+    entry={blockType:block.type,host,editor,pageId,blockId:block.id,itemId:item?.id,onKeyDown,source,serialized:editor.getMarkdown(),pending:restored,creating:false};entries.set(id,entry);drafts.delete(id);
     composition.track(editor.view.dom,async()=>{
       try {
         // Let ProseMirror consume the final DOM mutation before saving composed text.
@@ -179,7 +182,7 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
   }
   const manager={mount,
     mountChecklist(blockId:string,item:ChecklistItem,pageId:string,onKeyDown:ItemKeyDown){return mount({id:blockId,type:'text',text:item.text},pageId,item,onKeyDown);},
-    end(){for(const [id,entry] of entries)if(!entry.provisional&&(entry.pageId!==store.getActivePageId()||!entry.host.isConnected)){entry.slash?.destroy();entry.editor.destroy();entries.delete(id);}},
+    end(){for(const [id,entry] of entries)if(!entry.provisional&&(entry.pageId!==store.getActivePageId()||!entry.host.isConnected)){if(entry.pending!==null)drafts.set(id,{pageId:entry.pageId,blockId:entry.blockId,itemId:entry.itemId,blockType:entry.blockType,text:entry.pending});entry.slash?.destroy();entry.editor.destroy();entries.delete(id);}},
     captureFocus(){const entry=[...entries.values()].find(e=>e.editor.view.dom===document.activeElement);return entry?key(entry.pageId,entry.blockId,entry.itemId):null;},
     restoreFocus(id:string|null){const entry=id&&entries.get(id);if(entry&&entry.host.isConnected)entry.editor.view.focus();},
     focus(blockId:string){
@@ -188,11 +191,13 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
       // directly instead of Tiptap's delayed React focus path.
       entry.editor.commands.setTextSelection(1);entry.editor.view.focus();entry.editor.view.dom.scrollIntoView({block:'nearest'});
     },
-    hasPending(){return [...entries.values()].some(entry=>entry.provisional||entry.pending!==null||entry.saving);},
-    async flushAll({waitForTransitions=true}:{waitForTransitions?:boolean}={}){
+    hasPending(){return drafts.size>0||[...entries.values()].some(entry=>entry.provisional||entry.pending!==null||entry.saving);},
+    async flushAll({waitForTransitions=true,pageId}:{waitForTransitions?:boolean;pageId?:string}={}){
       if(waitForTransitions){await Promise.all([...entries.values()].map(entry=>entry.creation));if([...entries.values()].some(entry=>entry.provisional))throw new Error('The next block has not been saved. Retry creating block before leaving this page.');}
-      await Promise.all([...entries.values()].map(flush));await store.idle();
+      await Promise.all([...entries.values()].filter(entry=>!pageId||entry.pageId===pageId).map(flush));
+      for(const [id,draft] of [...drafts])if((!pageId||draft.pageId===pageId)&&drafts.get(id)===draft){await write(draft,draft.text);if(drafts.get(id)===draft)drafts.delete(id);}
+      await store.idle();
     },
-    destroy(){for(const entry of entries.values()){entry.slash?.destroy();entry.editor.destroy();}entries.clear();}
+    destroy(){for(const entry of entries.values()){entry.slash?.destroy();entry.editor.destroy();}entries.clear();drafts.clear();}
   };return manager;
 }
