@@ -42,6 +42,7 @@ export interface BlockPatch extends BlockOptions {open?:boolean;enabled?:boolean
 export interface CommandInputs {
   set_page:Partial<Pick<Page,'title'|'subtitle'|'theme'|'notificationMode'>>;
   add_block:BlockOptions & {type:BlockType;containerId?:ID;index?:number};
+  convert_block:BlockOptions & {blockId:ID;type:BlockType;expectedText:string};
   update_block:{blockId:ID;patch:BlockPatch};
   remove_block:{blockId:ID};move_block:{blockId:ID;containerId:ID;index?:number};
   table_cell_update:{blockId:ID;rowId:ID;columnId:ID;text:string};
@@ -58,10 +59,10 @@ export interface CommandInputs {
 }
 export type CommandName = keyof CommandInputs;
 export type CommandInput<K extends CommandName> = CommandInputs[K] & {pageId?:ID};
-export type CommandResult<K extends CommandName> = K extends 'add_block' ? {blockId:ID;block:Block} : K extends 'update_block' ? {blockId:ID} : K extends 'table_row_add' ? {rowId:ID} : K extends 'checklist_add'|'accordion_add' ? {itemId:ID} : K extends 'tab_add' ? {tabId:ID} : K extends 'column_add'|'table_column_add' ? {columnId:ID} : K extends 'card_add' ? {cardId:ID} : K extends 'page_add' ? {pageId:ID} : K extends 'page_remove' ? {removedPageIds:ID[]} : K extends 'import_notebook' ? {imported:true} : Record<never,never>;
+export type CommandResult<K extends CommandName> = K extends 'add_block'|'convert_block' ? {blockId:ID;block:Block} : K extends 'update_block' ? {blockId:ID} : K extends 'table_row_add' ? {rowId:ID} : K extends 'checklist_add'|'accordion_add' ? {itemId:ID} : K extends 'tab_add' ? {tabId:ID} : K extends 'column_add'|'table_column_add' ? {columnId:ID} : K extends 'card_add' ? {cardId:ID} : K extends 'page_add' ? {pageId:ID} : K extends 'page_remove' ? {removedPageIds:ID[]} : K extends 'import_notebook' ? {imported:true} : Record<never,never>;
 export type MutationResult<K extends CommandName> = CommandResult<K> & {revision:number};
 // Internal switch handlers retain runtime validation at the untrusted-input boundary.
-export type InternalInput = Partial<BlockOptions & {type:BlockType;theme:Theme;notificationMode:NotificationMode;subtitle:string;description:string;containerId:ID;index:number;blockId:ID;itemId:ID;tabId:ID;rowId:ID;columnId:ID;cardId:ID;pageId:ID;parentId:ID;firedAt:string;notebook:Notebook|Page;patch:BlockPatch & {text?:string;done?:boolean;description?:string}}>;
+export type InternalInput = Partial<BlockOptions & {expectedText:string;type:BlockType;theme:Theme;notificationMode:NotificationMode;subtitle:string;description:string;containerId:ID;index:number;blockId:ID;itemId:ID;tabId:ID;rowId:ID;columnId:ID;cardId:ID;pageId:ID;parentId:ID;firedAt:string;notebook:Notebook|Page;patch:BlockPatch & {text?:string;done?:boolean;description?:string}}>;
 export type ActionResult = Partial<{blockId:ID;block:Block;itemId:ID;tabId:ID;rowId:ID;columnId:ID;cardId:ID;pageId:ID;removedPageIds:ID[];imported:boolean}>;
 export interface ChangeEvent {actionName?:CommandName;changedBlockId?:ID;changedPageId?:ID;quiet?:boolean;reset?:boolean;reminderBlockId?:ID;reminderPageId?:ID;history?:boolean}
 export interface SaveStatus {pending:number;navigating:boolean;error:Error|null}

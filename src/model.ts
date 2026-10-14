@@ -217,6 +217,14 @@ export function mutatePage(doc:Page,action:CommandName,input:InternalInput = {},
       const container = findContainer(doc, input.containerId);
       const b = makeBlock(input.type!, input); insert(container.blocks, b, input.index); result = { blockId: b.id, block: copy(b) }; break;
     }
+    case 'convert_block': {
+      fields(input,['blockId','type','expectedText','text','title','orientation','dueAt','source','scene','rowCount','columnCount','headerRow','pinnedHeader','pinnedColumns']);
+      const found=findBlock(doc,input.blockId,'text');string(input.expectedText,'Expected text');
+      assert(found.block.text===input.expectedText,'The text block changed. Try the command again.');
+      const replacement={...makeBlock(input.type!,input),id:found.block.id};
+      found.siblings.splice(found.siblings.findIndex(b=>b.id===found.block.id),1,replacement);
+      result={blockId:replacement.id,block:copy(replacement)};break;
+    }
     case 'update_block': {
       fields(input, ['blockId', 'patch']); const b = block();
       const allowed = { text: ['text'], heading: ['text'], callout:['text','icon','tone'], checklist: ['title'], table:['title','headerRow','pinnedHeader','pinnedColumns'], tabs: ['title', 'orientation'], toggle: ['title', 'open'], accordion: ['title'], reminder: ['title', 'dueAt', 'enabled'], kanban: ['title'], divider: [], mermaid:['title','source'], excalidraw:['title','scene'] };

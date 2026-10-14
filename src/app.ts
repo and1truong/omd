@@ -11,6 +11,7 @@ import { createDiagramManager } from './diagrams.js';
 import { createRenderCache, reconcile, revealActions } from './render-cache.js';
 import { setupShell, showMenu } from './shell.js';
 import { icon, labelIcon } from './icons.js';
+import type {SlashOption} from './slash-menu.js';
 import {createTextEditors} from './text-editors.js';
 import {createTableEdits} from './table-edits.js';
 import {createTableEditors} from './table-editors.js';
@@ -418,6 +419,19 @@ const options: [BlockType,'horizontal'|'vertical'|null,string,string,string][] =
   ['kanban', null, '▦', 'Kanban board', 'Keep things moving'], ['divider', null, '—', 'Divider', 'A little breathing room'],
   ['mermaid',null,'◇','Mermaid','Markdown to a diagram'],['excalidraw',null,'✎','Excalidraw','A canvas for your thoughts']
 ];
+function slashOptions(blockId:string,pageId:string):SlashOption[] {
+  const page=store.getRenderState(),containerId=renderer.containerFor(blockId);if(page.id!==pageId||!containerId)return [];
+  const allowed=allowedTypes(page,containerId);
+  return options.filter(([type,orientation])=>allowed.types.includes(type)&&(type!=='tabs'||!allowed.tabOrientation||orientation===allowed.tabOrientation))
+    .map(([type,orientation,_glyph,name,caption])=>({type,...(orientation?{orientation}:{}),name,caption}));
+}
+async function convertTextBlock(blockId:string,pageId:string,option:SlashOption,expectedText:string) {
+  if(store.getActivePageId()!==pageId)throw new Error('The page changed. Try the command again.');
+  await store.dispatch('convert_block',{pageId,blockId,type:option.type,orientation:option.orientation,expectedText});
+  if(store.getActivePageId()!==pageId)return;
+  const block=document.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(blockId)}"]`);
+  (block?.querySelector<HTMLElement>('[contenteditable="true"]')??block?.querySelector<HTMLElement>('input,textarea')??block?.querySelector<HTMLElement>('.block-controls button:not(.block-drag)'))?.focus();
+}
 export function openPicker(containerId = 'page',anchor?:InsertionAnchor) {
   const pageId=store.getActivePageId(),allowed = allowedTypes(store.getRenderState(), containerId);
   const grid = domId('picker-options'); grid.replaceChildren();let adding=false;
@@ -512,7 +526,7 @@ async function boot() {
   for (const close of document.querySelectorAll('[data-close]')) close.addEventListener('click', () => close.closest('dialog')!.close());
   for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', e => { if (e.target === dialog) { const rect = dialog.getBoundingClientRect(); if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) dialog.close(); } });
   diagrams=createDiagramManager(store,{notify});
-  textEditors=createTextEditors(store,{composition,notify,createNext:(blockId,pageId)=>createTextAfter(blockId,pageId,false)});
+  textEditors=createTextEditors(store,{composition,notify,createNext:(blockId,pageId)=>createTextAfter(blockId,pageId,false),slash:{options:slashOptions,convert:convertTextBlock}});
   tableEdits=createTableEdits(store,{settled:()=>composition.settled(input=>input instanceof Element&&input.classList.contains('table-cell'))});
   tableEditors=createTableEditors(store,{composition,drafts:tableEdits,notify,flushPending});
   const dirtyContainers=new Set<string>();

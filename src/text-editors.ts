@@ -1,3 +1,6 @@
+import {createSlashMenu} from './slash-menu.js';
+import type {SlashOption} from './slash-menu.js';
+import type {BlockType} from './types.js';
 import {pasteMarkdown} from './markdown-paste.js';
 import {Editor,StarterKit,Markdown} from './text-editor-engine.js';
 import type {NotebookStore,TextBlock,CalloutBlock,ChecklistItem,Notify} from './types.js';
@@ -5,9 +8,9 @@ import type {createCompositionGuard} from './composition.js';
 import {errorOf} from './dom.js';
 
 /** Visible Markdown controls own a Tiptap instance; persisted content stays Markdown. */
-export function createTextEditors(store:NotebookStore,{composition,notify,createNext}:{composition:ReturnType<typeof createCompositionGuard>;notify:Notify;createNext:(blockId:string,pageId:string)=>Promise<string|undefined>}) {
+export function createTextEditors(store:NotebookStore,{composition,notify,createNext,slash}:{composition:ReturnType<typeof createCompositionGuard>;notify:Notify;createNext:(blockId:string,pageId:string)=>Promise<string|undefined>;slash?:{options:(blockId:string,pageId:string)=>SlashOption[];convert:(blockId:string,pageId:string,option:SlashOption,expectedText:string)=>Promise<void>}}) {
   type ItemKeyDown=(event:KeyboardEvent)=>boolean;
-  interface Entry {host:HTMLDivElement;editor:Editor;pageId:string;blockId:string;itemId?:string;onKeyDown?:ItemKeyDown;source:string;serialized:string;pending:string|null;saving?:Promise<unknown>;creating:boolean;provisional?:boolean;creation?:Promise<void>}
+  interface Entry {blockType:BlockType;slash?:ReturnType<typeof createSlashMenu>;host:HTMLDivElement;editor:Editor;pageId:string;blockId:string;itemId?:string;onKeyDown?:ItemKeyDown;source:string;serialized:string;pending:string|null;saving?:Promise<unknown>;creating:boolean;provisional?:boolean;creation?:Promise<void>}
   const entries=new Map<string,Entry>(),key=(pageId:string,blockId:string,itemId?:string)=>JSON.stringify([pageId,blockId,itemId]);
   function write(entry:Entry,text:string) {
     return entry.itemId
@@ -58,10 +61,10 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
         const target=entries.get(key(source.pageId,created));
         if(!target?.host.isConnected)throw new Error('The next block is no longer visible. Your text remains in the pending editor.');
         const focused=document.activeElement===next.editor.view.dom;
-        target.editor.destroy();target.host.replaceWith(host);entries.delete(key(source.pageId,created));entries.delete(key(source.pageId,id));
+        target.slash?.destroy();target.editor.destroy();target.host.replaceWith(host);entries.delete(key(source.pageId,created));entries.delete(key(source.pageId,id));
         next.blockId=created;next.provisional=false;next.creating=false;host.dataset.textEditor=created;delete host.dataset.pendingBlock;next.editor.view.dom.id=`${created}-text`;
         entries.set(key(source.pageId,created),next);
-        if(focused)next.editor.view.focus();capture(next);await flush(next);retry.remove();
+        if(focused)next.editor.view.focus();capture(next);await flush(next);next.slash?.update();retry.remove();
       }catch(error){retry.hidden=false;notify(errorOf(error).message,'error',true);}
       finally{source.creating=false;running=false;}
     }
@@ -69,6 +72,7 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
   }
   function mount(block:TextBlock|CalloutBlock,pageId:string,item?:ChecklistItem,onKeyDown?:ItemKeyDown) {
     const source=item?.text??block.text,id=key(pageId,block.id,item?.id);let entry=entries.get(id);
+    if(entry&&entry.blockType!==block.type){entry.slash?.destroy();entry.editor.destroy();entries.delete(id);entry=undefined;}
     if(entry) {
       entry.onKeyDown=onKeyDown;
       if(entry.source!==source&&entry.pending===null&&!entry.saving&&!composition.isComposing(entry.editor.view.dom)) {
@@ -95,6 +99,7 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
           if(event.isComposing||event.keyCode===229||editor.view.composing)return false;
           if(composition.isComposing(editor.view.dom))return event.key==='Enter'||event.key==='Tab';
           if(!item&&event.altKey&&event.key==='F10') {toolbar.dataset.keyboardOpen='true';toolbar.querySelector<HTMLButtonElement>('button')?.focus();return true;}
+          if(entry?.slash?.handleKeyDown(event))return true;
           if(entry?.onKeyDown?.(event))return true;
           if(item&&event.key==='Tab')return false;
           if(!item&&event.key==='Enter'&&event.shiftKey&&!event.ctrlKey&&!event.metaKey&&!event.altKey) {
@@ -110,7 +115,7 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
         }
       },onUpdate:()=>{if(entry)changed(entry);}
     });
-    entry={host,editor,pageId,blockId:block.id,itemId:item?.id,onKeyDown,source,serialized:editor.getMarkdown(),pending:null,creating:false};entries.set(id,entry);
+    entry={blockType:block.type,host,editor,pageId,blockId:block.id,itemId:item?.id,onKeyDown,source,serialized:editor.getMarkdown(),pending:null,creating:false};entries.set(id,entry);
     composition.track(editor.view.dom,async()=>{
       try {
         // Let ProseMirror consume the final DOM mutation before saving composed text.
@@ -125,6 +130,18 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
         }
       } catch(error){capture(entry!);notify(errorOf(error).message,'error',true);}
     },()=>pageId);
+    if(!item&&block.type==='text'&&slash)entry.slash=createSlashMenu(editor,{host,
+      getOptions:()=>slash.options(entry!.blockId,pageId),canOpen:()=>!entry!.creating&&!entry!.provisional&&!composition.isComposing(editor.view.dom),
+      select:option=>{
+        if(entry!.creating||entry!.provisional||composition.isComposing(editor.view.dom))return;
+        entry!.creating=true;editor.setEditable(false);
+        entry!.creation=(async()=>{
+          try {capture(entry!);await flush(entry!);await slash.convert(entry!.blockId,pageId,option,entry!.source);}
+          catch(error){notify(errorOf(error).message,'error',true);}
+          finally{entry!.creating=false;if(!editor.isDestroyed){editor.setEditable(true);editor.view.focus();}}
+        })();
+      }
+    });
     const controls:[string,string,(editor:Editor)=>void,()=>boolean][]=[
       ['B','Bold',e=>{e.chain().focus().toggleBold().run();},()=>editor.isActive('bold')],
       ['I','Italic',e=>{e.chain().focus().toggleItalic().run();},()=>editor.isActive('italic')],
@@ -161,7 +178,7 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
   }
   const manager={mount,
     mountChecklist(blockId:string,item:ChecklistItem,pageId:string,onKeyDown:ItemKeyDown){return mount({id:blockId,type:'text',text:item.text},pageId,item,onKeyDown);},
-    end(){for(const [id,entry] of entries)if(!entry.provisional&&(entry.pageId!==store.getActivePageId()||!entry.host.isConnected)){entry.editor.destroy();entries.delete(id);}},
+    end(){for(const [id,entry] of entries)if(!entry.provisional&&(entry.pageId!==store.getActivePageId()||!entry.host.isConnected)){entry.slash?.destroy();entry.editor.destroy();entries.delete(id);}},
     captureFocus(){const entry=[...entries.values()].find(e=>e.editor.view.dom===document.activeElement);return entry?key(entry.pageId,entry.blockId,entry.itemId):null;},
     restoreFocus(id:string|null){const entry=id&&entries.get(id);if(entry&&entry.host.isConnected)entry.editor.view.focus();},
     focus(blockId:string){
@@ -175,6 +192,6 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
       if(waitForTransitions){await Promise.all([...entries.values()].map(entry=>entry.creation));if([...entries.values()].some(entry=>entry.provisional))throw new Error('The next block has not been saved. Retry creating block before leaving this page.');}
       await Promise.all([...entries.values()].map(flush));await store.idle();
     },
-    destroy(){for(const entry of entries.values())entry.editor.destroy();entries.clear();}
+    destroy(){for(const entry of entries.values()){entry.slash?.destroy();entry.editor.destroy();}entries.clear();}
   };return manager;
 }
