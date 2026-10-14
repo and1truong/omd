@@ -149,6 +149,14 @@ body[data-content-width=wide] .paper { max-width: none; }
 .block-type-heading textarea { font-size: 24px; font-weight: 600; line-height: 1.4; }
 .block-type-text textarea { font-size: 14px; line-height: 1.8; min-height: 25px; }
 .block-type-text>textarea, .block-type-heading>textarea { background: transparent; outline: 0; border-radius: 0; }
+.slash-menu { position:fixed; z-index:30; overflow:auto; overscroll-behavior:contain; padding:6px; background:var(--paper); color:var(--text); border:1px solid var(--line); border-radius:8px; box-shadow:0 8px 28px #0003; }
+.slash-option { display:flex; align-items:center; gap:12px; padding:8px 10px; border-radius:5px; cursor:pointer; }
+.slash-option:hover, .slash-option[aria-selected=true] { background:var(--soft); }
+.slash-option strong, .slash-option small { display:block; }
+.slash-option small, .slash-help { color:var(--secondary); font-size:11px; }
+.slash-help { display:block; padding:8px 10px 4px; }
+.slash-menu > p { padding:8px 10px; margin:0; }
+
 .text-editor { min-width: 0; position: relative; }
 .markdown-toolbar { position: absolute; left: 0; bottom: 100%; display: flex; flex-wrap: wrap; max-width: 100%; gap: 3px; padding: 3px; border: 1px solid var(--line); border-radius: 5px; background: var(--paper); z-index: 3; visibility: hidden; opacity: 0; pointer-events: none; transition: opacity .12s ease; }
 .text-editor:hover>.markdown-toolbar, .markdown-toolbar:focus-within, .markdown-toolbar[data-keyboard-open=true] { visibility: visible; opacity: 1; pointer-events: auto; }

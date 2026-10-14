@@ -9,6 +9,7 @@
     "start": "node scripts/start.mjs",
     "build": "node scripts/build.mjs",
     "test:browser": "node tests/browser.mjs",
+    "test:slash": "node tests/slash-browser.mjs",
     "test:startup": "node tests/startup.mjs",
     "test:migration": "node tests/record-migration.mjs",
     "test:theme": "node tests/theme-browser.mjs",
