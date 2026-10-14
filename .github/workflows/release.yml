@@ -39,11 +39,11 @@ jobs:
       - run: npm run check:static
       - run: npx playwright install --with-deps chromium
       - name: Native browser at origin root
-        run: npm run test:browser
+        run: npm run test:browser && npm run test:callout && npm run test:slash
       - name: Native browser at GitHub Pages path
         env:
           OMD_BASE_PATH: /omd
-        run: npm run test:browser
+        run: npm run test:browser && npm run test:callout && npm run test:slash
       - run: npm run package:release
       - run: npm run test:release
       - uses: actions/upload-artifact@v4
@@ -54,8 +54,10 @@ jobs:
             release/*.zip
             release/*.tar.gz
             release/SHA256SUMS.txt
+  desktop:
+    uses: ./.github/workflows/desktop.yml
   publish:
-    needs: build
+    needs: [build, desktop]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -68,6 +70,12 @@ jobs:
         with:
           name: omd-release
           path: release
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: omd-desktop-*
+          path: desktop-artifacts
+      - name: Assemble verified desktop assets
+        run: node scripts/collect-desktop-release.mjs
       - name: Publish verified release assets
         env:
           GH_TOKEN: ${{ github.token }}
