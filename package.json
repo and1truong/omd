@@ -20,13 +20,14 @@
     "test:checklist": "node tests/checklist-browser.mjs",
     "test:checklist-time": "node tests/checklist-time.mjs",
     "test:editor": "node tests/text-editor.mjs",
+    "test:drafts": "node tests/input-drafts.mjs",
     "test:paste": "node tests/markdown-paste.mjs",
     "test:table": "node tests/table-browser.mjs",
     "test:table-rich": "node tests/table-rich.mjs",
     "test:tabs": "node tests/tabs-drag.mjs",
     "typecheck": "tsc --noEmit && tsc --project tsconfig.worker.json --noEmit",
     "check:static": "node tests/static-output.mjs",
-    "package:release": "node scripts/package-release.mjs",
+    "package:release": "node scripts/package-release.mjs && node scripts/package-cloudflare.mjs",
     "test:release": "node tests/release-package.mjs",
     "test:transition": "node tests/editor-transition.mjs",
     "test:diagrams": "node tests/diagram-dependencies.mjs",
@@ -35,7 +36,13 @@
     "desktop:dev": "node desktop/run.mjs dev",
     "desktop:build": "node desktop/run.mjs build",
     "test:bridge:browser": "node tests/bridge-browser.mjs",
-    "test:desktop": "node desktop/test-native.mjs"
+    "test:desktop": "node desktop/test-native.mjs",
+    "build:cloudflare": "node scripts/build-cloudflare.mjs",
+    "cloudflare:dev": "wrangler dev --config cloudflare/wrangler.jsonc --local",
+    "cloudflare:migrate:local": "wrangler d1 migrations apply omd-notebook --config cloudflare/wrangler.jsonc --local",
+    "cloudflare:deploy": "wrangler deploy --config cloudflare/wrangler.jsonc",
+    "test:cloudflare": "node --import tsx tests/cloudflare.mjs",
+    "test:cloudflare:package": "node --import tsx tests/cloudflare-package.mjs"
   },
   "engines": {
     "node": ">=22"
@@ -60,7 +67,8 @@
     "fake-indexeddb": "6.2.5",
     "playwright": "1.62.1",
     "tsx": "4.23.15",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "wrangler": "4.151.0"
   },
   "overrides": {
     "nanoid@3.3.3": "3.3.20",

@@ -4,7 +4,7 @@
 
 [Open omd](https://and1truong.github.io/omd/) · [Download a release](https://github.com/and1truong/omd/releases) · [User guide](https://github.com/and1truong/omd/blob/main/docs/user-guide.md)
 
-Your notebook stays in your browser. No account, analytics or AI API key is required. After the first online load, you can keep editing offline.
+The browser and desktop editions keep your notebook on your device. The [Cloudflare edition](docs/cloudflare.md) stores one shared notebook in D1; anyone with its URL can read and edit, with no application login. No application account, analytics or AI API key is required. Browser and desktop notebooks support offline editing after the first load; the Cloudflare edition needs a connection.
 
 ## Features
 
@@ -14,6 +14,7 @@ Your notebook stays in your browser. No account, analytics or AI API key is requ
 - **Diagrams:** Mermaid with live preview and Excalidraw with an editable full-page canvas.
 - **Everyday controls:** undo/redo, JSON import/export, keyboard and touch-friendly reordering, and system-aware light/dark themes.
 - **WebMCP:** supported browsers can let agents read and edit the notebook through the same validated commands as the UI.
+- **Cloudflare:** deploy the separate Worker/D1 download to share a notebook across devices. [Deployment and data guide](docs/cloudflare.md).
 - **Desktop preview:** OMD with a Coconut agent sidebar, plus the same Bridge tools for Lime in Chrome/Edge. [Build and data guide](docs/desktop.md).
 
 ## Run locally
@@ -22,7 +23,7 @@ Requires **Node.js 22 or newer**.
 
 ### From a release
 
-Download the named ZIP or tar.gz from [GitHub Releases](https://github.com/and1truong/omd/releases), extract it, and run this inside the extracted folder:
+Choose a browser, desktop or Cloudflare download as described in the [download targets](docs/cloudflare.md#three-download-targets). For the browser/local-server edition, download the named ZIP or tar.gz from [GitHub Releases](https://github.com/and1truong/omd/releases), extract it, and run this inside the extracted folder:
 
 ```sh
 node start.mjs

@@ -33,6 +33,7 @@ npx playwright install chromium
 npm run test:browser
 npm run test:checklist
 npm run test:editor
+npm run test:drafts
 npm run test:transition
 npm run test:diagrams
 ```
@@ -40,6 +41,10 @@ npm run test:diagrams
 The browser suite enables Chrome's native WebMCP feature and executes tools through the real registry. It also checks mobile layout, themes, reminders, import confirmation, persistent edits and offline reopening. An unavailable browser binary or unsupported native API is a verification failure. Adapter tests alone do not verify a Gemini integration; that requires a real extension session.
 
 CI runs the native suite at both the origin root and `/omd/`, including lazy library/font URLs and canvas behavior.
+
+`npm run test:drafts` checks failed generic input saves across local tab updates,
+IME unload protection, reminder updates during composition, canvas save failures,
+and retry recovery. CI runs it on Chromium and WebKit at root and `/omd/`.
 
 Route regression coverage uses two tabs sharing IndexedDB and native WebMCP to check independent selection/URLs, shared content, refresh, new-tab links, history, pending edits, invalid/deleted/imported pages and offline deep links. It also loads the generated static fallback with an HTTP 404 response; this simulates GitHub Pages, not a live deployment check.
 
@@ -68,12 +73,17 @@ The deploy job uses the `github-pages` environment and Pages/OIDC permissions. B
 ```sh
 npm run build
 npm run check:static
+npm run build:cloudflare
 npm run package:release
 npm run test:release
 ```
 
-Packaging creates ZIP, tar.gz and `SHA256SUMS.txt` in `release`, with a dependency-free local launcher, dependency inventory and available third-party notices. Package tests extract each archive outside the checkout, start the server without `node_modules`, and verify every asset against the build.
+Packaging creates separate browser and Cloudflare ZIP/tar.gz archives and `SHA256SUMS.txt` in `release`, with a dependency-free local launcher, dependency inventory and available third-party notices. Package tests extract each archive outside the checkout, start the server without `node_modules`, and verify every asset against the build.
 
-Pushing a `release/vVERSION` branch whose version matches `package.json` explicitly publishes that version. The Release workflow checks types, source tests, native browsers at root and `/omd/`, and extracted packages before creating a draft with assets and publishing it. It tags the tested commit and can also be run manually from the matching release branch. If publication fails, rerunning refreshes the assets and resumes only an unpublished draft targeting the same tested commit; published releases, unrelated existing tags and mismatched drafts cannot be overwritten. Update `docs/releases/vVERSION.md` for each release. Publishing a release is independent of merging changes into main; main remains the GitHub Pages source.
+Pushing a `release/vVERSION` branch whose version matches `package.json` explicitly publishes that version. The Release workflow checks types, source tests, native browsers at root and `/omd/`, and extracted packages before creating a draft with the browser packages, Cloudflare deployment packages and desktop installers and publishing it. It tags the tested commit and can also be run manually from the matching release branch. If publication fails, rerunning refreshes the assets and resumes only an unpublished draft targeting the same tested commit; published releases, unrelated existing tags and mismatched drafts cannot be overwritten. Update `docs/releases/vVERSION.md` for each release. Publishing a release is independent of merging changes into main; main remains the GitHub Pages source.
 
 See [ticket fixes and dependency verification](ticket-resolution.md) for input-transfer, native click, database recovery and patched bundle evidence.
+
+## Cloudflare checks
+
+`npm run build:cloudflare` builds the separate Worker/frontend. `npm run test:cloudflare` runs against real local Worker/D1 bindings, including independent browser contexts. After both targets are built and packaged, `npm run test:cloudflare:package` verifies the extracted deployment archives outside the checkout. See [Cloudflare deployment](cloudflare.md).

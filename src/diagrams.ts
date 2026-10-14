@@ -104,6 +104,7 @@ export function createDiagramManager(store:NotebookStore,{notify}:{notify:Notify
       if(focused){const entry=entries.get(focused)!;const stage=domId('canvas-stage-host');if(entry.host.parentNode!==stage)stage.replaceChildren(entry.host);}
     },
     themeChanged() { for(const entry of entries.values()) { if(entry.type==='mermaid')scheduleMermaid(entry,entry.source??'');else if(entry.renderer)entry.renderer.draw(get(entry.pageId,entry.blockId).scene,theme()); } },
+    hasPending(){return [...entries.values()].some(entry=>entry.pending||entry.saving);},
     async flushAll() {await Promise.all([...entries.values()].map(flush));await store.idle();},
     async beforeNavigate() {await this.flushAll();closeFocus();},
     syncHeader() { if(focused) { domId('canvas-stage-title').textContent=store.getRenderState().title;domId('canvas-stage-subtitle').textContent=store.getRenderState().subtitle; } }

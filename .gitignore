@@ -4,3 +4,6 @@ test-results/
 release/
 *.log
 .desktop/
+dist-cloudflare/
+.wrangler/
+.dev.vars

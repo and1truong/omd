@@ -65,7 +65,7 @@ export type MutationResult<K extends CommandName> = CommandResult<K> & {revision
 export type InternalInput = Partial<BlockOptions & {expectedText:string;type:BlockType;theme:Theme;notificationMode:NotificationMode;subtitle:string;description:string;containerId:ID;index:number;blockId:ID;itemId:ID;tabId:ID;rowId:ID;columnId:ID;cardId:ID;pageId:ID;parentId:ID;firedAt:string;notebook:Notebook|Page;patch:BlockPatch & {text?:string;done?:boolean;description?:string}}>;
 export type ActionResult = Partial<{blockId:ID;block:Block;itemId:ID;tabId:ID;rowId:ID;columnId:ID;cardId:ID;pageId:ID;removedPageIds:ID[];imported:boolean}>;
 export interface ChangeEvent {actionName?:CommandName;changedBlockId?:ID;changedPageId?:ID;quiet?:boolean;reset?:boolean;reminderBlockId?:ID;reminderPageId?:ID;history?:boolean}
-export interface SaveStatus {pending:number;navigating:boolean;error:Error|null}
+export interface SaveStatus {pending:number;navigating:boolean;error:Error|null;unsaved?:boolean}
 export interface BridgeWrite {notebookId:ID;expectedRevision:number;idempotencyKey:string;semantic:string}
 export interface BridgeReceipt {semantic:string;data:unknown;revision:number}
 export interface NotebookStore {
@@ -91,4 +91,4 @@ export interface RecordChange {key:RecordKey;before:StoredRecord|null;after:Stor
 export type Notify = (message:string,kind?:string,sticky?:boolean)=>void;
 export type ErrorHandler = (error:Error)=>void;
 export interface Journal {owner:string;before:Notebook;after:Notebook;changes:{key:RecordKey;forward:import('immer').Patch[];inverse:import('immer').Patch[]}[]}
-export interface StoreOptions {key?:string;name?:string;indexedDB?:IDBFactory;initial?:()=>Notebook|Page;locks?:LockManager;activePageId?:string}
+export interface StoreOptions {key?:string;name?:string;indexedDB?:IDBFactory;initial?:()=>Notebook|Page;locks?:LockManager;activePageId?:string;cloudEndpoint?:string;canReload?:()=>boolean}

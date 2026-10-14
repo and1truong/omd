@@ -1,5 +1,6 @@
+import {isCloudflare} from './runtime.js';
 import {errorOf} from './dom.js';
-import type {NotebookStore,Block,BlockType,BlockOf,CommandName,CommandInput,MutationResult,Page,ChangeEvent,PartialView,Notify,NotificationMode,ReminderBlock,BlockOptions,ChecklistItem} from './types.js';
+import type {NotebookStore,Block,BlockType,BlockOf,CommandName,CommandInput,MutationResult,Page,ChangeEvent,PartialView,Notify,NotificationMode,ReminderBlock,BlockOptions,ChecklistItem,SaveStatus} from './types.js';
 import {byId as domId} from './dom.js';
 import { createCompositionGuard } from './composition.js';
 import { createStore } from './store.js';
@@ -20,6 +21,7 @@ import {appBase,routePageId,setupRoutes} from './routes.js';
 
 function $<T extends HTMLElement=HTMLElement>(selector:string):T {if(selector.startsWith('#'))return domId<T>(selector.slice(1));const node=document.querySelector<T>(selector);if(!node)throw new Error(`Missing element: ${selector}`);return node;}
 let store:NotebookStore,palette:ReturnType<typeof setupPalette>|undefined,diagrams:ReturnType<typeof createDiagramManager>|undefined,renderer:ReturnType<typeof createRenderCache>,shell:ReturnType<typeof setupShell>|undefined,dragData:DragData|null|undefined;
+let cloudUnsaved=false;
 let textEditors:ReturnType<typeof createTextEditors>|undefined;
 let tableEdits:ReturnType<typeof createTableEdits>|undefined;
 let tableEditors:ReturnType<typeof createTableEditors>|undefined;
@@ -27,12 +29,34 @@ interface InsertionAnchor {blockId:string;side:'before'|'after'}
 interface DragData {containerId?:string;kind:'block'|'card'|'column'|'tab';blockId:string;cardId?:string;columnId?:string;tabId?:string;pageId?:string}
 let suppressTabClick=false;
 let tabTitleEdit:{flush:()=>Promise<unknown>}|undefined;
+const inputEdits=new Map<HTMLElement,{pageId:string;value:string;write:()=>Promise<unknown>}>();
+let refreshInputStatus=()=>{},deferredInputRender=false;
+function settleInputRender(){if(deferredInputRender&&!inputEdits.size&&!tabTitleEdit&&!composition.hasActive()){deferredInputRender=false;render(store.getRenderState(),{reset:true});}}
+function trackInput(input:HTMLInputElement|HTMLTextAreaElement,save:(value:string,pageId:string)=>unknown,getPageId:()=>string){
+  let pending:{value:string;task:Promise<unknown>}|undefined;
+  function write(pageId:string):Promise<unknown>{
+    const value=input.value;if(pending?.value===value)return pending.task;
+    const edit={pageId,value,write:()=>write(pageId)};inputEdits.set(input,edit);refreshInputStatus();
+    const task=Promise.resolve(save(value,pageId)).then(result=>{
+      if(result!==null&&inputEdits.get(input)===edit){inputEdits.delete(input);settleInputRender();}
+      return result;
+    }).finally(()=>{if(pending?.task===task)pending=undefined;refreshInputStatus();});
+    pending={value,task};return task;
+  }
+  composition.track(input,write,getPageId);
+  input.addEventListener('input',()=>{const pageId=getPageId();if(composition.isComposing(input)){inputEdits.set(input,{pageId,value:input.value,write:()=>write(pageId)});refreshInputStatus();}else void write(pageId).catch(()=>{});});
+  return write;
+}
+async function flushInputEdits(){
+  await composition.settled(input=>inputEdits.has(input as HTMLElement));
+  for(const edit of [...inputEdits.values()])if(await edit.write()===null)throw new Error('Could not save this edit. Your draft is still here; retry before leaving.');
+}
 export const openPalette = () => {shell?.closeMobile();palette?.open();};
 export const getView = () => shell!.getView();
 export const setView = async (patch:PartialView) => {if(patch.sidebarOpen)await beforeNavigate();return shell!.setView(patch);};
-export async function flushPending({waitForTransitions=true}:{waitForTransitions?:boolean}={}){await tabTitleEdit?.flush();await tableEditors?.flushAll();await textEditors?.flushAll({waitForTransitions});await diagrams?.flushAll();}
+export async function flushPending({waitForTransitions=true}:{waitForTransitions?:boolean}={}){await flushInputEdits();await tabTitleEdit?.flush();await tableEditors?.flushAll();await textEditors?.flushAll({waitForTransitions});await diagrams?.flushAll();}
 export const flushDiagrams=flushPending;
-async function beforeNavigate(){await tabTitleEdit?.flush();await tableEditors?.flushAll();await textEditors?.flushAll();await diagrams?.beforeNavigate();}
+async function beforeNavigate(){await flushInputEdits();await tabTitleEdit?.flush();await tableEditors?.flushAll();await textEditors?.flushAll();await diagrams?.beforeNavigate();}
 export async function openCanvas(blockId:string,pageId?:string) {
   const page=await store.getPage(pageId);findBlock(page,blockId,'excalidraw');await flushPending();
   shell?.closeMobile();
@@ -62,9 +86,7 @@ function editable(value:string,aria:string,fn:(value:string,pageId:string)=>unkn
   const input=multiline?element('textarea',className):element('input',className);if(input instanceof HTMLInputElement)input.type='text';else input.rows=1;
   input.value = value; input.placeholder = placeholder; input.setAttribute('aria-label', aria); if (id) input.id = id;
   const pageId=store.getActivePageId();
-  function write() { const result=fn(input.value,pageId); if(multiline)fit(input);return result; }
-  composition.track(input,write,()=>pageId);
-  input.addEventListener('input',()=>{if(!composition.isComposing(input))write();});
+  trackInput(input,(value,pageId)=>{const result=fn(value,pageId);if(multiline)fit(input);return result;},()=>pageId);
   if (multiline) input.dataset.autofit = 'true'; return input;
 }
 function fit(el:HTMLElement) { el.style.height = 'auto'; el.style.height = `${el.scrollHeight}px`; }
@@ -161,7 +183,7 @@ function renderBlock(b:Block,containerId:string,index:number,count:number) {
       text.addEventListener('keydown',event=>{
         const key=event as KeyboardEvent;if(key.key!=='Enter'||key.isComposing||key.keyCode===229||composition.isComposing(text))return;
         key.preventDefault();if(key.repeat||finishing)return;finishing=true;
-        void action('update_block',{pageId,blockId:b.id,patch:{text:text.value}},{quiet:true}).then(result=>{if(result&&document.activeElement===text)text.blur();}).finally(()=>{finishing=false;});
+        void flushInputEdits().then(()=>{if(document.activeElement===text)text.blur();}).catch(error=>notify(errorOf(error).message,'error',true)).finally(()=>{finishing=false;});
       });shell.append(text);break;
     }
     case 'divider': shell.append(element('hr')); break;
@@ -173,7 +195,7 @@ function renderBlock(b:Block,containerId:string,index:number,count:number) {
     case 'reminder': renderReminder(shell, b); break;
     case 'kanban': renderKanban(shell, b); break;
     case 'mermaid': {
-      shell.append(title(b,'◇'),editable(b.source,'Mermaid Markdown source',async (value,pageId)=>{if(await action('update_block',{pageId,blockId:b.id,patch:{source:value}},{quiet:true}))diagrams!.updateSource(b.id,value);},{multiline:true,className:'mermaid-source',id:`${b.id}-source`,placeholder:'flowchart LR\n  A --> B'}),diagrams!.mount(b,renderPageId)); break;
+      shell.append(title(b,'◇'),editable(b.source,'Mermaid Markdown source',async (value,pageId)=>{const result=await action('update_block',{pageId,blockId:b.id,patch:{source:value}},{quiet:true});if(result)diagrams!.updateSource(b.id,value);return result;},{multiline:true,className:'mermaid-source',id:`${b.id}-source`,placeholder:'flowchart LR\n  A --> B'}),diagrams!.mount(b,renderPageId)); break;
     }
     case 'excalidraw': {
       const head=title(b,'✎');head.append(button('↗ Full page','Open canvas full page',()=>openCanvas(b.id), 'add-inline'));
@@ -322,7 +344,7 @@ function renderTabs(shell:HTMLElement,b:BlockOf<'tabs'>) {
       const session={flush:()=>finish()};
       function close(focus=false) {
         finished=true;observer.disconnect();if(tabTitleEdit===session)tabTitleEdit=undefined;
-        input.remove();header.removeAttribute('role');for(const name of ['aria-label','aria-selected','aria-controls'])header.removeAttribute(name);tab.hidden=rename.hidden=false;if(focus&&tab.isConnected)tab.focus();
+        input.remove();header.removeAttribute('role');for(const name of ['aria-label','aria-selected','aria-controls'])header.removeAttribute(name);tab.hidden=rename.hidden=false;if(focus&&tab.isConnected)tab.focus();settleInputRender();
       }
       function finish(focus=false,finalComposition=false):Promise<void> {
         if(finished)return Promise.resolve();requested=true;
@@ -486,8 +508,9 @@ function render(state:Page, { quiet = false, reminderBlockId, reminderPageId, ch
   const focused=document.activeElement as HTMLInputElement|HTMLTextAreaElement|null; const focusId = focused?.id; const selection = focused?.selectionStart == null ? null : [focused.selectionStart, focused.selectionEnd!] as const;
   const editorFocus=textEditors?.captureFocus()??null,tableFocus=tableEditors?.captureFocus()??null;
   const scroll=[scrollX,scrollY] as const;
-  for(const [selector,value] of [['#page-title',state.title],['#page-subtitle',state.subtitle]]){const el=$<HTMLInputElement|HTMLTextAreaElement>(selector);if(el.value!==value){el.value=value;fit(el);}}
+  for(const [selector,value] of [['#page-title',state.title],['#page-subtitle',state.subtitle]]){const el=$<HTMLInputElement|HTMLTextAreaElement>(selector);if(inputEdits.get(el)?.pageId===state.id)continue;if(el.value!==value){el.value=value;fit(el);}}
   if(renderPageId===state.id&&!reset)return;
+  if(renderPageId===state.id&&(tabTitleEdit||[...inputEdits.keys()].some(input=>input.closest('#notebook')))){deferredInputRender=true;return;}
   renderPageId=state.id;diagrams?.begin();renderer.begin(state.id);
   reconcile(domId('notebook'),[renderer.list(state.blocks,'page')]);renderer.end();diagrams?.end();textEditors?.end();tableEditors?.end();
   for(const el of document.querySelectorAll<HTMLElement>('[data-autofit],.auto-height'))if(!el.dataset.fitted){fit(el);el.dataset.fitted='true';}
@@ -519,10 +542,11 @@ export async function deliverReminder(reminder:Pick<ReminderBlock,'id'|'title'>,
 function startupError(error:Error) {
   document.body.replaceChildren(); const box = element('main', 'startup-error'); const h = element('h1'); h.textContent = 'Your notebook needs a moment.'; const p = element('p'); p.textContent = error.message;
   const backup = button('Download saved data', 'Download saved data', () => { try { downloadJson(localStorage.getItem(STORAGE_KEY) ?? '', 'omd-recovery.json'); } catch { location.reload(); } }, 'secondary-button');
-  box.append(h, p, backup, button('Try again', 'Reload app', () => location.reload(), 'secondary-button')); document.body.append(box);
+  box.append(h,p,...(isCloudflare?[]:[backup]),button('Try again', 'Reload app', () => location.reload(), 'secondary-button')); document.body.append(box);
 }
 async function boot() {
-  try { store = await createStore(localStorage,{activePageId:routePageId()??undefined}); } catch (error) { startupError(errorOf(error)); return; }
+  try { store = await createStore(localStorage,{activePageId:routePageId()??undefined,canReload:()=>!inputEdits.size&&!tabTitleEdit&&!composition.hasActive()&&!textEditors?.hasPending()&&!tableEditors?.hasPending()&&!diagrams?.hasPending()}); } catch (error) { startupError(errorOf(error)); return; }
+  if(isCloudflare){domId('data-description').textContent='This notebook is shared with anyone who can open this URL. Changes save to the cloud and require a connection. Export JSON for a backup.';domId('persist-storage').hidden=true;domId('storage-mode').hidden=false;domId('storage-mode').textContent='Shared cloud notebook';}
   for (const close of document.querySelectorAll('[data-close]')) close.addEventListener('click', () => close.closest('dialog')!.close());
   for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', e => { if (e.target === dialog) { const rect = dialog.getBoundingClientRect(); if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) dialog.close(); } });
   diagrams=createDiagramManager(store,{notify});
@@ -539,6 +563,7 @@ async function boot() {
   });
   store.afterChange(()=>{
     if(!dirtyContainers.size)return;const state=store.getRenderState(),options=store.getLastEvent(),ids=[...dirtyContainers];dirtyContainers.clear();if(options.reset)return;
+    if([...inputEdits.keys()].some(input=>input.closest('#notebook'))){deferredInputRender=true;return;}
     const focused=document.activeElement as HTMLInputElement|HTMLTextAreaElement|null,focusId=focused?.id,selection=focused?.selectionStart==null?null:[focused.selectionStart,focused.selectionEnd!] as const,scroll=[scrollX,scrollY] as const;
     const editorFocus=textEditors!.captureFocus(),tableFocus=tableEditors?.captureFocus()??null;
     diagrams!.begin();for(const id of ids)try{renderer.refresh(findContainer(state,id).blocks,id);}catch(error){if(!/not found/.test(errorOf(error).message))notify(errorOf(error).message,'error',true);}diagrams!.end();textEditors!.end();tableEditors?.end();
@@ -548,16 +573,18 @@ async function boot() {
   });
   shell=setupShell(store,{beforeNavigate,openPalette,confirm:confirmAction,onError:error=>notify(errorOf(error).message,'error',true),onThemeChange:applyTheme});
   store.subscribe(render); render(store.getRenderState());
-  store.subscribeStatus(({pending,navigating,error})=>{domId('page-title').disabled=navigating&&!composition.isComposing(domId('page-title'));domId('page-subtitle').disabled=navigating&&!composition.isComposing(domId('page-subtitle'));domId('notebook').inert=navigating&&!composition.hasActive();const status=domId('save-status');status.replaceChildren();const dot=element('span','status-dot');status.append(dot,document.createTextNode(pending?'Saving…':error?'Not saved':'Saved'));});
+  let saveStatus:SaveStatus={pending:0,navigating:false,error:null};
+  refreshInputStatus=()=>{const {pending,navigating,error,unsaved}=saveStatus;cloudUnsaved=!!unsaved;domId('page-title').disabled=navigating&&!composition.isComposing(domId('page-title'));domId('page-subtitle').disabled=navigating&&!composition.isComposing(domId('page-subtitle'));domId('notebook').inert=navigating&&!composition.hasActive();const status=domId('save-status');status.replaceChildren();const dot=element('span','status-dot');status.append(dot,document.createTextNode(pending?'Saving…':error||inputEdits.size?'Not saved':isCloudflare?'Saved to cloud':'Saved'));};
+  store.subscribeStatus(status=>{saveStatus=status;refreshInputStatus();});
   palette = setupPalette(store, { onError: error => notify(errorOf(error).message, 'error', true), beforeOpen:()=>shell!.closeMobile(), beforeNavigate });
   setupRoutes(store,{beforeNavigate,onError:error=>notify(error.message,'error',true)});
   let fitFrame=0;window.addEventListener('resize',()=>{cancelAnimationFrame(fitFrame);fitFrame=requestAnimationFrame(()=>{for(const el of document.querySelectorAll<HTMLElement>('[data-autofit],.auto-height'))fit(el);});});
   domId('canvas-stage-close').addEventListener('click',closeCanvas);domId('canvas-stage-pages').addEventListener('click',openPalette);
-  window.addEventListener('pagehide',event=>{flushPending().then(()=>{if(!event.persisted){textEditors!.destroy();tableEditors?.destroy();return store.close();}}).catch(error=>notify(errorOf(error).message,'error',true));});window.addEventListener('beforeunload',event=>{if(textEditors?.hasPending()||tableEditors?.hasPending()){event.preventDefault();event.returnValue='';}void flushPending().catch(()=>{});});
+  if(isCloudflare){const refresh=()=>{if(document.visibilityState==='visible')void store.reload().catch(error=>notify(errorOf(error).message,'error'));};const timer=setInterval(refresh,5000);window.addEventListener('focus',refresh);window.addEventListener('online',()=>{void flushPending().then(refresh).catch(error=>notify(errorOf(error).message,'error',true));});window.addEventListener('pagehide',event=>{if(!event.persisted)clearInterval(timer);});}
+  window.addEventListener('pagehide',event=>{flushPending().then(()=>{if(!event.persisted){textEditors!.destroy();tableEditors?.destroy();return store.close();}}).catch(error=>notify(errorOf(error).message,'error',true));});window.addEventListener('beforeunload',event=>{if(composition.hasActive()||inputEdits.size||tabTitleEdit||cloudUnsaved||textEditors?.hasPending()||tableEditors?.hasPending()||diagrams?.hasPending()){event.preventDefault();event.returnValue='';}void flushPending().catch(()=>{});});
   for (const [selector, key] of [['#page-title', 'title'], ['#page-subtitle', 'subtitle']]) {
     const el=$<HTMLInputElement|HTMLTextAreaElement>(selector);
-    const write = (pageId:string) => {const saved=action('set_page', {pageId,[key]:el.value}, {quiet:true});fit(el);return saved;};
-    composition.track(el,write,()=>store.getActivePageId());el.addEventListener('input',()=>{if(!composition.isComposing(el))write(store.getActivePageId());});
+    const write=trackInput(el,(value,pageId)=>{const saved=action('set_page',{pageId,[key]:value},{quiet:true});fit(el);return saved;},()=>store.getActivePageId());
     if(key==='title') {
       let finishing=false;
       el.addEventListener('keydown',async event=>{
@@ -567,7 +594,7 @@ async function boot() {
         finishing=true;const pageId=store.getActivePageId(),title=el.value;
         try {
           await store.idle();
-          if(store.getPageMetadata(pageId)?.title!==title&&!await action('set_page',{pageId,title},{quiet:true}))return;
+          if(store.getPageMetadata(pageId)?.title!==title||inputEdits.has(el)){if(!await write(pageId))return;}
           if(store.getActivePageId()===pageId&&el.value===title&&!composition.isComposing(el))el.blur();
         } finally {finishing=false;}
       });

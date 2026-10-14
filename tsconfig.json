@@ -15,6 +15,7 @@
   },
   "include": [
     "src/**/*.ts",
+    "cloudflare/**/*.ts",
     "type-tests/**/*.ts"
   ]
 }

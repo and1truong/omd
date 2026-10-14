@@ -4,13 +4,15 @@ import {success,withinMessageCap} from './bridge-engine.js';
 import {errorOf} from './dom.js';
 import { STORAGE_KEY, mutatePage, validateNotebook } from './model.js';
 import { initialNotebook, validateBook, parseBook, listPages, applyBookAction } from './notebook.js';
+import {isCloudflare} from './runtime.js';
 import { openRepository } from './repository.js';
 import { pageRecords, bookRecords, metadataBook, recordChanges, makeMaterializer, recordKey, nativeRecordKey } from './records.js';
 import { createZustandStore, subscribeWithSelector, produce, produceWithPatches, applyPatches, enablePatches, freeze } from './state-engine.js';
 enablePatches();
 /** Serialized events, immutable selectors, durable record transactions. Only the active page is resident. */
 export async function createStore(storage:StorageLike,options:StoreOptions = {}):Promise<NotebookStore> {
-  const repository=await openRepository(storage,{key:STORAGE_KEY,initial:initialNotebook,...options});
+  const remote=isCloudflare||!!options.cloudEndpoint;
+  const repository=remote?await (await import('./cloudflare-repository.js')).openCloudflareRepository(options.cloudEndpoint):await openRepository(storage,{key:STORAGE_KEY,initial:initialNotebook,...options});
   let releaseLease:(()=>void)|undefined,channel:BroadcastChannel|null=null;
   try{
   const owner=crypto.randomUUID(),locks=options.locks??globalThis.navigator?.locks;
@@ -23,10 +25,10 @@ export async function createStore(storage:StorageLike,options:StoreOptions = {})
   interface State {meta:Notebook;records:Records;options:ChangeEvent;page:Page}
   const state=createZustandStore<State>()(subscribeWithSelector<State>(()=>({meta:loaded!.meta,records:new Map(),options:{},page:{...loaded!.meta.pages.find(p=>p.id===loaded!.meta.activePageId)!,blocks:[]}})));
   state.setState({meta:freeze(loaded!.meta,true),records:loaded!.records!,page:freeze(materialize(loaded!.records!,loaded!.meta.activePageId),true)});loaded=null;
-  const undoStack:string[]=[],redoStack:string[]=[],afterChange=new Set<()=>void>();let queue:Promise<unknown>=Promise.resolve();let closed=true,pending=0,navigations=0,lastError:Error|null=null;const statusListeners=new Set<(status:SaveStatus)=>void>();
-  function status(){return {pending,navigating:navigations>0,error:lastError};}
+  const undoStack:string[]=[],redoStack:string[]=[],afterChange=new Set<()=>void>();let queue:Promise<unknown>=Promise.resolve();let closed=true,pending=0,pendingWrites=0,navigations=0,lastError:Error|null=null,failedCloudWrite=false;const statusListeners=new Set<(status:SaveStatus)=>void>();
+  function status(){return {pending,navigating:navigations>0,error:lastError,...(remote?{unsaved:pendingWrites>0||failedCloudWrite}:{})};}
   function notifyStatus(){for(const fn of statusListeners)fn(status());}
-  function enqueue<T>(fn:()=>Promise<T>,navigate=false):Promise<T>{pending++;if(navigate)navigations++;notifyStatus();const task=queue.then(fn).catch(error=>{lastError=errorOf(error);throw error;}).finally(()=>{pending--;if(navigate)navigations--;notifyStatus();});queue=task.catch(()=>{});return task;}
+  function enqueue<T>(fn:()=>Promise<T>,navigate=false,write=false):Promise<T>{pending++;if(write)pendingWrites++;if(navigate)navigations++;notifyStatus();const task=queue.then(fn).catch(error=>{lastError=errorOf(error);if(remote&&write)failedCloudWrite=true;throw error;}).finally(()=>{pending--;if(write)pendingWrites--;if(navigate)navigations--;notifyStatus();});queue=task.catch(()=>{});return task;}
   function publish(meta:Notebook,records:Records,event:ChangeEvent={}) {
     if(meta.activePageId!==state.getState().meta.activePageId)materialize=makeMaterializer();
     state.setState({meta:freeze(meta,true),records,options:event,page:freeze(materialize(records,meta.activePageId),true)});
@@ -42,7 +44,7 @@ export async function createStore(storage:StorageLike,options:StoreOptions = {})
     const entry=history?{owner,before:current.meta,after:next,changes:patchChanges(changes)}:null;
     const {records:hydrated,replay}=await repository.commit(current.meta,next,changes,{journal:history?entry:null,journalId:id,deleteHistory:history?[...redoStack]:[],bridge});
     if(replay)return replay;
-    lastError=null;
+    lastError=null;failedCloudWrite=false;
     if(history){undoStack.push(id!);redoStack.length=0;}
     let records;
     if(next.activePageId===current.meta.activePageId){records=new Map(current.records);for(const c of changes)if((c.after??c.before)?.pageId===next.activePageId){if(c.after)records.set(recordKey(...c.key),c.after);else records.delete(recordKey(...c.key));}}
@@ -68,7 +70,7 @@ export async function createStore(storage:StorageLike,options:StoreOptions = {})
       const payload=structuredClone(input) as InternalInput;const target=payload.pageId??api.getActivePageId();
       return enqueue(async()=>{
         // A completed deletion/addition must replay before trying to resolve its old IDs.
-        if(bridge){const replay=await repository.bridgeReceipt(bridge);if(replay)return structuredClone(replay.data) as MutationResult<K>;}
+        if(bridge){const replay=await repository.bridgeReceipt(bridge);if(replay){lastError=null;failedCloudWrite=false;return structuredClone(replay.data) as MutationResult<K>;}}
         const current=state.getState();let next:Notebook,changes:RecordChange[],result:ActionResult;
         if(bridge&&(current.meta.id!==bridge.notebookId||current.meta.revision!==bridge.expectedRevision))throw new BridgeError('STALE_CONTEXT','The notebook revision changed. Get fresh context and approve again.');
         if(action==='page_select') {
@@ -100,14 +102,14 @@ export async function createStore(storage:StorageLike,options:StoreOptions = {})
         if(bridge&&!withinMessageCap(success(data,next.revision)))throw new BridgeError('INVALID_ARGUMENT','The result exceeds the Bridge message limit. No edit was saved.');
         const replay=await commit(next,changes,{actionName:action,changedBlockId:payload.blockId,changedPageId:target,...options},{history:options.history??!['reminder_fired','page_select'].includes(action),bridge:bridge?{...bridge,data}:undefined});
         return (replay?structuredClone(replay.data):data) as MutationResult<K>;
-      },['page_select','page_add','page_remove','import_notebook'].includes(action));
+      },['page_select','page_add','page_remove','import_notebook'].includes(action),!['page_select','reminder_fired'].includes(action));
     },
     subscribe(fn){return state.subscribe(s=>s.meta,()=>{const s=state.getState();fn(s.page,s.options);});},
     subscribeBlock(id,fn){return state.subscribe(s=>[s.records.get(recordKey(s.meta.activePageId,'block',id))?.data,s.records.get(recordKey(s.meta.activePageId,'scene',id))?.data,s.records.get(recordKey(s.meta.activePageId,'files',id))?.data],()=>fn(state.getState().page,state.getState().options),{equalityFn:(a,b)=>a[0]===b[0]&&a[1]===b[1]&&a[2]===b[2]});},
     subscribeContainer(id,fn){return state.subscribe(s=>s.records.get(recordKey(s.meta.activePageId,'container',id))?.data && (s.records.get(recordKey(s.meta.activePageId,'container',id))!.data as import('./types.js').ContainerRecord).blockIds,()=>fn(state.getState().page,state.getState().options));},
     export:async()=>JSON.stringify(await api.getNotebook(),null,2),
     import(raw,options){return api.dispatch('import_notebook',{notebook:parseBook(raw)},options);},
-    reload(){return enqueue(async()=>{const current=state.getState(),loaded=await repository.read(current.meta,current.meta.activePageId);if(!loaded)throw new Error('Saved notebook is missing.');if(loaded.meta.id===current.meta.id&&loaded.meta.revision===current.meta.revision)return;await repository.pruneHistory([...undoStack,...redoStack]);undoStack.length=redoStack.length=0;materialize=makeMaterializer();lastError=null;publish(loaded.meta,loaded.records!,{reset:true});});},
+    reload(){if(options.canReload?.()===false||remote&&(pending||failedCloudWrite))return Promise.resolve();return enqueue(async()=>{const current=state.getState(),loaded=await repository.read(current.meta,current.meta.activePageId);if(options.canReload?.()===false||remote&&(pending>1||failedCloudWrite))return;if(!loaded)throw new Error('Saved notebook is missing.');if(remote)lastError=null;if(loaded.meta.id===current.meta.id&&loaded.meta.revision===current.meta.revision)return;await repository.pruneHistory([...undoStack,...redoStack]);undoStack.length=redoStack.length=0;materialize=makeMaterializer();lastError=null;publish(loaded.meta,loaded.records!,{reset:true});});},
     dueReminders:now=>repository.due(now),
     canUndo:()=>undoStack.length>0,canRedo:()=>redoStack.length>0,
     undo:()=>restore(undoStack,redoStack,'inverse'),redo:()=>restore(redoStack,undoStack,'forward'),
@@ -121,11 +123,11 @@ export async function createStore(storage:StorageLike,options:StoreOptions = {})
     const current=state.getState(),entry=await repository.history(from.at(-1)!);
     const records=await repository.records(entry.changes.map(p=>p.key)),changes=entry.changes.map(p=>({key:p.key,before:records.get(recordKey(...p.key))??null,after:applyPatches({value:records.get(recordKey(...p.key))??null},p[direction]).value}));
     let next=structuredClone(direction==='inverse'?entry.before:entry.after);next.revision=current.meta.revision+1;next.updatedAt=new Date().toISOString();if(next.pages.some(p=>p.id===current.meta.activePageId))next.activePageId=current.meta.activePageId;
-    validateBook(next);const {records:hydrated}=await repository.commit(current.meta,next,changes);lastError=null;const id=from.pop()!;to.push(id);let resident;
+    validateBook(next);const {records:hydrated}=await repository.commit(current.meta,next,changes);lastError=null;failedCloudWrite=false;const id=from.pop()!;to.push(id);let resident;
     if(next.activePageId===current.meta.activePageId){resident=new Map(current.records);for(const c of changes)if((c.after??c.before)?.pageId===next.activePageId){if(c.after)resident.set(recordKey(...c.key),c.after);else resident.delete(recordKey(...c.key));}}
     else resident=hydrated!;
     publish(next,resident);channel?.postMessage(next.revision);return true;
-  });}
+  },false,true);}
   if(channel)channel.onmessage=()=>{if(!closed)api.reload().catch(()=>{});};
   if(locks?.request)for(const previous of await repository.historyOwners())await locks.request(`${repository.name}.history:${previous}`,{ifAvailable:true},async lock=>{if(lock)await repository.pruneOwner(previous);});
   closed=false;
