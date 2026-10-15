@@ -1,14 +1,21 @@
 import {spawn,execFileSync} from 'node:child_process';
 import {createServer} from 'node:net';
-import {mkdtemp,rm} from 'node:fs/promises';
+import {mkdtemp,rm,readFile,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {join,resolve,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 const root=fileURLToPath(new URL('..',import.meta.url));
 export const cli=join(root,'node_modules/wrangler/bin/wrangler.js');
-export async function startCloudflare({cwd=root,config=join(root,'cloudflare/wrangler.jsonc'),state}={}){
+export async function startCloudflare({cwd=root,config=join(root,'cloudflare/wrangler.jsonc'),state,diagnostics=false}={}){
   const temporary=await mkdtemp(join(tmpdir(),'omd cloud ')),persist=state??join(temporary,'state');
   const env={...process.env,WRANGLER_SEND_METRICS:'false',WRANGLER_LOG_PATH:join(temporary,'wrangler.log'),XDG_CONFIG_HOME:join(temporary,'config')};
+  if(diagnostics){
+    const {build}=await import('esbuild'),source=JSON.parse(await readFile(config,'utf8')),base=dirname(config);
+    source.main=join(temporary,'worker.js');source.assets.directory=resolve(base,source.assets.directory);
+    for(const db of source.d1_databases)db.migrations_dir=resolve(base,db.migrations_dir);
+    await build({entryPoints:[join(root,'tests/cloudflare-diagnostics-worker.ts')],outfile:source.main,bundle:true,format:'esm',target:'es2022'});
+    config=join(temporary,'wrangler.json');await writeFile(config,JSON.stringify(source));
+  }
   const args=['--config',config,'--persist-to',persist];
   const run=(extra)=>execFileSync(process.execPath,[cli,...extra],{cwd,env,encoding:'utf8',stdio:['ignore','pipe','pipe']});
   run(['d1','migrations','apply','omd-notebook',...args,'--local']);

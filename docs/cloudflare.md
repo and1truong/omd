@@ -82,6 +82,14 @@ has an 8 MiB API request limit; large imported notebooks or image edits can exce
 it. A rejected write changes no saved data and leaves the current editor draft.
 R2 object storage is not required in this implementation.
 
+Writes use bounded bulk SQL in one atomic transaction. Every SQL statement counts
+toward a per-request budget of 50 (the D1 Free limit), and bulk JSON bindings stay
+below 1 MB. Oversized operations are rejected before the transaction starts.
+Page loads and ordinary edits retrieve only the required pages/records; reminder
+polls use indexed block type hints and do not load drawing/image records. Existing
+rows without hints use a block-only fallback until they are rewritten. A full JSON
+export still reads the entire notebook.
+
 Open tabs poll for changes every five seconds and refresh when focused. Page
 selection, theme and layout stay specific to each tab/device. This is not a
 simultaneous collaborative text editor: writes check the notebook revision. If

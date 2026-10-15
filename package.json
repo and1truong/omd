@@ -41,7 +41,7 @@
     "cloudflare:dev": "wrangler dev --config cloudflare/wrangler.jsonc --local",
     "cloudflare:migrate:local": "wrangler d1 migrations apply omd-notebook --config cloudflare/wrangler.jsonc --local",
     "cloudflare:deploy": "wrangler deploy --config cloudflare/wrangler.jsonc",
-    "test:cloudflare": "node --import tsx tests/cloudflare.mjs",
+    "test:cloudflare": "node --import tsx tests/cloudflare-limits.mjs && node --import tsx tests/cloudflare.mjs",
     "test:cloudflare:package": "node --import tsx tests/cloudflare-package.mjs"
   },
   "engines": {
