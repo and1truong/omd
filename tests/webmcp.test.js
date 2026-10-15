@@ -117,3 +117,20 @@ test('canvas tools wait for async UI completion and propagate rejected operation
   const opening=call(tools,'open_canvas',{blockId:'canvas'});await new Promise(resolve=>setImmediate(resolve));assert.equal(finished,false);release();assert.deepEqual(await opening,{opened:true});assert.equal(finished,true);
   await assert.rejects(()=>call(tools,'close_canvas'),/Could not save/);await store.close();
 });
+
+test('destructive tools request composition settlement before mutation, including cancellation',async()=>{
+  const store=await setup(),blockId=(await store.dispatch('add_block',{type:'heading',text:'Keep me'})).blockId;
+  let release,entered,requested;const waiting=new Promise(resolve=>{entered=resolve;}),gate=new Promise(resolve=>{release=resolve;});
+  const tools=createTools(store,{flushPending:options=>{requested=options;entered();return gate;}}),controller=new AbortController();
+  const deleting=tools.find(t=>t.name==='omd_remove_block').execute({blockId},{signal:controller.signal});
+  await waiting;assert.deepEqual(requested,{waitForComposition:true});assert.equal(store.getState().blocks.length,1);
+  controller.abort();release();await assert.rejects(()=>deleting,/cancelled/);assert.equal(store.getState().blocks.length,1);
+  await store.close();
+});
+
+test('import rejects changes made while the backup is downloading',async()=>{
+  const store=await setup(),json=await store.export();let optionsSeen=[];
+  const tools=createTools(store,{flushPending:options=>optionsSeen.push(options),confirmImport:async()=>true,download:()=>store.dispatch('set_page',{title:'Edit during backup'})});
+  await assert.rejects(()=>call(tools,'import_notebook',{json}),/changed during backup/);
+  assert.equal(store.getState().title,'Edit during backup');assert.ok(optionsSeen.every(options=>options.waitForComposition));await store.close();
+});

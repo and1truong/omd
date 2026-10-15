@@ -1,5 +1,6 @@
 import type {NotebookStore,PartialView,Page,PageRow,ChangeEvent,ErrorHandler,CommandName,CommandInput,Theme} from './types.js';
 import {errorOf} from './dom.js';
+import {removesContent} from './command-effects.js';
 import {byId as domId} from './dom.js';
 import {icon} from './icons.js';
 import {createView,validateView,VIEW_KEY} from './view.js';
@@ -14,10 +15,10 @@ export function showMenu(id:'block-actions-dialog'|'page-actions-dialog',title:s
   for(const action of actions){const b=document.createElement('button');b.type='button';b.className=`action-item${action.danger?' danger':''}`;b.disabled=!!action.disabled;b.append(icon(action.icon));const label=document.createElement('span');label.textContent=action.label;b.append(label);b.addEventListener('click',()=>{dialog.close();action.run();});list.append(b);}
   dialog.showModal();const r=anchor.getBoundingClientRect(),bounds=dialog.getBoundingClientRect();dialog.style.left=`${Math.max(8,Math.min(r.left,innerWidth-bounds.width-8))}px`;dialog.style.top=`${Math.max(8,Math.min(r.bottom+6,innerHeight-bounds.height-8))}px`;list.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
 }
-export function setupShell(store:NotebookStore,{beforeNavigate,openPalette,confirm,onError,onThemeChange}:{beforeNavigate:()=>Promise<unknown>;openPalette:()=>unknown;confirm:(title:string,message:string,yes?:string)=>Promise<boolean>;onError:ErrorHandler;onThemeChange:(theme:Theme)=>unknown}) {
+export function setupShell(store:NotebookStore,{beforeNavigate,openPalette,confirm,onError,onThemeChange}:{beforeNavigate:(options?:{waitForComposition?:boolean})=>Promise<unknown>;openPalette:()=>unknown;confirm:(title:string,message:string,yes?:string)=>Promise<boolean>;onError:ErrorHandler;onThemeChange:(theme:Theme)=>unknown}) {
   const sidebar=domId('sidebar'),toggle=domId('sidebar-toggle'),pages=domId('sidebar-pages'),media=matchMedia('(max-width: 760px)'),view=createView({getItem:key=>localStorage.getItem(key),setItem:(key,value)=>localStorage.setItem(key,value)},store.getRenderState().theme),rows=new Map<string,{node:HTMLDivElement;expand:HTMLButtonElement;select:HTMLAnchorElement;label:HTMLSpanElement;more:HTMLButtonElement}>();
   const menu=domId('page-menu'),widthToggle=domId('page-width'),widthLabel=widthToggle.querySelector('span')!;let drawerOpen=false,lastActivePath:string|null=null,movingPageId:string|null=null,breadcrumbSignature='';
-  async function run<K extends CommandName>(name:K,input:CommandInput<K>){try{await beforeNavigate();return await store.dispatch(name,input);}catch(error){onError(errorOf(error));return null;}}
+  async function run<K extends CommandName>(name:K,input:CommandInput<K>){try{await beforeNavigate({waitForComposition:removesContent(name)});return await store.dispatch(name,input);}catch(error){onError(errorOf(error));return null;}}
   function closeMobile(){if(media.matches){drawerOpen=false;if(sidebar.open)sidebar.close();sync();}}
   function sync(){
     const state=view.get(),open=media.matches?drawerOpen:state.sidebarOpen,fromToggle=document.activeElement===toggle;

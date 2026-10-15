@@ -1,4 +1,5 @@
 import {isCloudflare} from './runtime.js';
+import {removesContent} from './command-effects.js';
 import {errorOf} from './dom.js';
 import type {NotebookStore,Block,BlockType,BlockOf,CommandName,CommandInput,MutationResult,Page,ChangeEvent,PartialView,Notify,NotificationMode,ReminderBlock,BlockOptions,ChecklistItem,SaveStatus} from './types.js';
 import {byId as domId} from './dom.js';
@@ -55,9 +56,14 @@ async function flushInputEdits(pageId?:string){
 export const openPalette = () => {shell?.closeMobile();palette?.open();};
 export const getView = () => shell!.getView();
 export const setView = async (patch:PartialView) => {if(patch.sidebarOpen)await beforeNavigate();return shell!.setView(patch);};
-export async function flushPending({waitForTransitions=true}:{waitForTransitions?:boolean}={}){await flushInputEdits();await tabTitleEdit?.flush();await tableEditors?.flushAll();await textEditors?.flushAll({waitForTransitions});await diagrams?.flushAll();}
+export async function flushPending({waitForTransitions=true,waitForComposition=false}:{waitForTransitions?:boolean;waitForComposition?:boolean}={}){
+  do{
+    if(waitForComposition)await composition.settled();
+    await flushInputEdits();await tabTitleEdit?.flush();await tableEditors?.flushAll();await textEditors?.flushAll({waitForTransitions});await diagrams?.flushAll();
+  }while(waitForComposition&&composition.hasActive());
+}
 export const flushDiagrams=flushPending;
-async function beforeNavigate(){await flushInputEdits(store.getActivePageId());await tabTitleEdit?.flush();await tableEditors?.flushAll();await textEditors?.flushAll({pageId:store.getActivePageId()});await diagrams?.beforeNavigate();}
+async function beforeNavigate({waitForComposition=false}:{waitForComposition?:boolean}={}){await flushInputEdits(store.getActivePageId());await tabTitleEdit?.flush();await tableEditors?.flushAll();await textEditors?.flushAll({pageId:store.getActivePageId()});await diagrams?.beforeNavigate();if(waitForComposition)await flushPending({waitForComposition:true});}
 export async function openCanvas(blockId:string,pageId?:string) {
   const page=await store.getPage(pageId);findBlock(page,blockId,'excalidraw');await flushPending();
   shell?.closeMobile();
@@ -80,7 +86,7 @@ function button(label:string,aria:string,fn:(event:MouseEvent)=>unknown,classNam
   const b = element('button', className); b.type = 'button'; if(labelIcon[label])b.append(icon(labelIcon[label]));else b.textContent=label; b.title = aria; b.setAttribute('aria-label', aria); b.addEventListener('click', fn); return b;
 }
 async function action<K extends CommandName>(name:K,input:CommandInput<K>,{quiet=false,focus}: {quiet?:boolean;focus?:string}={}):Promise<MutationResult<K>|null> {
-  try { input={...input,pageId:input.pageId??store.getActivePageId()}; domId('save-status').textContent='Saving…'; if(!quiet)await flushPending(); const result = await store.dispatch(name, input, { quiet }); if (focus) requestAnimationFrame(()=>document.getElementById(focus)?.focus()); return result; }
+  try { input={...input,pageId:input.pageId??store.getActivePageId()}; domId('save-status').textContent='Saving…'; if(!quiet)await flushPending({waitForComposition:removesContent(name)}); const result = await store.dispatch(name, input, { quiet }); if (focus) requestAnimationFrame(()=>document.getElementById(focus)?.focus()); return result; }
   catch (error) { domId('save-status').textContent = 'Not saved'; notify(errorOf(error).message, 'error', true); return null; }
 }
 function editable(value:string,aria:string,fn:(value:string,pageId:string)=>unknown,{multiline=false,className='',placeholder='',id,draftId}: {multiline?:boolean;className?:string;placeholder?:string;id?:string;draftId?:string}={}) {
@@ -553,7 +559,7 @@ async function boot() {
   for (const close of document.querySelectorAll('[data-close]')) close.addEventListener('click', () => close.closest('dialog')!.close());
   for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', e => { if (e.target === dialog) { const rect = dialog.getBoundingClientRect(); if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) dialog.close(); } });
   diagrams=createDiagramManager(store,{notify});
-  textEditors=createTextEditors(store,{composition,notify,createNext:(blockId,pageId)=>createTextAfter(blockId,pageId,false),slash:{options:slashOptions,convert:convertTextBlock}});
+  textEditors=createTextEditors(store,{composition,notify,beforeHistory:()=>flushPending({waitForComposition:true}),createNext:(blockId,pageId)=>createTextAfter(blockId,pageId,false),slash:{options:slashOptions,convert:convertTextBlock}});
   tableEdits=createTableEdits(store,{settled:()=>composition.settled(input=>input instanceof Element&&input.classList.contains('table-cell'))});
   tableEditors=createTableEditors(store,{composition,drafts:tableEdits,notify,flushPending});
   const dirtyContainers=new Set<string>();
@@ -605,14 +611,14 @@ async function boot() {
   }
   domId('theme').addEventListener('change', e => {try{shell!.setView({theme:(e.target as HTMLSelectElement).value as Page['theme']});}catch(error){applyTheme(shell!.getView().theme);notify(errorOf(error).message,'error',true);}}); themeQuery.addEventListener('change', () => applyTheme(shell!.getView().theme));
   domId('notification-mode').addEventListener('change', e => action('set_page', { notificationMode: (e.target as HTMLSelectElement).value as NotificationMode }));
-  domId('undo-button').addEventListener('click', async () => { try { await flushPending();await store.undo(); } catch (e) { notify(errorOf(e).message, 'error'); } });
-  domId('redo-button').addEventListener('click', async () => { try { await flushPending();await store.redo(); } catch (e) { notify(errorOf(e).message, 'error'); } });
+  domId('undo-button').addEventListener('click', async () => { try { await flushPending({waitForComposition:true});await store.undo(); } catch (e) { notify(errorOf(e).message, 'error'); } });
+  domId('redo-button').addEventListener('click', async () => { try { await flushPending({waitForComposition:true});await store.redo(); } catch (e) { notify(errorOf(e).message, 'error'); } });
   domId('export-button').addEventListener('click', async () => { domId('page-menu').open=false;await downloadJson(); notify('Notebook exported.'); });
   domId('import-button').addEventListener('click', () => {domId('page-menu').open=false;domId('import-file').click();});
   domId('import-file').addEventListener('change', async event => {
     const file=(event.target as HTMLInputElement).files?.[0];(event.target as HTMLInputElement).value = ''; if (!file) return;
     try { const raw = await file.text(); const { parseBook } = await import('./notebook.js'); parseBook(raw);
-      if (await confirmAction('Replace this notebook?', 'All current pages will be exported as a backup before importing. Import replaces the entire notebook, page order and settings.', 'Back up & import')) { await beforeNavigate();await downloadJson(await store.export(), `omd-before-import-${Date.now()}.json`); await store.import(raw); notify('Notebook imported.'); }
+      if (await confirmAction('Replace this notebook?', 'All current pages will be exported as a backup before importing. Import replaces the entire notebook, page order and settings.', 'Back up & import')) { await beforeNavigate({waitForComposition:true});const backup=await store.export(),backedUp=parseBook(backup);await downloadJson(backup, `omd-before-import-${Date.now()}.json`);await flushPending({waitForComposition:true});if(store.getRevision()!==backedUp.revision||store.getNotebookId()!==backedUp.id)throw new Error('The notebook changed during backup. Retry the import to back up your latest edits.');await store.import(raw); notify('Notebook imported.'); }
     } catch (error) { notify(errorOf(error).message, 'error', true); }
   });
   domId('settings-button').addEventListener('click', openSettings); domId('sidebar-settings').addEventListener('click', openSettings); domId('agent-status').addEventListener('click', openSettings);

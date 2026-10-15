@@ -5,6 +5,7 @@ import {errorOf} from './dom.js';
 import { STORAGE_KEY, mutatePage, validateNotebook } from './model.js';
 import { initialNotebook, validateBook, parseBook, listPages, applyBookAction } from './notebook.js';
 import {isCloudflare} from './runtime.js';
+import {removesContent} from './command-effects.js';
 import { openRepository } from './repository.js';
 import { pageRecords, bookRecords, metadataBook, recordChanges, makeMaterializer, recordKey, nativeRecordKey } from './records.js';
 import { createZustandStore, subscribeWithSelector, produce, produceWithPatches, applyPatches, enablePatches, freeze } from './state-engine.js';
@@ -102,7 +103,7 @@ export async function createStore(storage:StorageLike,options:StoreOptions = {})
         if(bridge&&!withinMessageCap(success(data,next.revision)))throw new BridgeError('INVALID_ARGUMENT','The result exceeds the Bridge message limit. No edit was saved.');
         const replay=await commit(next,changes,{actionName:action,changedBlockId:payload.blockId,changedPageId:target,...options},{history:options.history??!['reminder_fired','page_select'].includes(action),bridge:bridge?{...bridge,data}:undefined});
         return (replay?structuredClone(replay.data):data) as MutationResult<K>;
-      },['page_select','page_add','page_remove','import_notebook'].includes(action),!['page_select','reminder_fired'].includes(action));
+      },['page_select','page_add'].includes(action)||removesContent(action),!['page_select','reminder_fired'].includes(action));
     },
     subscribe(fn){return state.subscribe(s=>s.meta,()=>{const s=state.getState();fn(s.page,s.options);});},
     subscribeBlock(id,fn){return state.subscribe(s=>[s.records.get(recordKey(s.meta.activePageId,'block',id))?.data,s.records.get(recordKey(s.meta.activePageId,'scene',id))?.data,s.records.get(recordKey(s.meta.activePageId,'files',id))?.data],()=>fn(state.getState().page,state.getState().options),{equalityFn:(a,b)=>a[0]===b[0]&&a[1]===b[1]&&a[2]===b[2]});},
@@ -127,7 +128,7 @@ export async function createStore(storage:StorageLike,options:StoreOptions = {})
     if(next.activePageId===current.meta.activePageId){resident=new Map(current.records);for(const c of changes)if((c.after??c.before)?.pageId===next.activePageId){if(c.after)resident.set(recordKey(...c.key),c.after);else resident.delete(recordKey(...c.key));}}
     else resident=hydrated!;
     publish(next,resident);channel?.postMessage(next.revision);return true;
-  },false,true);}
+  },true,true);}
   if(channel)channel.onmessage=()=>{if(!closed)api.reload().catch(()=>{});};
   if(locks?.request)for(const previous of await repository.historyOwners())await locks.request(`${repository.name}.history:${previous}`,{ifAvailable:true},async lock=>{if(lock)await repository.pruneOwner(previous);});
   closed=false;

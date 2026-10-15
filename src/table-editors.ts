@@ -5,7 +5,7 @@ import type {createCompositionGuard} from './composition.js';
 import type {createTableEdits} from './table-edits.js';
 import {errorOf} from './dom.js';
 interface Cell {host:HTMLDivElement;editor:Editor;pageId:string;blockId:string;rowId:string;columnId:string;source:string;serialized:string;dirty:boolean;preediting:boolean;saving:Set<Promise<void>>;onKeyDown:(event:KeyboardEvent)=>boolean}
-export function createTableEditors(store:NotebookStore,{composition,drafts,notify,flushPending}:{composition:ReturnType<typeof createCompositionGuard>;drafts:ReturnType<typeof createTableEdits>;notify:Notify;flushPending:()=>Promise<unknown>}) {
+export function createTableEditors(store:NotebookStore,{composition,drafts,notify,flushPending}:{composition:ReturnType<typeof createCompositionGuard>;drafts:ReturnType<typeof createTableEdits>;notify:Notify;flushPending:(options?:{waitForComposition?:boolean})=>Promise<unknown>}) {
   const key=(...ids:string[])=>JSON.stringify(ids),cells=new Map<string,Cell>();
   const bars=new Map<string,{host:HTMLDivElement;active:string|null;buttons:HTMLButtonElement[]}>();
   const controls:[string,string,(editor:Editor)=>void,(editor:Editor)=>boolean][]=[
@@ -43,7 +43,7 @@ export function createTableEditors(store:NotebookStore,{composition,drafts,notif
         if(event.isComposing||event.keyCode===229||editor.view.composing)return false;
         if(composition.isComposing(editor.view.dom))return event.key==='Enter'||event.key==='Tab';
         if(event.altKey&&event.key==='F10'){bars.get(key(pageId,blockId))?.buttons[0]?.focus();return true;}
-        if((event.ctrlKey||event.metaKey)&&!event.altKey&&['z','y'].includes(event.key.toLowerCase())){void (async()=>{await flushPending();if(event.shiftKey||event.key.toLowerCase()==='y')await store.redo();else await store.undo();})().catch(error=>notify(errorOf(error).message,'error',true));return true;}
+        if((event.ctrlKey||event.metaKey)&&!event.altKey&&['z','y'].includes(event.key.toLowerCase())){void (async()=>{await flushPending({waitForComposition:true});if(event.shiftKey||event.key.toLowerCase()==='y')await store.redo();else await store.undo();})().catch(error=>notify(errorOf(error).message,'error',true));return true;}
         return cell?.onKeyDown(event)??false;
       }
     },onUpdate:()=>{if(cell)changed(cell);}});

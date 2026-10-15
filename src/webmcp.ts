@@ -3,12 +3,13 @@ import type {NotebookStore,Page,View,PartialView,InternalInput,CommandName,Comma
 import { BLOCK_TYPES, CALLOUT_TONES, allowedTypes } from './model.js';
 import { parseBook } from './notebook.js';
 import { parseScene } from './scene.js';
+import {removesContent} from './command-effects.js';
 
 export interface JSONSchema {type?:'object'|'array'|'string'|'boolean'|'integer';properties?:Record<string,JSONSchema>;required?:readonly string[];additionalProperties?:boolean;items?:JSONSchema;minimum?:number;maximum?:number;maxLength?:number;enum?:readonly string[];description?:string}
 export interface ToolExecutionOptions {signal?:AbortSignal}
 export interface WebMCPTool {name:string;title:string;description:string;inputSchema:JSONSchema;annotations:{readOnlyHint:boolean;untrustedContentHint:boolean};execute(input?:unknown,options?:ToolExecutionOptions):Promise<unknown>}
 export interface WebMCPRegistry {registerTool?:(tool:WebMCPTool,options:{signal:AbortSignal})=>unknown}
-export interface WebMCPUI {flushPending?:()=>unknown;getView?:()=>View;setView?:(patch:PartialView)=>unknown;openPalette?:()=>unknown;openCanvas?:(id:string,pageId?:string)=>unknown;closeCanvas?:()=>unknown;download?:(json:string,filename?:string)=>unknown;confirmImport?:(signal?:AbortSignal)=>Promise<boolean>;openSettings?:()=>unknown;notificationPermission?:()=>string;testReminder?:()=>unknown}
+export interface WebMCPUI {flushPending?:(options?:{waitForComposition?:boolean})=>unknown;getView?:()=>View;setView?:(patch:PartialView)=>unknown;openPalette?:()=>unknown;openCanvas?:(id:string,pageId?:string)=>unknown;closeCanvas?:()=>unknown;download?:(json:string,filename?:string)=>unknown;confirmImport?:(signal?:AbortSignal)=>Promise<boolean>;openSettings?:()=>unknown;notificationPermission?:()=>string;testReminder?:()=>unknown}
 type ToolInput=InternalInput & PartialView & {json?:string;download?:boolean};
 const text = (description?:string):JSONSchema => ({ type: 'string', ...(description ? { description } : {}) });
 const index:JSONSchema = { type: 'integer', minimum: 0, description: 'Zero-based final position. Omit to append.' };
@@ -50,9 +51,12 @@ export function createTools(store:NotebookStore,ui:WebMCPUI = {}):WebMCPTool[] {
       async execute(raw:unknown = {},options:ToolExecutionOptions = {}) {
         if (options.signal?.aborted) throw new Error('Tool cancelled.');
         validateToolInput(raw,inputSchema);const input=raw as ToolInput;
-        await ui.flushPending?.();
+        await ui.flushPending?.({waitForComposition:removesContent(name)});
         if (options.signal?.aborted) throw new Error('Tool cancelled.');
         await store.idle();
+        if (options.signal?.aborted) throw new Error('Tool cancelled.');
+        // A queued cloud write can outlive the first flush and allow a new IME session.
+        if(removesContent(name))await ui.flushPending?.({waitForComposition:true});
         if (options.signal?.aborted) throw new Error('Tool cancelled.');
         // Subscribers synchronously update the DOM before the shared command returns.
         return await run(input, options);
@@ -126,10 +130,14 @@ export function createTools(store:NotebookStore,ui:WebMCPUI = {}):WebMCPTool[] {
     if (!ui.confirmImport || !ui.download) throw new Error('The import confirmation and backup UI is unavailable.');
     const approved = await ui.confirmImport(options.signal);
     if (!approved || options.signal?.aborted) return { imported: false, reason: 'cancelled' };
-    const backup=await store.export();
+    await ui.flushPending?.({waitForComposition:true});
+    const backup=await store.export(),backedUp=parseBook(backup);
     if(options.signal?.aborted)return {imported:false,reason:'cancelled'};
     await ui.download(backup, `omd-before-import-${Date.now()}.json`);
     if(options.signal?.aborted)return {imported:false,reason:'cancelled'};
+    await ui.flushPending?.({waitForComposition:true});
+    if(options.signal?.aborted)return {imported:false,reason:'cancelled'};
+    if(store.getRevision()!==backedUp.revision||store.getNotebookId()!==backedUp.id)throw new Error('The notebook changed during backup. Retry the import to back up your latest edits.');
     return store.import(input.json!);
   });
   add('undo', 'Undo the last notebook edit. Reminder delivery records are preserved.', schema(), async () => ({ changed: await store.undo(), revision: store.getRevision() }));

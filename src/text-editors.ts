@@ -8,7 +8,7 @@ import type {createCompositionGuard} from './composition.js';
 import {errorOf} from './dom.js';
 
 /** Visible Markdown controls own a Tiptap instance; persisted content stays Markdown. */
-export function createTextEditors(store:NotebookStore,{composition,notify,createNext,slash}:{composition:ReturnType<typeof createCompositionGuard>;notify:Notify;createNext:(blockId:string,pageId:string)=>Promise<string|undefined>;slash?:{options:(blockId:string,pageId:string)=>SlashOption[];convert:(blockId:string,pageId:string,option:SlashOption,expectedText:string)=>Promise<void>}}) {
+export function createTextEditors(store:NotebookStore,{composition,notify,createNext,slash,beforeHistory}:{beforeHistory?:()=>Promise<void>;composition:ReturnType<typeof createCompositionGuard>;notify:Notify;createNext:(blockId:string,pageId:string)=>Promise<string|undefined>;slash?:{options:(blockId:string,pageId:string)=>SlashOption[];convert:(blockId:string,pageId:string,option:SlashOption,expectedText:string)=>Promise<void>}}) {
   type ItemKeyDown=(event:KeyboardEvent)=>boolean;
   interface Entry {blockType:BlockType;slash?:ReturnType<typeof createSlashMenu>;host:HTMLDivElement;editor:Editor;pageId:string;blockId:string;itemId?:string;onKeyDown?:ItemKeyDown;source:string;serialized:string;pending:string|null;saving?:Promise<unknown>;creating:boolean;provisional?:boolean;creation?:Promise<void>}
   const entries=new Map<string,Entry>(),key=(pageId:string,blockId:string,itemId?:string)=>JSON.stringify([pageId,blockId,itemId]);
@@ -39,7 +39,7 @@ export function createTextEditors(store:NotebookStore,{composition,notify,create
     void flush(entry).catch(error=>notify(errorOf(error).message,'error',true));
   }
   async function history(redo:boolean) {
-    try {await manager.flushAll();if(redo)await store.redo();else await store.undo();}
+    try {if(beforeHistory)await beforeHistory();else{await composition.settled();await manager.flushAll();}if(redo)await store.redo();else await store.undo();}
     catch(error){notify(errorOf(error).message,'error',true);}
   }
   function continueIntoNext(source:Entry) {
