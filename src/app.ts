@@ -33,6 +33,7 @@ let tabTitleEdit:{flush:()=>Promise<unknown>}|undefined;
 const inputEdits=new Map<string|HTMLElement,{input:HTMLElement;pageId:string;value:string;write:()=>Promise<unknown>}>();
 const inputEditKey=(input:HTMLElement,pageId:string)=>input.dataset.draftKey||['page-title','page-subtitle'].includes(input.id)?JSON.stringify([pageId,input.dataset.draftKey??input.id]):input;
 let refreshInputStatus=()=>{},deferredInputRender=false;
+function hasPendingEdits(){return inputEdits.size>0||!!tabTitleEdit||composition.hasActive()||!!textEditors?.hasPending()||!!tableEditors?.hasPending()||!!diagrams?.hasPending();}
 function settleInputRender(){if(deferredInputRender&&!inputEdits.size&&!tabTitleEdit&&!composition.hasActive()){deferredInputRender=false;render(store.getRenderState(),{reset:true});}}
 function trackInput(input:HTMLInputElement|HTMLTextAreaElement,save:(value:string,pageId:string)=>unknown,getPageId:()=>string){
   let pending:{pageId:string;value:string;task:Promise<unknown>}|undefined;
@@ -353,7 +354,7 @@ function renderTabs(shell:HTMLElement,b:BlockOf<'tabs'>) {
       const session={flush:()=>finish()};
       function close(focus=false) {
         finished=true;observer.disconnect();if(tabTitleEdit===session)tabTitleEdit=undefined;
-        input.remove();header.removeAttribute('role');for(const name of ['aria-label','aria-selected','aria-controls'])header.removeAttribute(name);tab.hidden=rename.hidden=false;if(focus&&tab.isConnected)tab.focus();settleInputRender();
+        input.remove();header.removeAttribute('role');for(const name of ['aria-label','aria-selected','aria-controls'])header.removeAttribute(name);tab.hidden=rename.hidden=false;if(focus&&tab.isConnected)tab.focus();settleInputRender();refreshInputStatus();
       }
       function finish(focus=false,finalComposition=false):Promise<void> {
         if(finished)return Promise.resolve();requested=true;
@@ -554,7 +555,7 @@ function startupError(error:Error) {
   box.append(h,p,...(isCloudflare?[]:[backup]),button('Try again', 'Reload app', () => location.reload(), 'secondary-button')); document.body.append(box);
 }
 async function boot() {
-  try { store = await createStore(localStorage,{activePageId:routePageId()??undefined,canReload:()=>!inputEdits.size&&!tabTitleEdit&&!composition.hasActive()&&!textEditors?.hasPending()&&!tableEditors?.hasPending()&&!diagrams?.hasPending()}); } catch (error) { startupError(errorOf(error)); return; }
+  try { store = await createStore(localStorage,{activePageId:routePageId()??undefined,canReload:()=>!hasPendingEdits()}); } catch (error) { startupError(errorOf(error)); return; }
   if(isCloudflare){domId('data-description').textContent='This notebook is shared with anyone who can open this URL. Changes save to the cloud and require a connection. Export JSON for a backup.';domId('persist-storage').hidden=true;domId('storage-mode').hidden=false;domId('storage-mode').textContent='Shared cloud notebook';}
   for (const close of document.querySelectorAll('[data-close]')) close.addEventListener('click', () => close.closest('dialog')!.close());
   for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', e => { if (e.target === dialog) { const rect = dialog.getBoundingClientRect(); if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) dialog.close(); } });
@@ -583,14 +584,17 @@ async function boot() {
   shell=setupShell(store,{beforeNavigate,openPalette,confirm:confirmAction,onError:error=>notify(errorOf(error).message,'error',true),onThemeChange:applyTheme});
   store.subscribe(render); render(store.getRenderState());
   let saveStatus:SaveStatus={pending:0,navigating:false,error:null};
-  refreshInputStatus=()=>{const {pending,navigating,error,unsaved}=saveStatus;cloudUnsaved=!!unsaved;domId('page-title').disabled=navigating&&!composition.isComposing(domId('page-title'));domId('page-subtitle').disabled=navigating&&!composition.isComposing(domId('page-subtitle'));domId('notebook').inert=navigating&&!composition.hasActive();const status=domId('save-status');status.replaceChildren();const dot=element('span','status-dot');status.append(dot,document.createTextNode(pending?'Saving…':error||inputEdits.size?'Not saved':isCloudflare?'Saved to cloud':'Saved'));};
-  store.subscribeStatus(status=>{saveStatus=status;refreshInputStatus();});
+  refreshInputStatus=()=>{const {pending,navigating,error,unsaved}=saveStatus;cloudUnsaved=!!unsaved;domId('page-title').disabled=navigating&&!composition.isComposing(domId('page-title'));domId('page-subtitle').disabled=navigating&&!composition.isComposing(domId('page-subtitle'));domId('notebook').inert=navigating&&!composition.hasActive();const status=domId('save-status');status.replaceChildren();const dot=element('span','status-dot');status.append(dot,document.createTextNode(pending?'Saving…':error||hasPendingEdits()?'Not saved':isCloudflare?'Saved to cloud':'Saved'));};
+  let statusFrame=0;const scheduleStatusRefresh=()=>{if(!statusFrame)statusFrame=requestAnimationFrame(()=>{statusFrame=0;refreshInputStatus();});};
+  // Editor promise finalizers release their drafts after the store emits its completed status.
+  store.subscribeStatus(status=>{saveStatus=status;refreshInputStatus();scheduleStatusRefresh();});
+  for(const event of ['input','compositionstart','compositionend'])document.addEventListener(event,scheduleStatusRefresh);
   palette = setupPalette(store, { onError: error => notify(errorOf(error).message, 'error', true), beforeOpen:()=>shell!.closeMobile(), beforeNavigate });
   setupRoutes(store,{beforeNavigate,onError:error=>notify(error.message,'error',true)});
   let fitFrame=0;window.addEventListener('resize',()=>{cancelAnimationFrame(fitFrame);fitFrame=requestAnimationFrame(()=>{for(const el of document.querySelectorAll<HTMLElement>('[data-autofit],.auto-height'))fit(el);});});
   domId('canvas-stage-close').addEventListener('click',closeCanvas);domId('canvas-stage-pages').addEventListener('click',openPalette);
   if(isCloudflare){const refresh=()=>{if(document.visibilityState==='visible')void store.reload().catch(error=>notify(errorOf(error).message,'error'));};const timer=setInterval(refresh,5000);window.addEventListener('focus',refresh);window.addEventListener('online',()=>{void flushPending().then(refresh).catch(error=>notify(errorOf(error).message,'error',true));});window.addEventListener('pagehide',event=>{if(!event.persisted)clearInterval(timer);});}
-  window.addEventListener('pagehide',event=>{flushPending().then(()=>{if(!event.persisted){textEditors!.destroy();tableEditors?.destroy();return store.close();}}).catch(error=>notify(errorOf(error).message,'error',true));});window.addEventListener('beforeunload',event=>{if(composition.hasActive()||inputEdits.size||tabTitleEdit||cloudUnsaved||textEditors?.hasPending()||tableEditors?.hasPending()||diagrams?.hasPending()){event.preventDefault();event.returnValue='';}void flushPending().catch(()=>{});});
+  window.addEventListener('pagehide',event=>{flushPending().then(()=>{if(!event.persisted){textEditors!.destroy();tableEditors?.destroy();return store.close();}}).catch(error=>notify(errorOf(error).message,'error',true));});window.addEventListener('beforeunload',event=>{if(hasPendingEdits()||cloudUnsaved){event.preventDefault();event.returnValue='';}void flushPending().catch(()=>{});});
   for (const [selector, key] of [['#page-title', 'title'], ['#page-subtitle', 'subtitle']]) {
     const el=$<HTMLInputElement|HTMLTextAreaElement>(selector);
     const write=trackInput(el,(value,pageId)=>{const saved=action('set_page',{pageId,[key]:value},{quiet:true});fit(el);return saved;},()=>store.getActivePageId());

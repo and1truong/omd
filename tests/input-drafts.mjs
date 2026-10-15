@@ -70,6 +70,7 @@ try{
   const box=await ime.locator('#canvas-stage .excalidraw canvas').first().boundingBox(),x=box.x+Math.max(250,box.width*.5),y=box.y+Math.max(150,box.height*.35);
   await ime.mouse.move(x,y);await ime.mouse.down();await ime.mouse.move(x+90,y+90,{steps:6});await ime.mouse.up();await ime.waitForFunction(()=>document.getElementById('notices').textContent.includes('Injected canvas write failure'));
   assert.equal(await unload(ime),true);assert.equal(await ime.evaluate(id=>store.getState().blocks.find(b=>b.id===id).scene.elements.length,drawing.blockId),0);
-  await ime.evaluate(async()=>{restoreDispatch();await app.flushPending();});assert.equal(await ime.evaluate(id=>store.getState().blocks.find(b=>b.id===id).scene.elements.length,drawing.blockId),1);
+  await ime.evaluate(()=>store.dispatch('set_page',{title:'Saved title while canvas draft waits'},{quiet:true}));await ime.waitForFunction(()=>store.getState().title==='Saved title while canvas draft waits');assert.equal(await ime.locator('#save-status').textContent(),'Not saved');
+  await ime.evaluate(async()=>{restoreDispatch();await app.flushPending();});assert.equal(await ime.evaluate(id=>store.getState().blocks.find(b=>b.id===id).scene.elements.length,drawing.blockId),1);await ime.waitForFunction(()=>document.getElementById('save-status').textContent==='Saved');
   await composing.close();console.log(`${engine} ${basePath||'/'}: local peer refresh, generic failed drafts, composing unload, reminder/IME and canvas failure/retry passed.`);
 }finally{await browser?.close();server.kill();}

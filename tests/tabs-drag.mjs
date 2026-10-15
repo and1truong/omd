@@ -67,7 +67,7 @@ async function inlineRename(group,nested,orientation) {
   assert.equal(await revision(),before+1);assert.equal(await page.evaluate(()=>window.tabsApp.getStore().residency().undoEntries),history+1);
   await page.locator('#undo-button').click();await settled();assert.equal(await titleOf(group,id),old);
   await page.locator('#redo-button').click();await settled();assert.equal(await titleOf(group,id),`Inline ${orientation}`);
-  await header(id).press('F2');await titleInput().fill('Cancelled draft');await titleInput().press('Escape');await focused(id);
+  await header(id).press('F2');await titleInput().fill('Cancelled draft');await page.waitForFunction(()=>document.getElementById('save-status').textContent==='Not saved');await titleInput().press('Escape');await focused(id);await page.waitForFunction(()=>document.getElementById('save-status').textContent==='Saved');
   assert.equal(await titleOf(group,id),`Inline ${orientation}`);assert.equal(await revision(),before+3);
   // A pointer gesture and blur commit operate on the label itself.
   const activeTitle=await titleOf(group,active);
