@@ -14,7 +14,7 @@ export async function openCloudflareRepository(endpoint=new URL('../api/notebook
       try{response=await transport(endpoint,{method:'POST',headers:{'content-type':'application/json'},body,cache:'no-store',credentials:'omit'});}
       catch{if(!attempt)continue;throw new Error('Cloud connection unavailable. Your unsaved draft stays in this tab. Reconnect and try saving again.');}
       let value:{result:T;error?:string;code?:BridgeError['code']};
-      try{value=await response.json();}catch{throw new Error('The cloud server returned an invalid response. Your draft has not been acknowledged.');}
+      try{value=await response.json();}catch{if(response.status>=500&&!attempt)continue;throw new Error('The cloud server returned an invalid response. Your draft has not been acknowledged.');}
       if(!response.ok){if(response.status>=500&&!attempt)continue;if(value.code)throw new BridgeError(value.code,value.error??'Cloud save failed.');throw new Error(value.error??'Cloud save failed.');}
       return value.result;
     }

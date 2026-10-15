@@ -20,9 +20,11 @@ try{
   const race=await Promise.allSettled([first.dispatch('add_block',{type:'heading',text:'First writer'}),second.dispatch('add_block',{type:'heading',text:'Second writer'})]);assert.equal(race.filter(r=>r.status==='fulfilled').length,1);assert.match(race.find(r=>r.status==='rejected').reason.message,/Another device|revision/);
   const current=await open(),book=JSON.parse(await current.export());assert.equal(book.pages[0].blocks.length,2);
   // Retry a committed request whose response was lost. Real D1 receipts must prevent duplication.
-  let drop=true;const repository=await openCloudflareRepository(endpoint,async(...args)=>{const response=await fetch(...args);if(drop&&JSON.parse(args[1].body).operation==='commit'){drop=false;throw new Error('Lost acknowledgement');}return response;});
-  const before=(await repository.read()).meta,page=(await repository.export()).pages[0],after=applyBookAction({...before,pages:[page]},'add_block',{type:'divider'}).state,next=metadataBook(after),changes=recordChanges(pageRecords(page),pageRecords(after.pages[0]));
-  await repository.commit(before,next,changes);assert.equal((await repository.export()).revision,before.revision+1);assert.equal((await repository.export()).pages[0].blocks.length,3);
+  let drop;const repository=await openCloudflareRepository(endpoint,async(...args)=>{const response=await fetch(...args);if(drop&&JSON.parse(args[1].body).operation==='commit'){const mode=drop;drop=null;await response.arrayBuffer();if(mode==='network')throw new Error('Lost acknowledgement');return new Response('<h1>Bad gateway</h1>',{status:502});}return response;});
+  for(const mode of ['network','html']){
+    drop=mode;const before=(await repository.read()).meta,page=(await repository.export()).pages[0],after=applyBookAction({...before,pages:[page]},'add_block',{type:'divider'}).state,next=metadataBook(after),changes=recordChanges(pageRecords(page),pageRecords(after.pages[0]));
+    await repository.commit(before,next,changes);assert.equal((await repository.export()).revision,before.revision+1);assert.equal((await repository.export()).pages[0].blocks.length,page.blocks.length+1);
+  }
   // Reject malformed updates without changing the notebook or leaving orphan records.
   // A D1 constraint failure after earlier statements must roll the complete batch back.
   const journalId=crypto.randomUUID();

@@ -46,7 +46,7 @@ function trackInput(input:HTMLInputElement|HTMLTextAreaElement,save:(value:strin
     pending={pageId,value,task};return task;
   }
   composition.track(input,write,getPageId);
-  input.addEventListener('input',()=>{const pageId=getPageId(),value=input.value;if(composition.isComposing(input)){inputEdits.set(inputEditKey(input,pageId),{input,pageId,value,write:()=>write(pageId,value)});refreshInputStatus();}else void write(pageId,value).catch(()=>{});});
+  input.addEventListener('input',()=>{const pageId=composition.pageId(input)??getPageId(),value=input.value;if(composition.isComposing(input)){inputEdits.set(inputEditKey(input,pageId),{input,pageId,value,write:()=>write(pageId,value)});refreshInputStatus();}else void write(pageId,value).catch(()=>{});});
   return write;
 }
 async function flushInputEdits(pageId?:string){

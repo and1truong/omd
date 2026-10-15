@@ -28,6 +28,18 @@ try{
   await nav.getByRole('link',{name:'Switch to Original page',exact:true}).click();await nav.waitForFunction(id=>store.getActivePageId()===id,ids.first);assert.equal(await nav.locator('#page-title').inputValue(),'Composed original-page draft');
   await nav.evaluate(async()=>{restoreDispatch();await app.flushPending();});assert.equal(await nav.evaluate(async id=>(await store.getPage(id)).title,ids.first),'Composed original-page draft');assert.equal(await nav.evaluate(async id=>(await store.getPage(id)).title,ids.second),'Destination page');await navigation.close();
 
+  // Headers are reused across pages; input events after a switch still belong to composition's source page.
+  for(const field of ['title','subtitle']){
+    const headers=await browser.newContext(),header=await headers.newPage();await boot(header);
+    const pages=await header.evaluate(async()=>{const first=(await store.dispatch('page_add',{title:'Header source'})).pageId;await store.dispatch('set_page',{subtitle:'Source subtitle'});const second=(await store.dispatch('page_add',{title:'Header destination'})).pageId;await store.dispatch('set_page',{subtitle:'Destination subtitle'});await store.dispatch('page_select',{pageId:first});return {first,second};});
+    const control=header.locator(`#page-${field}`);await control.evaluate(el=>{el.focus();el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.value='Partial composition';el.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));});
+    await header.evaluate(async pageId=>{await app.flushPending();await store.dispatch('page_select',{pageId});},pages.second);
+    await control.evaluate(el=>{el.value='Final source composition';el.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true}));el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));});
+    await header.waitForFunction(async({first,field})=>(await store.getPage(first))[field]==='Final source composition',{first:pages.first,field});await header.evaluate(()=>app.flushPending());
+    assert.equal(await header.evaluate(async({second,field})=>(await store.getPage(second))[field],{second:pages.second,field}),field==='title'?'Header destination':'Destination subtitle');
+    await header.evaluate(async pageId=>{await store.dispatch('page_select',{pageId});await app.flushPending();},pages.first);assert.equal(await control.inputValue(),'Final source composition');await headers.close();
+  }
+
   // Rich Markdown drafts must outlive their editor when navigation finishes before an IME save.
   const richContext=await browser.newContext(),rich=await richContext.newPage();await boot(rich);
   const richIds=await rich.evaluate(async()=>{const first=(await store.dispatch('page_add',{title:'Rich original page'})).pageId;await store.dispatch('add_block',{type:'text',text:'Saved original text'});const second=(await store.dispatch('page_add',{title:'Rich destination'})).pageId;await store.dispatch('page_select',{pageId:first});const dispatch=store.dispatch;window.restoreDispatch=()=>store.dispatch=dispatch;store.dispatch=(name,input,options)=>name==='update_block'&&input.patch?.text==='Composed rich draft'?Promise.reject(new Error('Injected navigated rich failure')):dispatch(name,input,options);return {first,second};});
