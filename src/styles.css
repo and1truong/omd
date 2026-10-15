@@ -453,9 +453,9 @@ h3 { font-size: 13px; margin: 0 0 12px; }
 .column-drop-preview[data-side=right]>span {left:auto;right:8px;}
 .column-drop-preview[data-allowed=false],.column-drop-preview[data-allowed=false]>span {background:#a34b12;}
 @media(max-width:760px){.layout-row {grid-template-columns:minmax(0,1fr);gap:10px;}.layout-column>.block-list>.block>.block-controls {left:-26px;}}
-.layout-column .callout-body {position:relative;gap:8px;padding:12px;}
+.layout-column .callout-body {display:grid;grid-template-columns:32px minmax(0,1fr);gap:8px;padding:12px;}
 .layout-column .callout-body>.callout-icon {flex-basis:32px;width:32px;font-size:22px;}
-.layout-column .callout-tone {position:absolute;top:5px;right:5px;max-width:80px;margin:0;}
+.layout-column .callout-tone {grid-column:2;justify-self:end;max-width:80px;margin:0;}
 
 .column-drop-preview[data-side=before],.column-drop-preview[data-side=after] {transform:translateY(-50%);}
 .column-drop-preview[data-side=before]::before,.column-drop-preview[data-side=after]::before {inset:-8px 0;}
