@@ -39,11 +39,11 @@ jobs:
       - run: npm run check:static
       - run: npx playwright install --with-deps chromium
       - name: Native browser at origin root
-        run: npm run test:browser && npm run test:callout && npm run test:slash
+        run: npm run test:browser && npm run test:callout && npm run test:slash && npm run test:columns
       - name: Native browser at GitHub Pages path
         env:
           OMD_BASE_PATH: /omd
-        run: npm run test:browser && npm run test:callout && npm run test:slash
+        run: npm run test:browser && npm run test:callout && npm run test:slash && npm run test:columns
       - run: npm run build:cloudflare
       - run: npm run test:cloudflare
       - run: npm run package:release
