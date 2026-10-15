@@ -88,7 +88,7 @@ export function createDiagramManager(store:NotebookStore,{notify}:{notify:Notify
   function cleanup(entry:Entry) {entry.disposed=true;clearTimeout(entry.timer);clearTimeout(entry.saveTimer);entry.renderer?.unmount();entry.api=null;entry.renderer=null;entry.pending=null;entry.saved=null;entry.source=null;entry.host.replaceChildren();entries.delete(key(entry.pageId,entry.blockId)); }
   return {
     mount,openFocus,closeFocus,
-    updateSource(blockId:string,source:string) { const entry=entries.get(key(store.getRenderState().id,blockId));if(entry)scheduleMermaid(entry,source); },
+    updateSource(pageId:string,blockId:string,source:string) { const entry=entries.get(key(pageId,blockId));if(entry)scheduleMermaid(entry,source); },
     begin() { used=new Set(); if(focused) { const entry=entries.get(focused)!;try{const block=get(entry.pageId,entry.blockId);if(entry.pageId!==store.getRenderState().id||block.type!=='excalidraw')closeFocus();}catch{closeFocus();} } },
     end() {
       // Cached blocks do not call mount again. Derive lifetime from the connected

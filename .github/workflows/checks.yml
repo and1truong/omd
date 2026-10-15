@@ -91,6 +91,7 @@ jobs:
       - run: npm run test:editor
       - run: npm run test:drafts
       - run: npm run test:destructive
+      - run: npm run test:page-owner
       - run: npm run test:paste
       - run: npm run test:callout
       - run: npm run test:heading
