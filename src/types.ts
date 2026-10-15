@@ -25,9 +25,11 @@ export interface ReminderBlock {id:ID;type:'reminder';title:string;dueAt:string;
 export interface Card {id:ID;title:string;description:string}
 export interface Column {id:ID;title:string;cards:Card[]}
 export interface KanbanBlock {id:ID;type:'kanban';title:string;columns:Column[]}
+export interface LayoutColumn {id:ID;blocks:Block[]}
+export interface ColumnsBlock {id:ID;type:'columns';columns:LayoutColumn[]}
 export interface MermaidBlock {id:ID;type:'mermaid';title:string;source:string}
 export interface ExcalidrawBlock {id:ID;type:'excalidraw';title:string;scene:Scene}
-export type Block = TextBlock | CalloutBlock | DividerBlock | TableBlock | ChecklistBlock | TabsBlock | ToggleBlock | AccordionBlock | ReminderBlock | KanbanBlock | MermaidBlock | ExcalidrawBlock;
+export type Block = TextBlock | CalloutBlock | DividerBlock | TableBlock | ChecklistBlock | TabsBlock | ToggleBlock | AccordionBlock | ReminderBlock | KanbanBlock | MermaidBlock | ExcalidrawBlock | ColumnsBlock;
 export type BlockType = Block['type'];
 export type BlockOf<T extends BlockType> = Extract<Block,{type:T}> | (T extends 'text' | 'heading' ? TextBlock : never);
 export interface Page {format:'omd';version:1;id:ID;revision:number;title:string;subtitle:string;theme:Theme;notificationMode:NotificationMode;updatedAt:string;blocks:Block[]}
@@ -44,7 +46,7 @@ export interface CommandInputs {
   add_block:BlockOptions & {type:BlockType;containerId?:ID;index?:number};
   convert_block:BlockOptions & {blockId:ID;type:BlockType;expectedText:string};
   update_block:{blockId:ID;patch:BlockPatch};
-  remove_block:{blockId:ID};move_block:{blockId:ID;containerId:ID;index?:number};
+  remove_block:{blockId:ID};move_block:{blockId:ID;containerId:ID;index?:number;targetBlockId?:ID;side?:'left'|'right'};
   table_cell_update:{blockId:ID;rowId:ID;columnId:ID;text:string};
   table_row_add:{blockId:ID;index?:number};table_row_remove:{blockId:ID;rowId:ID};
   table_column_add:{blockId:ID;index?:number};table_column_remove:{blockId:ID;columnId:ID};
@@ -62,7 +64,7 @@ export type CommandInput<K extends CommandName> = CommandInputs[K] & {pageId?:ID
 export type CommandResult<K extends CommandName> = K extends 'add_block'|'convert_block' ? {blockId:ID;block:Block} : K extends 'update_block' ? {blockId:ID} : K extends 'table_row_add' ? {rowId:ID} : K extends 'checklist_add'|'accordion_add' ? {itemId:ID} : K extends 'tab_add' ? {tabId:ID} : K extends 'column_add'|'table_column_add' ? {columnId:ID} : K extends 'card_add' ? {cardId:ID} : K extends 'page_add' ? {pageId:ID} : K extends 'page_remove' ? {removedPageIds:ID[]} : K extends 'import_notebook' ? {imported:true} : Record<never,never>;
 export type MutationResult<K extends CommandName> = CommandResult<K> & {revision:number};
 // Internal switch handlers retain runtime validation at the untrusted-input boundary.
-export type InternalInput = Partial<BlockOptions & {expectedText:string;type:BlockType;theme:Theme;notificationMode:NotificationMode;subtitle:string;description:string;containerId:ID;index:number;blockId:ID;itemId:ID;tabId:ID;rowId:ID;columnId:ID;cardId:ID;pageId:ID;parentId:ID;firedAt:string;notebook:Notebook|Page;patch:BlockPatch & {text?:string;done?:boolean;description?:string}}>;
+export type InternalInput = Partial<BlockOptions & {expectedText:string;type:BlockType;theme:Theme;notificationMode:NotificationMode;subtitle:string;description:string;containerId:ID;index:number;blockId:ID;targetBlockId:ID;side:'left'|'right';itemId:ID;tabId:ID;rowId:ID;columnId:ID;cardId:ID;pageId:ID;parentId:ID;firedAt:string;notebook:Notebook|Page;patch:BlockPatch & {text?:string;done?:boolean;description?:string}}>;
 export type ActionResult = Partial<{blockId:ID;block:Block;itemId:ID;tabId:ID;rowId:ID;columnId:ID;cardId:ID;pageId:ID;removedPageIds:ID[];imported:boolean}>;
 export interface ChangeEvent {actionName?:CommandName;changedBlockId?:ID;changedPageId?:ID;quiet?:boolean;reset?:boolean;reminderBlockId?:ID;reminderPageId?:ID;history?:boolean}
 export interface SaveStatus {pending:number;navigating:boolean;error:Error|null;unsaved?:boolean}
@@ -80,7 +82,7 @@ export interface NotebookStore {
   residency():{pageId:ID;pageCount:number;recordCount:number;undoEntries:number};
 }
 export interface DueReminder extends ReminderBlock {pageId:ID;due:number}
-export type BlockMetadata = Exclude<Block,TabsBlock|ToggleBlock|AccordionBlock|ExcalidrawBlock> | Omit<ToggleBlock,'blocks'> | (Omit<TabsBlock,'tabs'> & {tabs:Omit<Tab,'blocks'>[]}) | (Omit<AccordionBlock,'items'> & {items:Omit<AccordionItem,'blocks'>[]}) | Omit<ExcalidrawBlock,'scene'>;
+export type BlockMetadata = Exclude<Block,TabsBlock|ToggleBlock|AccordionBlock|ExcalidrawBlock|ColumnsBlock> | Omit<ToggleBlock,'blocks'> | (Omit<TabsBlock,'tabs'> & {tabs:Omit<Tab,'blocks'>[]}) | (Omit<AccordionBlock,'items'> & {items:Omit<AccordionItem,'blocks'>[]}) | Omit<ExcalidrawBlock,'scene'> | {id:ID;type:'columns';columns:Omit<LayoutColumn,'blocks'>[]};
 export interface ContainerRecord {id:ID;blockIds:ID[]}
 export type RecordData = {page:PageMetadata;block:BlockMetadata;container:ContainerRecord;scene:Omit<Scene,'files'>;files:Scene['files']};
 export type RecordKind = keyof RecordData;

@@ -2,6 +2,7 @@ import type {Block,CommandInput} from './types.js';
 // Only visible branches participate in rendering. Hidden data remains in storage,
 // not in DOM nodes, event-handler closures or retained renderer caches.
 export function visibleContainers(block:Block):{id:string;blocks:Block[]}[] {
+  if (block.type === 'columns') return block.columns;
   if (block.type === 'tabs') { const tab=block.tabs.find(t=>t.id===block.activeTabId)!; return [{id:tab.id,blocks:tab.blocks}]; }
   if (block.type === 'toggle') return block.open ? [{id:block.id,blocks:block.blocks}] : [];
   if (block.type === 'accordion') return block.items.filter(i=>i.open).map(i=>({id:i.id,blocks:i.blocks}));
@@ -13,16 +14,17 @@ export type RevealAction=['tab_select',CommandInput<'tab_select'>]|['update_bloc
 export function revealActions(blocks:Block[],blockId:string):RevealAction[]|null {
   for(const block of blocks) {
     if(block.id===blockId)return [];
-    const containers=block.type==='tabs'?block.tabs:block.type==='toggle'?[{id:block.id,blocks:block.blocks}]:block.type==='accordion'?block.items:[];
+    const containers=block.type==='tabs'?block.tabs:block.type==='toggle'?[{id:block.id,blocks:block.blocks}]:block.type==='accordion'?block.items:block.type==='columns'?block.columns:[];
     for(const container of containers) {
       const path=revealActions(container.blocks,blockId);if(path===null)continue;
-      const action:RevealAction|null=block.type==='tabs'?(container.id===block.activeTabId?null:['tab_select',{blockId:block.id,tabId:container.id}]):block.type==='toggle'?(block.open?null:['update_block',{blockId:block.id,patch:{open:true}}]):('open' in container&&container.open)?null:['accordion_update',{blockId:block.id,itemId:container.id,patch:{open:true}}];
+      const action:RevealAction|null=block.type==='columns'?null:block.type==='tabs'?(container.id===block.activeTabId?null:['tab_select',{blockId:block.id,tabId:container.id}]):block.type==='toggle'?(block.open?null:['update_block',{blockId:block.id,patch:{open:true}}]):('open' in container&&container.open)?null:['accordion_update',{blockId:block.id,itemId:container.id,patch:{open:true}}];
       return action?[action,...path]:path;
     }
   }
   return null;
 }
 export function renderData(block:Block):Block {
+  if(block.type==='columns')return {...block,columns:block.columns.map(c=>({...c,blocks:[]}))};
   if (block.type === 'tabs') return {...block,tabs:block.tabs.map(t=>({...t,blocks:[]}))};
   if (block.type === 'toggle') return {...block,blocks:[]};
   if (block.type === 'accordion') return {...block,items:block.items.map(i=>({...i,blocks:[]}))};
@@ -30,6 +32,7 @@ export function renderData(block:Block):Block {
 }
 export function blockSignature(block:Block) {
   const own:Record<string,unknown>={...block}; delete own.blocks;
+  if(block.type==='columns')own.columns=block.columns.map(({blocks,...column})=>column);
   if(block.type==='tabs') own.tabs=block.tabs.map(({blocks,...tab})=>tab);
   if(block.type==='accordion') own.items=block.items.map(({blocks,...item})=>item);
   return JSON.stringify(own);

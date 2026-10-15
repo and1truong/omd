@@ -1,3 +1,4 @@
+import {createColumnDropPreview} from './column-drag.js';
 import {isCloudflare} from './runtime.js';
 import {removesContent} from './command-effects.js';
 import {errorOf} from './dom.js';
@@ -6,7 +7,7 @@ import {byId as domId} from './dom.js';
 import { createCompositionGuard } from './composition.js';
 import { createStore } from './store.js';
 import {completedDate} from './completed-time.js';
-import { STORAGE_KEY, CALLOUT_TONES, allowedTypes, findBlock, findContainer, MAX_CHECKLIST_LEVELS, checklistHeight } from './model.js';
+import { STORAGE_KEY, CALLOUT_TONES, columnMoveTarget, allowedTypes, findBlock, findContainer, MAX_CHECKLIST_LEVELS, checklistHeight } from './model.js';
 import { startReminders } from './reminders.js';
 import { setupPalette } from './palette.js';
 import { createDiagramManager } from './diagrams.js';
@@ -22,6 +23,7 @@ import {appBase,routePageId,setupRoutes} from './routes.js';
 
 function $<T extends HTMLElement=HTMLElement>(selector:string):T {if(selector.startsWith('#'))return domId<T>(selector.slice(1));const node=document.querySelector<T>(selector);if(!node)throw new Error(`Missing element: ${selector}`);return node;}
 let store:NotebookStore,palette:ReturnType<typeof setupPalette>|undefined,diagrams:ReturnType<typeof createDiagramManager>|undefined,renderer:ReturnType<typeof createRenderCache>,shell:ReturnType<typeof setupShell>|undefined,dragData:DragData|null|undefined;
+let columnDrop:ReturnType<typeof createColumnDropPreview>|undefined;
 let cloudUnsaved=false;
 let textEditors:ReturnType<typeof createTextEditors>|undefined;
 let tableEdits:ReturnType<typeof createTableEdits>|undefined;
@@ -134,7 +136,7 @@ export async function confirmAction(title:string,message:string,yes = 'Continue'
   });
 }
 function endDrag() {
-  dragData = null; document.body.classList.remove('dragging-block'); for (const el of document.querySelectorAll('.dragging,.drop-active,.tab-drop-before,.tab-drop-after')) el.classList.remove('dragging', 'drop-active', 'tab-drop-before', 'tab-drop-after');
+  columnDrop?.clear();dragData = null; document.body.classList.remove('dragging-block'); for (const el of document.querySelectorAll('.dragging,.drop-active,.tab-drop-before,.tab-drop-after')) el.classList.remove('dragging', 'drop-active', 'tab-drop-before', 'tab-drop-after');
   setTimeout(()=>{suppressTabClick=false;},0);
 }
 function draggable(handle:HTMLElement,data:DragData) {
@@ -171,6 +173,19 @@ function makeBlockList(blocks:Block[],containerId:string,nodes:HTMLElement[]) {
 function renderBlock(b:Block,containerId:string,index:number,count:number) {
   const pageId=renderPageId,action=pageAction(pageId);
   const shell = element('section', `block block-type-${b.type}`); shell.dataset.blockId = b.id;
+  if(b.type==='columns'){
+    shell.classList.add('layout-row');shell.style.setProperty('--layout-columns',String(b.columns.length));shell.setAttribute('role','group');shell.setAttribute('aria-label',`${b.columns.length} column layout`);
+    for(const [i,column] of b.columns.entries()){const cell=element('div','layout-column');cell.dataset.layoutColumn=column.id;cell.setAttribute('role','group');cell.setAttribute('aria-label',`Column ${i+1} of ${b.columns.length}`);cell.append(renderer.childList(column.id));shell.append(cell);}return shell;
+  }
+  columnDrop!.attach(shell,{
+    active:()=>dragData?.kind==='block'&&dragData.pageId===pageId&&pageId===store.getActivePageId()&&pageId===renderPageId,
+    inspect:side=>{
+      let anchor:HTMLElement=shell;const cell=shell.closest<HTMLElement>('[data-layout-column]');if(cell?.dataset.layoutColumn===containerId)anchor=cell;
+      try{const vertical=side==='before'||side==='after',info=columnMoveTarget(store.getRenderState(),dragData!.blockId,containerId,b.id,!vertical);return {allowed:true,anchor:vertical?shell:anchor,message:vertical?`Move ${side==='before'?'above':'below'} this block`:`New column on the ${side} · ${info.count} columns`};}
+      catch(error){return {allowed:false,anchor,message:errorOf(error).message};}
+    },
+    drop:(side,preview)=>{if(!preview.allowed){notify(preview.message,'error');return;}const blockId=dragData!.blockId;if(side==='before'||side==='after'){const page=store.getRenderState(),source=findBlock(page,blockId),target=findBlock(page,b.id);let index=target.siblings.findIndex(block=>block.id===b.id)+(side==='after'?1:0);if(source.siblings===target.siblings&&source.siblings.findIndex(block=>block.id===blockId)<index)index--;void action('move_block',{blockId,containerId,index});}else void action('move_block',{blockId,containerId,targetBlockId:b.id,side});}
+  });
   const controls = element('div', 'block-controls'); const handle = button('⠿', 'Drag block', () => {}, 'icon-button block-drag'); draggable(handle, { kind: 'block', blockId: b.id, containerId });
   const more=button('…','Block actions',async()=>{
     const current=findBlock(await store.getPage(pageId),b.id),position=current.siblings.findIndex(block=>block.id===b.id);
@@ -572,6 +587,7 @@ async function boot() {
   if(isCloudflare){domId('data-description').textContent='This notebook is shared with anyone who can open this URL. Changes save to the cloud and require a connection. Export JSON for a backup.';domId('persist-storage').hidden=true;domId('storage-mode').hidden=false;domId('storage-mode').textContent='Shared cloud notebook';}
   for (const close of document.querySelectorAll('[data-close]')) close.addEventListener('click', () => close.closest('dialog')!.close());
   for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', e => { if (e.target === dialog) { const rect = dialog.getBoundingClientRect(); if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) dialog.close(); } });
+  columnDrop=createColumnDropPreview();
   diagrams=createDiagramManager(store,{notify});
   textEditors=createTextEditors(store,{composition,notify,beforeHistory:()=>flushPending({waitForComposition:true}),createNext:(blockId,pageId)=>createTextAfter(blockId,pageId,false),slash:{options:slashOptions,convert:convertTextBlock}});
   tableEdits=createTableEdits(store,{settled:()=>composition.settled(input=>input instanceof Element&&input.classList.contains('table-cell'))});

@@ -10,6 +10,7 @@ The browser and desktop editions keep your notebook on your device. The [Cloudfl
 
 - **Pages and subpages:** organize a notebook with a sidebar, breadcrumbs and Cmd/Ctrl+K search.
 - **Flexible blocks:** Tiptap Markdown text, headings, nested checklists, horizontal/vertical tabs, expandable blocks, accordions and dividers. Shift+Enter continues into a new text block.
+- **Drag to columns:** drop a block near another block’s left or right edge to arrange up to 12 columns. Columns stack on small screens.
 - **Planning:** editable tables with row/column insertion and pinned headers/columns, reminders and kanban boards.
 - **Diagrams:** Mermaid with live preview and Excalidraw with an editable full-page canvas.
 - **Everyday controls:** undo/redo, JSON import/export, keyboard and touch-friendly reordering, and system-aware light/dark themes.
