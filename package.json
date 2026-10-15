@@ -23,6 +23,7 @@
     "test:drafts": "node tests/input-drafts.mjs",
     "test:destructive": "node tests/destructive-composition.mjs",
     "test:page-owner": "node tests/page-owner-controls.mjs",
+    "test:columns": "node tests/columns-browser.mjs",
     "test:paste": "node tests/markdown-paste.mjs",
     "test:table": "node tests/table-browser.mjs",
     "test:table-rich": "node tests/table-rich.mjs",

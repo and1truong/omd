@@ -6,6 +6,14 @@
 
 Use the collapsible sidebar to create and switch pages. Click **Fixed / Fluid** in the top bar to switch page width: **Fixed** centers the page with a maximum width of 900px; **Fluid** fills the available workspace while keeping comfortable side padding. The choice applies across pages and is remembered on this device, without changing notebook content or backups. Both layouts fit smaller screens. The page menu provides JSON import/export and settings. Block actions appear on hover or keyboard focus and remain reachable on touch devices. Mobile navigation opens as a drawer; Escape or a click outside closes it.
 
+## Arranging blocks in columns
+
+Drag a block by its handle toward the **left or right edge** of another block. A line shows where a new column will appear; release to place it there. Dropping beside an existing column adds another column to that row, up to **12 columns per row**. At the limit, the preview explains why another column cannot be added; moving a whole single-block column within the row still works.
+
+Each column can contain several blocks. Drop near the top or bottom of a block, or on an insertion control, to place a block above or below it. Drag blocks out to return them to the surrounding list. Empty columns disappear, and a row with one remaining column becomes an ordinary block list. Escape cancels a drag before changing the document. On small screens, columns stack in their saved left-to-right order.
+
+Columns retain their blocks in Undo/Redo, JSON backups, browser/desktop storage and Cloudflare D1. WebMCP uses the existing `move_block` tool: supply `blockId`, the target block’s `containerId`, `targetBlockId`, and `side: "left"` or `"right"`. Omit `side` and `targetBlockId` for ordinary vertical moves.
+
 ## Adding blocks
 
 Hover above the first block or between existing blocks to reveal **+ Add block** and insert at that position. Keyboard focus also reveals the control; it stays visible on touch devices. Each block's **…** menu also offers **Insert block before** and **Insert block after**. These controls work inside tabs, expandable blocks and accordion sections; **Add a block** at the bottom still appends. After choosing a block type, focus moves to the new block. Undo removes the insertion.

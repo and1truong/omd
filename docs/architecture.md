@@ -6,12 +6,14 @@
 
 - Notebook exports use `omd-notebook` version 3; individual pages use `omd` version 1. Blocks include text, headings, checklists, tabs, expandable blocks, accordions, reminders, kanban, dividers, Mermaid and Excalidraw. Checklist items have optional recursive `children` arrays with at most 4 levels including root items; flat documents retain their existing shape. Item IDs are unique across the page, and checklist moves/removal carry entire subtrees.
 - Horizontal tabs may contain vertical tabs; vertical tabs may contain horizontal tabs. At most two tab groups per ancestor path, including through other containers.
-- No application quotas on numbers of blocks, tabs, list items, columns, cards, text length, or import size. Browser storage and device resources impose their own physical limits.
+- Layout rows contain 2–12 columns; table dimensions have their own limits. No application quotas on numbers of blocks, tabs, list items, kanban columns, cards, text length, or import size. Browser storage and device resources impose their own physical limits.
 - One validated command path for UI and agents. Invalid operations are atomic.
 - Transactional IndexedDB records, Zustand selectors, revision checks across windows, patch-based undo/redo, validated JSON import/export. Failed writes keep the previous state; corrupt saved data is never silently overwritten.
 - Reminders include persisted delivery records and are found in hidden containers too.
 
 Notebook exports use version 3 with a flat page collection and persistent parent links. Version 1 single-page and version 2 flat notebooks import/migrate as root pages. Automatic upgrades retain the original bytes under `.v1-backup` or `.v2-backup`; failed writes preserve the original notebook. Page hierarchy traversal and cycle checks are iterative, with a maximum of 32 levels. Each page's block schema stays unchanged.
+
+Layout rows use structural `columns` blocks with stable row/column IDs and ordinary block lists per column. They do not appear in the block picker. Edge moves extend `move_block` with `targetBlockId` and `side`; validation preserves tab ancestry and prevents cycles. Removing empty columns and unwrapping single-column rows happen after the entire move, within the same transaction. Normalized block metadata stores column IDs separately from their container records. Existing notebook/page export versions remain unchanged; older app builds cannot read pages containing this new block type.
 
 ## Rendering and persistence
 

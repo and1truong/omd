@@ -4,6 +4,7 @@ import { emptyScene, validateScene } from './scene.js';
 export const FORMAT_VERSION = 1;
 export const STORAGE_KEY = 'omd.notebook.v1';
 export const MAX_CHECKLIST_LEVELS = 4;
+export const MAX_LAYOUT_COLUMNS = 12;
 export const BLOCK_TYPES = ['text', 'heading', 'callout', 'checklist', 'table', 'tabs', 'toggle', 'accordion', 'reminder', 'kanban', 'divider', 'mermaid', 'excalidraw'];
 export const CALLOUT_TONES = ['neutral','info','success','warning','danger'] as const;
 export const MAX_TABLE_ROWS = 100;
@@ -60,6 +61,7 @@ export function makeBlock(type:BlockType, options:BlockOptions = {}):Block {
     case 'accordion': return { ...base,type:'accordion', title: options.title ?? 'Things worth keeping', items: [{ id: uid(), title: 'An idea', open: true, blocks: [] }] };
     case 'reminder': return { ...base,type:'reminder', title: options.title ?? 'A gentle nudge', dueAt: options.dueAt ?? '', enabled: !!options.dueAt, firedAt: null };
     case 'kanban': return { ...base,type:'kanban', title: options.title ?? 'Little steps, big things', columns: ['To do', 'In progress', 'Done'].map(title => ({ id: uid(), title, cards: [] })) };
+    case 'columns': throw new Error('Column layouts are created by moving blocks to an edge.');
   }
 }
 
@@ -91,12 +93,16 @@ export function validateNotebook(raw:unknown):Page {
     list(blocks);
     for (const b of blocks) {
       assert(object(b), 'Invalid block.'); id(b.id);
-      assert(BLOCK_TYPES.includes(b.type), 'Unknown block type.');
+      assert(b.type==='columns'||BLOCK_TYPES.includes(b.type), 'Unknown block type.');
       switch (b.type) {
         case 'text': case 'heading': fields(b, ['id', 'type', 'text']); string(b.text, 'Block text'); break;
         case 'callout':
           fields(b,['id','type','text','icon','tone']);string(b.text,'Callout text');string(b.icon,'Callout icon');assert(b.icon.length<=32&&!/[\r\n]/.test(b.icon),'Callout icon must be at most 32 characters on one line.');assert(CALLOUT_TONES.includes(b.tone),'Invalid callout tone.');break;
         case 'divider': fields(b, ['id', 'type']); break;
+        case 'columns':
+          fields(b,['id','type','columns']);list(b.columns);
+          assert(b.columns.length>=2&&b.columns.length<=MAX_LAYOUT_COLUMNS,`A row needs 2–${MAX_LAYOUT_COLUMNS} columns.`);
+          for(const column of b.columns){fields(column,['id','blocks']);assert(column.id!=='page','The page container ID is reserved.');id(column.id);list(column.blocks);assert(column.blocks.length>0,'Column layouts cannot contain empty columns.');visit(column.blocks,axes,depth+1);}break;
         case 'table':
           fields(b,['id','type','title','headerRow','pinnedHeader','pinnedColumns','columns','rows']);string(b.title,'Table title');boolean(b.headerRow,'Header row');boolean(b.pinnedHeader,'Pinned header');
           list(b.rows);list(b.columns);tableSize(b.rows.length,MAX_TABLE_ROWS);tableSize(b.columns.length,MAX_TABLE_COLUMNS);
@@ -148,6 +154,7 @@ export function walkBlocks(notebook:Page,fn:(block:Block,siblings:Block[],axes:O
       if (block.type === 'tabs') for (const tab of block.tabs) walk(tab.blocks, [...axes, block.orientation]);
       if (block.type === 'toggle') walk(block.blocks, axes);
       if (block.type === 'accordion') for (const item of block.items) walk(item.blocks, axes);
+      if (block.type === 'columns') for (const column of block.columns) walk(column.blocks, axes);
     }
   }
   walk(notebook.blocks);
@@ -167,6 +174,7 @@ export function findContainer(notebook:Page,containerId:string = 'page') {
     if (block.type === 'toggle' && block.id === containerId) found = { blocks: block.blocks, axes };
     if (block.type === 'tabs') for (const tab of block.tabs) if (tab.id === containerId) found = { blocks: tab.blocks, axes: [...axes, block.orientation] };
     if (block.type === 'accordion') for (const item of block.items) if (item.id === containerId) found = { blocks: item.blocks, axes };
+    if (block.type === 'columns') for (const column of block.columns) if (column.id === containerId) found = { blocks: column.blocks, axes };
   });
   assert(found, 'Container not found.'); return found;
 }
@@ -198,6 +206,44 @@ function remove<T extends {id:string}>(items:T[],id:string|undefined):T { const 
 function insert<T>(items:T[],item:T,index=items.length) { integer(index, items.length); items.splice(index, 0, item); }
 function move<T extends {id:string}>(items:T[],id:string|undefined,index:number|undefined) { integer(index, items.length - 1); const item = remove(items, id); insert(items, item, index); }
 
+/** A layout column is a regular block container; nesting preserves existing tab axes. */
+export function layoutColumn(notebook:Page,containerId:string){
+  let found:{row:BlockOf<'columns'>;index:number}|undefined;
+  walkBlocks(notebook,block=>{if(block.type==='columns'){const index=block.columns.findIndex(c=>c.id===containerId);if(index>=0)found={row:block,index};}});return found;
+}
+export function containsBlock(block:Block,id:string):boolean {
+  if(block.id===id)return true;
+  const lists=block.type==='toggle'?[block]:block.type==='tabs'?block.tabs:block.type==='accordion'?block.items:block.type==='columns'?block.columns:[];
+  return lists.some(container=>container.blocks.some(child=>containsBlock(child,id)));
+}
+export function columnMoveTarget(notebook:Page,blockId:string,containerId:string,targetBlockId:string,createColumn=true){
+  const source=findBlock(notebook,blockId),target=findBlock(notebook,targetBlockId);
+  assert(!containsBlock(source.block,target.block.id),'Cannot move a block beside itself or its descendants.');
+  assert(findContainer(notebook,containerId).blocks===target.siblings,'The target block changed containers. Try the drop again.');
+  function axesAllowed(block:Block,axes:Orientation[]){
+    if(block.type==='tabs'){
+      assert(axes.length<2,'Tabs are limited to two levels.');assert(axes.at(-1)!==block.orientation,'Nested tabs must use the opposite orientation.');
+      for(const tab of block.tabs)for(const child of tab.blocks)axesAllowed(child,[...axes,block.orientation]);
+    }else{const lists=block.type==='toggle'?[block]:block.type==='accordion'?block.items:block.type==='columns'?block.columns:[];for(const list of lists)for(const child of list.blocks)axesAllowed(child,axes);}
+  }
+  axesAllowed(source.block,target.axes);
+  const column=layoutColumn(notebook,containerId);
+  const vacatesColumn=column?.row.columns.some(c=>c.blocks===source.siblings&&c.blocks.length===1)??false;
+  const count=column?column.row.columns.length+1-(vacatesColumn?1:0):2;
+  if(createColumn)assert(count<=MAX_LAYOUT_COLUMNS,`A row supports at most ${MAX_LAYOUT_COLUMNS} columns.`);
+  return {source,target,column,count};
+}
+function normalizeColumns(blocks:Block[]){
+  for(let i=blocks.length-1;i>=0;i--){const block=blocks[i];
+    const lists=block.type==='toggle'?[block]:block.type==='tabs'?block.tabs:block.type==='accordion'?block.items:block.type==='columns'?block.columns:[];
+    for(const container of lists)normalizeColumns(container.blocks);
+    if(block.type==='columns'){
+      if(block.columns.some(column=>column.blocks.length===0))block.columns=block.columns.filter(column=>column.blocks.length>0);
+      if(block.columns.length<2)blocks.splice(i,1,...(block.columns[0]?.blocks??[]));
+    }
+  }
+}
+
 /** Applies one atomic action to a clone; invalid actions never change the input. */
 export function applyAction(current:Page,action:CommandName,input:InternalInput = {}) {
   assert(object(input), 'Tool input must be an object.');
@@ -227,7 +273,7 @@ export function mutatePage(doc:Page,action:CommandName,input:InternalInput = {},
     }
     case 'update_block': {
       fields(input, ['blockId', 'patch']); const b = block();
-      const allowed = { text: ['text'], heading: ['text'], callout:['text','icon','tone'], checklist: ['title'], table:['title','headerRow','pinnedHeader','pinnedColumns'], tabs: ['title', 'orientation'], toggle: ['title', 'open'], accordion: ['title'], reminder: ['title', 'dueAt', 'enabled'], kanban: ['title'], divider: [], mermaid:['title','source'], excalidraw:['title','scene'] };
+      const allowed = { text: ['text'], heading: ['text'], callout:['text','icon','tone'], checklist: ['title'], table:['title','headerRow','pinnedHeader','pinnedColumns'], tabs: ['title', 'orientation'], toggle: ['title', 'open'], accordion: ['title'], reminder: ['title', 'dueAt', 'enabled'], kanban: ['title'], divider: [], mermaid:['title','source'], excalidraw:['title','scene'],columns:[] };
       fields(input.patch, allowed[b.type]); Object.assign(b, input.patch);
       if (b.type === 'reminder' && ('dueAt' in input.patch! || input.patch!.enabled === true)) b.firedAt = null;
       result = { blockId: b.id }; break;
@@ -248,7 +294,22 @@ export function mutatePage(doc:Page,action:CommandName,input:InternalInput = {},
       fields(input,['blockId','columnId']);const b=block('table');assert(b.columns.length>1,'Keep at least one table column.');member(b.columns,input.columnId);const index=b.columns.findIndex(column=>column.id===input.columnId);remove(b.columns,input.columnId);for(const row of b.rows)row.cells.splice(index,1);b.pinnedColumns=Math.min(b.pinnedColumns,b.columns.length);break;
     }
     case 'move_block': {
-      fields(input, ['blockId', 'containerId', 'index']);
+      fields(input, ['blockId', 'containerId', 'index','targetBlockId','side']);
+      if(input.side!==undefined||input.targetBlockId!==undefined){
+        assert(input.side==='left'||input.side==='right','Choose a left or right column edge.');
+        assert(input.index===undefined,'Column edge moves do not accept a vertical index.');
+        string(input.containerId,'Target container');string(input.targetBlockId,'Target block');string(input.blockId,'Source block');
+        const {source,target,column}=columnMoveTarget(doc,input.blockId,input.containerId,input.targetBlockId);
+        const moved=remove(source.siblings,input.blockId);
+        if(column){
+          assert(column.row.columns.filter(c=>c.blocks.length>0).length<MAX_LAYOUT_COLUMNS,`A row supports at most ${MAX_LAYOUT_COLUMNS} columns.`);
+          column.row.columns.splice(column.index+(input.side==='right'?1:0),0,{id:uid(),blocks:[moved]});
+        }else{
+          const columns=[{id:uid(),blocks:[target.block]},{id:uid(),blocks:[moved]}];if(input.side==='left')columns.reverse();
+          target.siblings.splice(target.siblings.findIndex(b=>b.id===target.block.id),1,{id:uid(),type:'columns',columns});
+        }
+        break;
+      }
       const target = findContainer(doc, input.containerId);
       const source = findBlock(doc, input.blockId);
       const b = remove(source.siblings, input.blockId); insert(target.blocks, b, input.index);
@@ -298,6 +359,7 @@ export function mutatePage(doc:Page,action:CommandName,input:InternalInput = {},
     case 'import_notebook': fields(input, ['notebook']); validateNotebook(input.notebook); return { state: { ...copy(input.notebook as Page), revision: doc.revision + 1, updatedAt: new Date().toISOString() }, result: { imported: true } };
     default: throw new Error(`Unknown action: ${action}.`);
   }
+  normalizeColumns(doc.blocks);
   doc.revision++; doc.updatedAt = new Date().toISOString(); if(validate)validateNotebook(doc);
   return { state: doc, result };
 }
@@ -335,6 +397,6 @@ export function upgradePageDates(raw:unknown):unknown {
   if(!page||page.version!==1)return page;
   const normalize=<T extends string|null>(value:T):T=>typeof value==='string'&&!ISO_DATE.test(value)&&Number.isFinite(Date.parse(value))?new Date(Date.parse(value)).toISOString() as T:value;
   page.updatedAt=normalize(page.updatedAt);const stack=Array.isArray(page.blocks)?[...page.blocks]:[];
-  while(stack.length){const b=stack.pop();if(!b||typeof b!=='object')continue;if(b.type==='reminder'){b.dueAt=normalize(b.dueAt);b.firedAt=normalize(b.firedAt);}const children=b.type==='toggle'?[b]:b.type==='tabs'?b.tabs:b.type==='accordion'?b.items:[];if(Array.isArray(children))for(const child of children)if(Array.isArray(child?.blocks))for(const nested of child.blocks)stack.push(nested);}
+  while(stack.length){const b=stack.pop();if(!b||typeof b!=='object')continue;if(b.type==='reminder'){b.dueAt=normalize(b.dueAt);b.firedAt=normalize(b.firedAt);}const children=b.type==='toggle'?[b]:b.type==='tabs'?b.tabs:b.type==='accordion'?b.items:b.type==='columns'?b.columns:[];if(Array.isArray(children))for(const child of children)if(Array.isArray(child?.blocks))for(const nested of child.blocks)stack.push(nested);}
   return page;
 }

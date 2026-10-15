@@ -7,6 +7,7 @@ const ownCache=new WeakMap<Block,BlockMetadata>(),containerCache=new WeakMap<Blo
 function own(block:Block):BlockMetadata {
   switch(block.type){
     case 'tabs':return {...block,tabs:block.tabs.map(({blocks,...tab})=>tab)};
+    case 'columns':return {...block,columns:block.columns.map(({blocks,...column})=>column)};
     case 'toggle':{const {blocks,...data}=block;return data;}
     case 'accordion':return {...block,items:block.items.map(({blocks,...item})=>item)};
     case 'excalidraw':{const {scene,...data}=block;return data;}
@@ -26,6 +27,7 @@ export function pageRecords(page:Page):Records {
       if(block.type==='tabs')for(const tab of block.tabs)list(tab.blocks,tab.id);
       if(block.type==='toggle')list(block.blocks,block.id);
       if(block.type==='accordion')for(const item of block.items)list(item.blocks,item.id);
+      if(block.type==='columns')for(const column of block.columns)list(column.blocks,column.id);
     }
   }
   list(blocks,'page');return records;
@@ -40,13 +42,14 @@ export function makeMaterializer() {
     function list(id:string):Block[]{const ids=get(id,'container').blockIds,result=ids.map(block);containerCache.set(result,ids);return result;}
     function block(id:string):Block {
       const data=get(id,'block'),scene=data.type==='excalidraw'?get(id,'scene'):undefined,files=data.type==='excalidraw'?get(id,'files'):undefined;let children:Block[][]=[];
-      if(data.type==='tabs')children=data.tabs.map(t=>list(t.id));if(data.type==='toggle')children=[list(id)];if(data.type==='accordion')children=data.items.map(t=>list(t.id));
+      if(data.type==='tabs')children=data.tabs.map(t=>list(t.id));if(data.type==='toggle')children=[list(id)];if(data.type==='accordion')children=data.items.map(t=>list(t.id));if(data.type==='columns')children=data.columns.map(t=>list(t.id));
       const previous=cache.get(id);if(previous&&previous.data===data&&previous.scene===scene&&previous.files===files&&children.length===previous.children.length&&children.every((c,i)=>c.length===previous.children[i].length&&c.every((b,j)=>b===previous.children[i][j])))return previous.value;
       let value:Block;
       switch(data.type){
         case 'excalidraw':{const fullScene=previous?.scene===scene&&previous?.files===files&&previous?.value.type==='excalidraw'?previous.value.scene:{...scene!,files:files!};sceneCache.set(fullScene,scene!);value={...data,scene:fullScene};break;}
         case 'tabs':value={...data,tabs:data.tabs.map((t,i)=>({...t,blocks:children[i]}))};break;
         case 'toggle':value={...data,blocks:children[0]};break;
+        case 'columns':value={...data,columns:data.columns.map((c,i)=>({...c,blocks:children[i]}))};break;
         case 'accordion':value={...data,items:data.items.map((t,i)=>({...t,blocks:children[i]}))};break;
         default:value=data;
       }
