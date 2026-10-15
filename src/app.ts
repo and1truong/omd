@@ -32,8 +32,8 @@ let suppressTabClick=false;
 let tabTitleEdit:{flush:()=>Promise<unknown>}|undefined;
 const inputEdits=new Map<string|HTMLElement,{input:HTMLElement;pageId:string;value:string;write:()=>Promise<unknown>}>();
 const inputEditKey=(input:HTMLElement,pageId:string)=>input.dataset.draftKey||['page-title','page-subtitle'].includes(input.id)?JSON.stringify([pageId,input.dataset.draftKey??input.id]):input;
-let refreshInputStatus=()=>{},deferredInputRender=false;
-function hasPendingEdits(){return inputEdits.size>0||!!tabTitleEdit||composition.hasActive()||!!textEditors?.hasPending()||!!tableEditors?.hasPending()||!!diagrams?.hasPending();}
+let refreshInputStatus=()=>{},deferredInputRender=false,pendingControls=0;
+function hasPendingEdits(){return pendingControls>0||inputEdits.size>0||!!tabTitleEdit||composition.hasActive()||!!textEditors?.hasPending()||!!tableEditors?.hasPending()||!!diagrams?.hasPending();}
 function settleInputRender(){if(deferredInputRender&&!inputEdits.size&&!tabTitleEdit&&!composition.hasActive()){deferredInputRender=false;render(store.getRenderState(),{reset:true});}}
 function trackInput(input:HTMLInputElement|HTMLTextAreaElement,save:(value:string,pageId:string)=>unknown,getPageId:()=>string){
   let pending:{pageId:string;value:string;task:Promise<unknown>}|undefined;
@@ -83,6 +83,9 @@ export function notify(message:string,kind = '', persistent = false) {
   if(!persistent)setTimeout(()=>el.remove(),kind==='error'?12000:5000);
 }
 function element<T extends keyof HTMLElementTagNameMap>(tag:T,className = '') { const el = document.createElement(tag); el.className = className; return el; }
+function controlChange(input:HTMLInputElement|HTMLSelectElement,change:(event:Event)=>Promise<unknown>){
+  let saving=false;input.addEventListener('change',async event=>{if(saving)return;saving=true;const disabled=input.disabled;input.disabled=true;pendingControls++;refreshInputStatus();try{await change(event);}catch(error){notify(errorOf(error).message,'error',true);}finally{input.disabled=disabled;saving=false;pendingControls--;refreshInputStatus();}});
+}
 function button(label:string,aria:string,fn:(event:MouseEvent)=>unknown,className = 'icon-button') {
   const b = element('button', className); b.type = 'button'; if(labelIcon[label])b.append(icon(labelIcon[label]));else b.textContent=label; b.title = aria; b.setAttribute('aria-label', aria); b.addEventListener('click', fn); return b;
 }
@@ -187,7 +190,7 @@ function renderBlock(b:Block,containerId:string,index:number,count:number) {
       const symbol=editable(b.icon,'Callout icon',(value,pageId)=>action('update_block',{pageId,blockId:b.id,patch:{icon:value}},{quiet:true}),{className:'callout-icon',id:`${b.id}-icon`,placeholder:'💡'});symbol.maxLength=32;
       const tone=element('select','callout-tone');tone.id=`${b.id}-tone`;tone.setAttribute('aria-label','Callout color');
       for(const value of CALLOUT_TONES){const option=element('option');option.value=value;option.textContent=value[0].toUpperCase()+value.slice(1);tone.append(option);}tone.value=b.tone;
-      let saving=false;tone.addEventListener('change',async()=>{if(saving)return;saving=true;tone.disabled=true;const value=tone.value as typeof b.tone,previous=body.dataset.tone??b.tone;try{const result=await action('update_block',{pageId,blockId:b.id,patch:{tone:value}},{quiet:true});if(result)body.dataset.tone=value;else tone.value=previous;}finally{saving=false;tone.disabled=false;}});
+      controlChange(tone,async()=>{const value=tone.value as typeof b.tone,previous=body.dataset.tone??b.tone;const result=await action('update_block',{pageId,blockId:b.id,patch:{tone:value}},{quiet:true});if(result)body.dataset.tone=value;else tone.value=previous;});
       body.append(symbol,textEditors!.mount(b,renderPageId),tone);shell.append(body);break;
     }
     case 'heading': {
@@ -229,7 +232,7 @@ function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
       const parent=ancestors.at(-1),level=ancestors.length+1;
       const entry=element('div','checklist-item');entry.setAttribute('role','listitem');entry.dataset.itemId=item.id;entry.dataset.level=String(level);
       const row=element('div',`check-row ${item.done?'done':''}`),check=element('input');check.type='checkbox';check.checked=item.done;check.setAttribute('aria-label',`Complete ${item.text||'item'}`);
-      check.addEventListener('change',async()=>{if(!await action('checklist_update',{blockId:b.id,itemId:item.id,patch:{done:check.checked}}))check.checked=item.done;});
+      controlChange(check,async()=>{if(!await action('checklist_update',{blockId:b.id,itemId:item.id,patch:{done:check.checked}}))check.checked=item.done;});
       const canIndent=index>0&&level+checklistHeight(item)<=MAX_CHECKLIST_LEVELS;
       const indent=()=>action('checklist_move',{blockId:b.id,itemId:item.id,parentId:items[index-1].id,index:items[index-1].children?.length??0},{focus:item.id});
       const outdent=()=>{
@@ -267,11 +270,11 @@ function renderTable(shell:HTMLElement,b:BlockOf<'table'>) {
   rowButton.disabled=b.rows.length>=MAX_TABLE_ROWS;columnButton.disabled=b.columns.length>=MAX_TABLE_COLUMNS;
   const checkbox=(label:string,checked:boolean,patch:'headerRow'|'pinnedHeader')=>{
     const wrapper=element('label'),input=element('input');input.type='checkbox';input.checked=checked;input.id=`${b.id}-${patch}`;input.setAttribute('aria-label',label);
-    input.addEventListener('change',async()=>{if(!await action('update_block',{pageId,blockId:b.id,patch:{[patch]:input.checked}}))input.checked=checked;});wrapper.append(input,document.createTextNode(label));return wrapper;
+    controlChange(input,async()=>{if(!await action('update_block',{pageId,blockId:b.id,patch:{[patch]:input.checked}}))input.checked=checked;});wrapper.append(input,document.createTextNode(label));return wrapper;
   };
   const pins=element('label'),select=element('select');select.setAttribute('aria-label','Pinned first columns');select.id=`${b.id}-pins`;
   for(let i=0;i<=b.columns.length;i++){const option=element('option');option.value=String(i);option.textContent=String(i);select.append(option);}select.value=String(b.pinnedColumns);
-  select.addEventListener('change',async()=>{if(!await action('update_block',{pageId,blockId:b.id,patch:{pinnedColumns:Number(select.value)}}))select.value=String(b.pinnedColumns);});pins.append(document.createTextNode('Pin first columns '),select);
+  controlChange(select,async()=>{if(!await action('update_block',{pageId,blockId:b.id,patch:{pinnedColumns:Number(select.value)}}))select.value=String(b.pinnedColumns);});pins.append(document.createTextNode('Pin first columns '),select);
   const options=element('details','table-options'),summary=element('summary'),panel=element('div','table-options-panel');options.open=document.querySelector<HTMLDetailsElement>(`[data-block-id="${CSS.escape(b.id)}"] .table-options`)?.open??false;summary.setAttribute('aria-label','Table options');summary.append(icon('settings'),document.createTextNode('Table options'));
   options.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();options.open=false;summary.focus();}});
   const pinHeader=checkbox('Pin header',b.pinnedHeader,'pinnedHeader');pinHeader.querySelector('input')!.disabled=!b.headerRow;
@@ -418,9 +421,9 @@ function renderReminder(shell:HTMLElement,b:BlockOf<'reminder'>) {
   const box = element('div', 'reminder-box'); const reminderIcon=icon('reminder');reminderIcon.classList.add('reminder-icon');
   const body = element('div', 'reminder-body'); body.append(editable(b.title, 'Reminder text', (value,pageId) => action('update_block', { pageId, blockId: b.id, patch: { title: value } }, { quiet: true }), { className: 'block-title',draftId:JSON.stringify([b.id,'title']) }));
   const dateRow = element('div', 'reminder-date'); const input = element('input'); input.type = 'datetime-local'; input.value = toLocalDateTime(b.dueAt); input.setAttribute('aria-label', 'Reminder date and time');
-  input.addEventListener('change', async () => { const dueAt = input.value ? new Date(input.value).toISOString() : ''; if(!await action('update_block', { blockId: b.id, patch: { dueAt, enabled: !!dueAt } }))input.value=toLocalDateTime(b.dueAt); });
+  controlChange(input, async () => { const dueAt = input.value ? new Date(input.value).toISOString() : ''; if(!await action('update_block', { blockId: b.id, patch: { dueAt, enabled: !!dueAt } }))input.value=toLocalDateTime(b.dueAt); });
   const status = element('span', 'reminder-status'); status.textContent = b.firedAt ? 'Delivered' : !b.enabled ? 'Off' : Date.parse(b.dueAt) <= Date.now() ? 'Due' : 'Scheduled'; dateRow.append(input, status); body.append(dateRow);
-  const label = element('label', 'reminder-enable'); const enabled = element('input'); enabled.type = 'checkbox'; enabled.checked = b.enabled; enabled.disabled = !b.dueAt; enabled.addEventListener('change', async () => {if(!await action('update_block', { blockId: b.id, patch: { enabled: enabled.checked } }))enabled.checked=b.enabled;}); label.append(enabled, document.createTextNode('On')); box.append(reminderIcon, body, label); shell.append(box);
+  const label = element('label', 'reminder-enable'); const enabled = element('input'); enabled.type = 'checkbox'; enabled.checked = b.enabled; enabled.disabled = !b.dueAt; controlChange(enabled, async () => {if(!await action('update_block', { blockId: b.id, patch: { enabled: enabled.checked } }))enabled.checked=b.enabled;}); label.append(enabled, document.createTextNode('On')); box.append(reminderIcon, body, label); shell.append(box);
   const note = element('p', 'reminder-note'); note.textContent = 'While open, or when you return. Notification settings ↗'; note.append(button('Settings', 'Reminder settings', () => openSettings(), 'link-button')); shell.append(note);
 }
 function renderKanban(shell:HTMLElement,b:BlockOf<'kanban'>) {
@@ -441,7 +444,7 @@ function renderKanban(shell:HTMLElement,b:BlockOf<'kanban'>) {
       const tools = element('div', 'card-tools'); const handle = button('⠿', 'Drag card', () => {}, 'icon-button block-drag'); handle.style.fontSize = '12px'; draggable(handle, { kind: 'card', blockId: b.id, cardId: card.id, columnId: col.id });
       const select = element('select', 'card-move'); select.setAttribute('aria-label', 'Move card to column');
       b.columns.forEach(c => { const o = element('option'); o.value = c.id; o.textContent = `→ ${c.title || 'Untitled'}`; select.append(o); }); select.value = col.id;
-      select.addEventListener('change', async () => {if(!await action('card_move', { blockId: b.id, cardId: card.id, columnId: select.value }))select.value=col.id;});
+      controlChange(select, async () => {if(!await action('card_move', { blockId: b.id, cardId: card.id, columnId: select.value }))select.value=col.id;});
       tools.append(handle, select, rowsControls(() => action('card_move', { blockId: b.id, cardId: card.id, columnId: col.id, index: i - 1 }), () => action('card_move', { blockId: b.id, cardId: card.id, columnId: col.id, index: i + 1 }), () => action('card_remove', { blockId: b.id, cardId: card.id }), i === 0, i === col.cards.length - 1, 'card'));
       el.append(tools); dropTarget(el, data => data.kind === 'card' && data.blockId === b.id && data.cardId !== card.id, data => { let index = i; if (data.columnId === col.id && col.cards.findIndex(c => c.id === data.cardId) < i) index--; action('card_move', { blockId: b.id, cardId: data.cardId!, columnId: col.id, index }); }); cards.append(el);
     });
@@ -624,7 +627,7 @@ async function boot() {
     }
   }
   domId('theme').addEventListener('change', e => {try{shell!.setView({theme:(e.target as HTMLSelectElement).value as Page['theme']});}catch(error){applyTheme(shell!.getView().theme);notify(errorOf(error).message,'error',true);}}); themeQuery.addEventListener('change', () => applyTheme(shell!.getView().theme));
-  domId('notification-mode').addEventListener('change', async e => {const select=e.target as HTMLSelectElement,pageId=renderPageId,value=select.value as NotificationMode,previous=select.dataset.savedValue??store.getRenderState().notificationMode;if(!await action('set_page', { pageId,notificationMode:value })&&renderPageId===pageId)select.value=store.getPageMetadata(pageId)?.notificationMode??previous;});
+  controlChange(domId<HTMLSelectElement>('notification-mode'), async e => {const select=e.target as HTMLSelectElement,pageId=renderPageId,value=select.value as NotificationMode,previous=select.dataset.savedValue??store.getRenderState().notificationMode;if(!await action('set_page', { pageId,notificationMode:value })&&renderPageId===pageId)select.value=store.getPageMetadata(pageId)?.notificationMode??previous;});
   domId('undo-button').addEventListener('click', async () => { try { await flushPending({waitForComposition:true});await store.undo(); } catch (e) { notify(errorOf(e).message, 'error'); } });
   domId('redo-button').addEventListener('click', async () => { try { await flushPending({waitForComposition:true});await store.redo(); } catch (e) { notify(errorOf(e).message, 'error'); } });
   domId('export-button').addEventListener('click', async () => { domId('page-menu').open=false;await downloadJson(); notify('Notebook exported.'); });
