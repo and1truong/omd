@@ -624,7 +624,7 @@ async function boot() {
     }
   }
   domId('theme').addEventListener('change', e => {try{shell!.setView({theme:(e.target as HTMLSelectElement).value as Page['theme']});}catch(error){applyTheme(shell!.getView().theme);notify(errorOf(error).message,'error',true);}}); themeQuery.addEventListener('change', () => applyTheme(shell!.getView().theme));
-  domId('notification-mode').addEventListener('change', async e => {const select=e.target as HTMLSelectElement,pageId=renderPageId,value=select.value as NotificationMode,previous=select.dataset.savedValue??store.getRenderState().notificationMode;if(!await action('set_page', { pageId,notificationMode:value }))select.value=previous;});
+  domId('notification-mode').addEventListener('change', async e => {const select=e.target as HTMLSelectElement,pageId=renderPageId,value=select.value as NotificationMode,previous=select.dataset.savedValue??store.getRenderState().notificationMode;if(!await action('set_page', { pageId,notificationMode:value })&&renderPageId===pageId)select.value=store.getPageMetadata(pageId)?.notificationMode??previous;});
   domId('undo-button').addEventListener('click', async () => { try { await flushPending({waitForComposition:true});await store.undo(); } catch (e) { notify(errorOf(e).message, 'error'); } });
   domId('redo-button').addEventListener('click', async () => { try { await flushPending({waitForComposition:true});await store.redo(); } catch (e) { notify(errorOf(e).message, 'error'); } });
   domId('export-button').addEventListener('click', async () => { domId('page-menu').open=false;await downloadJson(); notify('Notebook exported.'); });
