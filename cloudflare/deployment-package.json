@@ -1,0 +1,19 @@
+{
+  "name": "omd-cloudflare",
+  "version": "0.0.4",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --local",
+    "deploy": "wrangler deploy",
+    "db:create": "wrangler d1 create omd-notebook",
+    "db:migrate": "wrangler d1 migrations apply omd-notebook --remote",
+    "db:migrate:local": "wrangler d1 migrations apply omd-notebook --local"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "wrangler": "4.151.0"
+  }
+}

@@ -88,7 +88,7 @@ export function createDiagramManager(store:NotebookStore,{notify}:{notify:Notify
   function cleanup(entry:Entry) {entry.disposed=true;clearTimeout(entry.timer);clearTimeout(entry.saveTimer);entry.renderer?.unmount();entry.api=null;entry.renderer=null;entry.pending=null;entry.saved=null;entry.source=null;entry.host.replaceChildren();entries.delete(key(entry.pageId,entry.blockId)); }
   return {
     mount,openFocus,closeFocus,
-    updateSource(blockId:string,source:string) { const entry=entries.get(key(store.getRenderState().id,blockId));if(entry)scheduleMermaid(entry,source); },
+    updateSource(pageId:string,blockId:string,source:string) { const entry=entries.get(key(pageId,blockId));if(entry)scheduleMermaid(entry,source); },
     begin() { used=new Set(); if(focused) { const entry=entries.get(focused)!;try{const block=get(entry.pageId,entry.blockId);if(entry.pageId!==store.getRenderState().id||block.type!=='excalidraw')closeFocus();}catch{closeFocus();} } },
     end() {
       // Cached blocks do not call mount again. Derive lifetime from the connected
@@ -104,6 +104,7 @@ export function createDiagramManager(store:NotebookStore,{notify}:{notify:Notify
       if(focused){const entry=entries.get(focused)!;const stage=domId('canvas-stage-host');if(entry.host.parentNode!==stage)stage.replaceChildren(entry.host);}
     },
     themeChanged() { for(const entry of entries.values()) { if(entry.type==='mermaid')scheduleMermaid(entry,entry.source??'');else if(entry.renderer)entry.renderer.draw(get(entry.pageId,entry.blockId).scene,theme()); } },
+    hasPending(){return [...entries.values()].some(entry=>entry.pending||entry.saving);},
     async flushAll() {await Promise.all([...entries.values()].map(flush));await store.idle();},
     async beforeNavigate() {await this.flushAll();closeFocus();},
     syncHeader() { if(focused) { domId('canvas-stage-title').textContent=store.getRenderState().title;domId('canvas-stage-subtitle').textContent=store.getRenderState().subtitle; } }

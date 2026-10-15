@@ -1,10 +1,11 @@
+import {waitForServer} from './server-ready.mjs';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {mkdir} from 'node:fs/promises';
 import {chromium,webkit} from 'playwright';
 const root=new URL('..',import.meta.url).pathname,engine=process.env.OMD_BROWSER??'chromium',base=process.env.OMD_BASE_PATH??'',url=`http://localhost:4335${base}/`;
 const startServer=()=>spawn(process.execPath,['scripts/serve.mjs'],{cwd:root,env:{...process.env,OMD_PORT:'4335',OMD_STATIC_DIR:'dist'},stdio:['ignore','pipe','pipe']});let server=startServer(),browser,page,blockId;
-const listening=()=>new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.once('error',reject);});
+const listening=()=>waitForServer(server);
 const ready=()=>page.evaluate(async()=>{window.timeApp=await import(new URL('./src/app.js',document.baseURI).href);await timeApp.ready;});
 const call=(name,input={})=>page.evaluate(async({name,input})=>{await timeApp.flushPending();const store=timeApp.getStore();return name==='undo'?store.undo():name==='redo'?store.redo():store.dispatch(name,input);},{name,input});
 const items=()=>page.evaluate(async blockId=>{await timeApp.flushPending();const {findBlock}=await import(new URL('./src/model.js',document.baseURI).href);return findBlock(timeApp.getStore().getState(),blockId,'checklist').block.items;},blockId);
@@ -34,7 +35,7 @@ try{
   const exported=await page.evaluate(()=>timeApp.getStore().export());await page.reload();await ready();assert.equal(await time(id).getAttribute('datetime'),'2026-10-13T07:16:16.000Z');assert.equal(await time(child).getAttribute('datetime'),'2026-10-13T07:16:16.000Z');await page.evaluate(json=>timeApp.getStore().import(json),exported);assert.equal(await time(id).getAttribute('datetime'),'2026-10-13T07:16:16.000Z');
   // A rejected transaction must not show a completion date that was never stored.
   const failed=(await call('checklist_add',{blockId,text:'Failed save'})).itemId;await page.evaluate(()=>{window.timePut=IDBObjectStore.prototype.put;const db=timeApp.getStore().databaseName();IDBObjectStore.prototype.put=function(...args){if(this.transaction.db.name===db)throw new DOMException('Completion quota','QuotaExceededError');return timePut.apply(this,args);};});
-  await row(failed).getByRole('checkbox').check();await page.locator('.notice.error').filter({hasText:'Completion quota'}).first().waitFor();assert.equal(await time(failed).count(),0);assert.equal((await items()).find(item=>item.id===failed).done,false);await page.evaluate(()=>{IDBObjectStore.prototype.put=timePut;});
+  await row(failed).getByRole('checkbox').click();await page.locator('.notice.error').filter({hasText:'Completion quota'}).first().waitFor();await page.waitForFunction(id=>!document.querySelector(`[data-item-id="${id}"] > .check-row input[type="checkbox"]`).checked,failed);assert.equal(await time(failed).count(),0);assert.equal((await items()).find(item=>item.id===failed).done,false);await page.evaluate(()=>{IDBObjectStore.prototype.put=timePut;});
   // Completed time stays saved and renders after a real offline boot.
   await page.evaluate(()=>navigator.serviceWorker.ready);await page.waitForFunction(()=>!!navigator.serviceWorker.controller);const stopped=new Promise(resolve=>server.once('exit',resolve));server.kill();await stopped;
   await row(failed).getByRole('checkbox').uncheck();await row(failed).getByRole('checkbox').check();await time(failed).waitFor();const offlineStamp=(await items()).find(item=>item.id===failed).completedAt;

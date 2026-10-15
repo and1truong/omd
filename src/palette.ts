@@ -1,12 +1,13 @@
 import type {NotebookStore,CommandName,CommandInput,PageRow,ErrorHandler} from './types.js';
 import {errorOf} from './dom.js';
+import {removesContent} from './command-effects.js';
 import {byId as domId} from './dom.js';
 import {MAX_PAGE_LEVELS} from './notebook.js';
 import {pagePath,followPageLink} from './routes.js';
-export function setupPalette(store:NotebookStore,{onError,beforeOpen=()=>{},beforeNavigate=()=>{}}:{onError?:ErrorHandler;beforeOpen?:()=>unknown;beforeNavigate?:()=>unknown}={}) {
+export function setupPalette(store:NotebookStore,{onError,beforeOpen=()=>{},beforeNavigate=()=>{}}:{onError?:ErrorHandler;beforeOpen?:()=>unknown;beforeNavigate?:(options?:{waitForComposition?:boolean})=>unknown}={}) {
   const dialog = domId('page-palette'), search = domId('page-search'), list = domId('palette-pages'), create = domId('palette-create'),parentSelect=domId('page-create-parent');
   let selected = 0, matches:PageRow[] = [];
-  const run = async <K extends CommandName>(action:K,args:CommandInput<K>) => { try { await beforeNavigate?.(); return await store.dispatch(action, args); } catch (error) { onError?.(errorOf(error)); return null; } };
+  const run = async <K extends CommandName>(action:K,args:CommandInput<K>) => { try { await beforeNavigate?.({waitForComposition:removesContent(action)}); return await store.dispatch(action, args); } catch (error) { onError?.(errorOf(error)); return null; } };
   const select = async (pageId:string) => { if(await run('page_select', { pageId }))dialog.close(); };
   function render(reveal = false) {
     const pages = store.listPages(), query = search.value.toLocaleLowerCase().trim();

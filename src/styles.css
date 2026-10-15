@@ -435,3 +435,5 @@ h3 { font-size: 13px; margin: 0 0 12px; }
 .block-type-callout:hover .callout-tone, .callout-tone:focus-visible { opacity:1; pointer-events:auto; }
 @media(hover:none) { .callout-body:focus-within > .callout-tone { opacity:1; pointer-events:auto; } }
 @media(max-width:760px) { .callout-body { flex-wrap:wrap; gap:8px; padding:12px; } .callout-body > .text-editor { flex-basis:calc(100% - 50px); } .callout-tone { margin-left:50px; } }
+
+@media(max-width:760px) { #storage-mode { display:none; } }

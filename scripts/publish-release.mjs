@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 
 const execute = (command, args) => execFileSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
 
@@ -38,6 +39,10 @@ export function publishRelease({ repository, tag, commit, assets, run = execute 
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const tag = process.env.RELEASE_TAG;
+  const names=readFileSync('release/SHA256SUMS.txt','utf8').trim().split('\n').map(line=>{
+    const match=/^[a-f0-9]{64}  ([A-Za-z0-9][A-Za-z0-9._-]*)$/.exec(line);
+    if(!match)throw new Error('Invalid release checksum entry.');return match[1];
+  });
   publishRelease({ repository: process.env.GH_REPO, tag, commit: process.env.GITHUB_SHA,
-    assets: [`release/omd-${tag}.zip`, `release/omd-${tag}.tar.gz`, 'release/SHA256SUMS.txt'] });
+    assets: [...names.map(name=>`release/${name}`), 'release/SHA256SUMS.txt'] });
 }

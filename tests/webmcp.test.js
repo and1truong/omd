@@ -90,8 +90,47 @@ test('agent cancellation does not apply an imported page', async () => {
   const result = await tools.find(t => t.name === 'omd_import_notebook').execute({ json: (await store.export()) }, { signal: signal.signal });
   assert.equal(result.imported, false);
 });
+test('cancellation while awaiting editor flush or store idle prevents the tool mutation',async()=>{
+  for(const stage of ['flush','idle']){
+    const store=await setup(),controller=new AbortController();let release,entered;
+    const waiting=new Promise(resolve=>{entered=resolve;}),gate=new Promise(resolve=>{release=resolve;});
+    const wait=()=>{entered();return gate;};
+    const originalIdle=store.idle;if(stage==='idle')store.idle=wait;
+    const tools=createTools(store,stage==='flush'?{flushPending:wait}:{});
+    const executing=tools.find(t=>t.name==='omd_set_page').execute({title:'Cancelled edit'},{signal:controller.signal});
+    await waiting;controller.abort();release();await assert.rejects(()=>executing,/cancelled/);
+    assert.equal(store.getRevision(),0);assert.equal(store.getState().title,'My day, on a page');
+    store.idle=originalIdle;await store.close();
+  }
+});
+test('cancellation while downloading an import backup preserves the current notebook',async()=>{
+  const store=await setup(),json=await store.export(),controller=new AbortController();
+  await store.dispatch('set_page',{title:'Keep this notebook'});const before=await store.export();
+  let release,entered;const waiting=new Promise(resolve=>{entered=resolve;}),gate=new Promise(resolve=>{release=resolve;});
+  const tools=createTools(store,{confirmImport:async()=>true,download:()=>{entered();return gate;}});
+  const importing=tools.find(t=>t.name==='omd_import_notebook').execute({json},{signal:controller.signal});
+  await waiting;controller.abort();release();assert.deepEqual(await importing,{imported:false,reason:'cancelled'});
+  assert.equal(await store.export(),before);await store.close();
+});
 test('canvas tools wait for async UI completion and propagate rejected operations',async()=>{
   const store=await setup();let release,finished=false;const gate=new Promise(resolve=>{release=resolve;});const tools=createTools(store,{openCanvas:async()=>{await gate;finished=true;},closeCanvas:async()=>{throw new Error('Could not save canvas.');}});
   const opening=call(tools,'open_canvas',{blockId:'canvas'});await new Promise(resolve=>setImmediate(resolve));assert.equal(finished,false);release();assert.deepEqual(await opening,{opened:true});assert.equal(finished,true);
   await assert.rejects(()=>call(tools,'close_canvas'),/Could not save/);await store.close();
+});
+
+test('destructive tools request composition settlement before mutation, including cancellation',async()=>{
+  const store=await setup(),blockId=(await store.dispatch('add_block',{type:'heading',text:'Keep me'})).blockId;
+  let release,entered,requested;const waiting=new Promise(resolve=>{entered=resolve;}),gate=new Promise(resolve=>{release=resolve;});
+  const tools=createTools(store,{flushPending:options=>{requested=options;entered();return gate;}}),controller=new AbortController();
+  const deleting=tools.find(t=>t.name==='omd_remove_block').execute({blockId},{signal:controller.signal});
+  await waiting;assert.deepEqual(requested,{waitForComposition:true});assert.equal(store.getState().blocks.length,1);
+  controller.abort();release();await assert.rejects(()=>deleting,/cancelled/);assert.equal(store.getState().blocks.length,1);
+  await store.close();
+});
+
+test('import rejects changes made while the backup is downloading',async()=>{
+  const store=await setup(),json=await store.export();let optionsSeen=[];
+  const tools=createTools(store,{flushPending:options=>optionsSeen.push(options),confirmImport:async()=>true,download:()=>store.dispatch('set_page',{title:'Edit during backup'})});
+  await assert.rejects(()=>call(tools,'import_notebook',{json}),/changed during backup/);
+  assert.equal(store.getState().title,'Edit during backup');assert.ok(optionsSeen.every(options=>options.waitForComposition));await store.close();
 });

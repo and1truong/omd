@@ -1,8 +1,9 @@
+import {waitForServer} from './server-ready.mjs';
 import assert from 'node:assert/strict';import {spawn} from 'node:child_process';import {chromium,webkit} from 'playwright';
 const root=new URL('..',import.meta.url).pathname,engine=process.env.OMD_BROWSER??'chromium',base=process.env.OMD_BASE_PATH??'',url=`http://localhost:4332${base}/`;
 const server=spawn(process.execPath,['scripts/serve.mjs'],{cwd:root,env:{...process.env,OMD_PORT:'4332',OMD_STATIC_DIR:'dist'},stdio:['ignore','pipe','pipe']});let browser;
 try{
- await new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.once('error',reject);});browser=await({chromium,webkit}[engine]).launch();const context=await browser.newContext(),page=await context.newPage();
+ await waitForServer(server);browser=await({chromium,webkit}[engine]).launch();const context=await browser.newContext(),page=await context.newPage();
  await page.goto(url);await page.evaluate(async()=>{window.app=await import(new URL('./src/app.js',document.baseURI).href);await app.ready;window.store=app.getStore();});
  const call=(name,input)=>page.evaluate(async({name,input})=>{await app.flushPending();return store.dispatch(name,input);},{name,input});await call('page_add',{title:'Heading regression'});
  const id=(await call('add_block',{type:'heading',text:'Original\nlegacy heading'})).blockId,box=page.getByRole('textbox',{name:'heading content',exact:true});
@@ -13,6 +14,7 @@ try{
  await page.evaluate(()=>{const put=IDBObjectStore.prototype.put;window.restore=()=>{IDBObjectStore.prototype.put=put;};IDBObjectStore.prototype.put=function(...args){if(this.name==='records')throw new DOMException('heading save quota','QuotaExceededError');return put.apply(this,args);};});
  await box.fill('Kept after failure');await box.press('Enter');await page.waitForFunction(()=>document.getElementById('notices').textContent.includes('heading save quota'));assert.equal(await box.evaluate(el=>el===document.activeElement),true);assert.equal(await box.inputValue(),'Kept after failure');assert.equal(await page.evaluate(()=>store.getState().blocks[0].text),'Tiếng Việt');
  await page.evaluate(()=>window.restore());await box.press('Enter');await page.waitForFunction(()=>store.getState().blocks[0].text==='Kept after failure'&&document.activeElement?.getAttribute('aria-label')!=='heading content');
+ assert.equal(await page.locator('#save-status').textContent(),'Saved');
  const parent=(await call('add_block',{type:'tabs'})).block;await call('remove_block',{blockId:id});const nested=(await call('add_block',{type:'heading',containerId:parent.tabs[0].id,text:'Nested heading'})).blockId;
  await page.locator(`[id="${nested}-text"]`).fill('Nested saved');await page.locator(`[id="${nested}-text"]`).press('Enter');await page.waitForFunction(id=>document.activeElement?.id!==`${id}-text`,nested);
  await page.reload();await page.evaluate(async()=>{window.app=await import(new URL('./src/app.js',document.baseURI).href);await app.ready;window.store=app.getStore();});assert.equal(await page.locator(`[id="${nested}-text"]`).inputValue(),'Nested saved');

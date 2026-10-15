@@ -1,5 +1,7 @@
+import {isCloudflare} from './runtime.js';
+import {removesContent} from './command-effects.js';
 import {errorOf} from './dom.js';
-import type {NotebookStore,Block,BlockType,BlockOf,CommandName,CommandInput,MutationResult,Page,ChangeEvent,PartialView,Notify,NotificationMode,ReminderBlock,BlockOptions,ChecklistItem} from './types.js';
+import type {NotebookStore,Block,BlockType,BlockOf,CommandName,CommandInput,MutationResult,Page,ChangeEvent,PartialView,Notify,NotificationMode,ReminderBlock,BlockOptions,ChecklistItem,SaveStatus} from './types.js';
 import {byId as domId} from './dom.js';
 import { createCompositionGuard } from './composition.js';
 import { createStore } from './store.js';
@@ -20,6 +22,7 @@ import {appBase,routePageId,setupRoutes} from './routes.js';
 
 function $<T extends HTMLElement=HTMLElement>(selector:string):T {if(selector.startsWith('#'))return domId<T>(selector.slice(1));const node=document.querySelector<T>(selector);if(!node)throw new Error(`Missing element: ${selector}`);return node;}
 let store:NotebookStore,palette:ReturnType<typeof setupPalette>|undefined,diagrams:ReturnType<typeof createDiagramManager>|undefined,renderer:ReturnType<typeof createRenderCache>,shell:ReturnType<typeof setupShell>|undefined,dragData:DragData|null|undefined;
+let cloudUnsaved=false;
 let textEditors:ReturnType<typeof createTextEditors>|undefined;
 let tableEdits:ReturnType<typeof createTableEdits>|undefined;
 let tableEditors:ReturnType<typeof createTableEditors>|undefined;
@@ -27,12 +30,41 @@ interface InsertionAnchor {blockId:string;side:'before'|'after'}
 interface DragData {containerId?:string;kind:'block'|'card'|'column'|'tab';blockId:string;cardId?:string;columnId?:string;tabId?:string;pageId?:string}
 let suppressTabClick=false;
 let tabTitleEdit:{flush:()=>Promise<unknown>}|undefined;
+const inputEdits=new Map<string|HTMLElement,{input:HTMLElement;pageId:string;value:string;write:()=>Promise<unknown>}>();
+const inputEditKey=(input:HTMLElement,pageId:string)=>input.dataset.draftKey||['page-title','page-subtitle'].includes(input.id)?JSON.stringify([pageId,input.dataset.draftKey??input.id]):input;
+let refreshInputStatus=()=>{},deferredInputRender=false,pendingControls=0;
+function hasPendingEdits(){return pendingControls>0||inputEdits.size>0||!!tabTitleEdit||composition.hasActive()||!!textEditors?.hasPending()||!!tableEditors?.hasPending()||!!diagrams?.hasPending();}
+function settleInputRender(){if(deferredInputRender&&!inputEdits.size&&!tabTitleEdit&&!composition.hasActive()){deferredInputRender=false;render(store.getRenderState(),{reset:true});}}
+function trackInput(input:HTMLInputElement|HTMLTextAreaElement,save:(value:string,pageId:string)=>unknown,getPageId:()=>string){
+  let pending:{pageId:string;value:string;task:Promise<unknown>}|undefined;
+  function write(pageId:string,value=input.value):Promise<unknown>{
+    if(pending?.pageId===pageId&&pending.value===value)return pending.task;
+    const key=inputEditKey(input,pageId),edit={input,pageId,value,write:()=>write(pageId,value)};inputEdits.set(key,edit);refreshInputStatus();
+    const task=Promise.resolve(save(value,pageId)).then(result=>{
+      if(result!==null&&inputEdits.get(key)===edit){inputEdits.delete(key);settleInputRender();}
+      return result;
+    }).finally(()=>{if(pending?.task===task)pending=undefined;refreshInputStatus();});
+    pending={pageId,value,task};return task;
+  }
+  composition.track(input,write,getPageId);
+  input.addEventListener('input',()=>{const pageId=composition.pageId(input)??getPageId(),value=input.value;if(composition.isComposing(input)){inputEdits.set(inputEditKey(input,pageId),{input,pageId,value,write:()=>write(pageId,value)});refreshInputStatus();}else void write(pageId,value).catch(()=>{});});
+  return write;
+}
+async function flushInputEdits(pageId?:string){
+  // Composition owns its final save; unrelated tools can run while its DOM stays connected.
+  for(const [key,edit] of [...inputEdits])if(inputEdits.get(key)===edit&&(!pageId||edit.pageId===pageId)&&!composition.isComposing(edit.input)&&await edit.write()===null)throw new Error('Could not save this edit. Your draft is still here; retry before leaving.');
+}
 export const openPalette = () => {shell?.closeMobile();palette?.open();};
 export const getView = () => shell!.getView();
 export const setView = async (patch:PartialView) => {if(patch.sidebarOpen)await beforeNavigate();return shell!.setView(patch);};
-export async function flushPending({waitForTransitions=true}:{waitForTransitions?:boolean}={}){await tabTitleEdit?.flush();await tableEditors?.flushAll();await textEditors?.flushAll({waitForTransitions});await diagrams?.flushAll();}
+export async function flushPending({waitForTransitions=true,waitForComposition=false}:{waitForTransitions?:boolean;waitForComposition?:boolean}={}){
+  do{
+    if(waitForComposition)await composition.settled();
+    await flushInputEdits();await tabTitleEdit?.flush();await tableEditors?.flushAll();await textEditors?.flushAll({waitForTransitions});await diagrams?.flushAll();
+  }while(waitForComposition&&composition.hasActive());
+}
 export const flushDiagrams=flushPending;
-async function beforeNavigate(){await tabTitleEdit?.flush();await tableEditors?.flushAll();await textEditors?.flushAll();await diagrams?.beforeNavigate();}
+async function beforeNavigate({waitForComposition=false}:{waitForComposition?:boolean}={}){await flushInputEdits(store.getActivePageId());await tabTitleEdit?.flush();await tableEditors?.flushAll();await textEditors?.flushAll({pageId:store.getActivePageId()});await diagrams?.beforeNavigate();if(waitForComposition)await flushPending({waitForComposition:true});}
 export async function openCanvas(blockId:string,pageId?:string) {
   const page=await store.getPage(pageId);findBlock(page,blockId,'excalidraw');await flushPending();
   shell?.closeMobile();
@@ -51,20 +83,24 @@ export function notify(message:string,kind = '', persistent = false) {
   if(!persistent)setTimeout(()=>el.remove(),kind==='error'?12000:5000);
 }
 function element<T extends keyof HTMLElementTagNameMap>(tag:T,className = '') { const el = document.createElement(tag); el.className = className; return el; }
+function controlChange(input:HTMLInputElement|HTMLSelectElement,change:(event:Event)=>Promise<unknown>){
+  let saving=false;input.addEventListener('change',async event=>{if(saving)return;saving=true;const disabled=input.disabled;input.disabled=true;pendingControls++;refreshInputStatus();try{await change(event);}catch(error){notify(errorOf(error).message,'error',true);}finally{input.disabled=disabled;saving=false;pendingControls--;refreshInputStatus();}});
+}
 function button(label:string,aria:string,fn:(event:MouseEvent)=>unknown,className = 'icon-button') {
   const b = element('button', className); b.type = 'button'; if(labelIcon[label])b.append(icon(labelIcon[label]));else b.textContent=label; b.title = aria; b.setAttribute('aria-label', aria); b.addEventListener('click', fn); return b;
 }
 async function action<K extends CommandName>(name:K,input:CommandInput<K>,{quiet=false,focus}: {quiet?:boolean;focus?:string}={}):Promise<MutationResult<K>|null> {
-  try { input={...input,pageId:input.pageId??store.getActivePageId()}; domId('save-status').textContent='Saving…'; if(!quiet)await flushPending(); const result = await store.dispatch(name, input, { quiet }); if (focus) requestAnimationFrame(()=>document.getElementById(focus)?.focus()); return result; }
+  try { input={...input,pageId:input.pageId??store.getActivePageId()}; domId('save-status').textContent='Saving…'; if(!quiet)await flushPending({waitForComposition:removesContent(name)}); const result = await store.dispatch(name, input, { quiet }); if (focus) requestAnimationFrame(()=>document.getElementById(focus)?.focus()); return result; }
   catch (error) { domId('save-status').textContent = 'Not saved'; notify(errorOf(error).message, 'error', true); return null; }
 }
-function editable(value:string,aria:string,fn:(value:string,pageId:string)=>unknown,{multiline=false,className='',placeholder='',id}: {multiline?:boolean;className?:string;placeholder?:string;id?:string}={}) {
+function pageAction(pageId:string){return <K extends CommandName>(name:K,input:CommandInput<K>,options?:{quiet?:boolean;focus?:string})=>action(name,{...input,pageId:input.pageId??pageId},options);}
+function editable(value:string,aria:string,fn:(value:string,pageId:string)=>unknown,{multiline=false,className='',placeholder='',id,draftId}: {multiline?:boolean;className?:string;placeholder?:string;id?:string;draftId?:string}={}) {
   const input=multiline?element('textarea',className):element('input',className);if(input instanceof HTMLInputElement)input.type='text';else input.rows=1;
   input.value = value; input.placeholder = placeholder; input.setAttribute('aria-label', aria); if (id) input.id = id;
   const pageId=store.getActivePageId();
-  function write() { const result=fn(input.value,pageId); if(multiline)fit(input);return result; }
-  composition.track(input,write,()=>pageId);
-  input.addEventListener('input',()=>{if(!composition.isComposing(input))write();});
+  input.dataset.draftKey=draftId??JSON.stringify([id??aria]);
+  const draft=inputEdits.get(inputEditKey(input,pageId));if(draft){input.value=draft.value;draft.input=input;}
+  trackInput(input,(value,pageId)=>{const result=fn(value,pageId);if(multiline)fit(input);return result;},()=>pageId);
   if (multiline) input.dataset.autofit = 'true'; return input;
 }
 function fit(el:HTMLElement) { el.style.height = 'auto'; el.style.height = `${el.scrollHeight}px`; }
@@ -79,7 +115,7 @@ async function createTextAfter(blockId:string,pageId:string,focus=true) {
 }
 function title(b:Extract<Block,{title:string}>,glyph:string) {
   const head = element('div', 'block-heading'); const glyphIcon=icon(b.type);glyphIcon.classList.add('type-glyph');
-  head.append(glyphIcon, editable(b.title, `${b.type} title`, (value,pageId) => action('update_block', { pageId, blockId: b.id, patch: { title: value } }, { quiet: true }), { className: 'block-title', placeholder: 'Untitled' })); return head;
+  head.append(glyphIcon, editable(b.title, `${b.type} title`, (value,pageId) => action('update_block', { pageId, blockId: b.id, patch: { title: value } }, { quiet: true }), { className: 'block-title', placeholder: 'Untitled',draftId:JSON.stringify([b.id,'title']) })); return head;
 }
 function rowsControls(onUp:()=>unknown,onDown:()=>unknown,onRemove:()=>unknown,upDisabled:boolean,downDisabled:boolean,label:string) {
   const tools = element('div', 'row-controls');
@@ -102,16 +138,17 @@ function endDrag() {
   setTimeout(()=>{suppressTabClick=false;},0);
 }
 function draggable(handle:HTMLElement,data:DragData) {
-  handle.draggable = true; handle.addEventListener('dragstart', event => { event.stopPropagation(); dragData = data; event.dataTransfer!.effectAllowed = 'move'; event.dataTransfer!.setData('application/x-omd', JSON.stringify(data)); (data.kind==='tab'?handle:handle.closest('.block,.kanban-card,.kanban-column'))?.classList.add('dragging'); if (data.kind === 'block') requestAnimationFrame(()=>{if(dragData===data)document.body.classList.add('dragging-block');}); if(data.kind==='tab')suppressTabClick=true; });
+  data={...data,pageId:data.pageId??renderPageId};handle.draggable = true; handle.addEventListener('dragstart', event => { event.stopPropagation(); dragData = data; event.dataTransfer!.effectAllowed = 'move'; event.dataTransfer!.setData('application/x-omd', JSON.stringify(data)); (data.kind==='tab'?handle:handle.closest('.block,.kanban-card,.kanban-column'))?.classList.add('dragging'); if (data.kind === 'block') requestAnimationFrame(()=>{if(dragData===data)document.body.classList.add('dragging-block');}); if(data.kind==='tab')suppressTabClick=true; });
   handle.addEventListener('dragend', endDrag);
 }
 function dropTarget(el:HTMLElement,canDrop:(data:DragData)=>boolean,drop:(data:DragData)=>unknown) {
-  el.addEventListener('dragover', event => { if (dragData && canDrop(dragData)) { event.preventDefault(); event.stopPropagation(); event.dataTransfer!.dropEffect = 'move'; el.classList.add('drop-active'); } });
+  el.addEventListener('dragover', event => { if (dragData && dragData.pageId===renderPageId && renderPageId===store.getActivePageId() && canDrop(dragData)) { event.preventDefault(); event.stopPropagation(); event.dataTransfer!.dropEffect = 'move'; el.classList.add('drop-active'); } });
   el.addEventListener('dragleave', event => { if (!el.contains(event.relatedTarget as Node|null)) el.classList.remove('drop-active'); });
-  el.addEventListener('drop', event => { if (dragData && canDrop(dragData)) { event.preventDefault(); event.stopPropagation(); el.classList.remove('drop-active'); drop(dragData); } });
+  el.addEventListener('drop', event => { if (dragData && dragData.pageId===renderPageId && renderPageId===store.getActivePageId() && canDrop(dragData)) { event.preventDefault(); event.stopPropagation(); el.classList.remove('drop-active'); drop(dragData); } });
 }
 
 function makeBlockList(blocks:Block[],containerId:string,nodes:HTMLElement[]) {
+  const pageId=renderPageId,action=pageAction(pageId);
   const list = element('div', 'block-list'); list.dataset.container = containerId;
   function slot(index:number) {
     const el = element('div', 'drop-slot');
@@ -132,10 +169,11 @@ function makeBlockList(blocks:Block[],containerId:string,nodes:HTMLElement[]) {
   dropTarget(add, data => data.kind === 'block', data => action('move_block', { blockId: data.blockId, containerId })); return {node:list,children};
 }
 function renderBlock(b:Block,containerId:string,index:number,count:number) {
+  const pageId=renderPageId,action=pageAction(pageId);
   const shell = element('section', `block block-type-${b.type}`); shell.dataset.blockId = b.id;
   const controls = element('div', 'block-controls'); const handle = button('⠿', 'Drag block', () => {}, 'icon-button block-drag'); draggable(handle, { kind: 'block', blockId: b.id, containerId });
-  const more=button('…','Block actions',()=>{
-    const current=findBlock(store.getRenderState(),b.id),position=current.siblings.findIndex(block=>block.id===b.id);
+  const more=button('…','Block actions',async()=>{
+    const current=findBlock(await store.getPage(pageId),b.id),position=current.siblings.findIndex(block=>block.id===b.id);
     showMenu('block-actions-dialog','Block actions',[
       {label:'Insert block before',icon:'plus',run:()=>openPicker(containerId,{blockId:b.id,side:'before'})},
       {label:'Insert block after',icon:'plus',run:()=>openPicker(containerId,{blockId:b.id,side:'after'})},
@@ -152,7 +190,7 @@ function renderBlock(b:Block,containerId:string,index:number,count:number) {
       const symbol=editable(b.icon,'Callout icon',(value,pageId)=>action('update_block',{pageId,blockId:b.id,patch:{icon:value}},{quiet:true}),{className:'callout-icon',id:`${b.id}-icon`,placeholder:'💡'});symbol.maxLength=32;
       const tone=element('select','callout-tone');tone.id=`${b.id}-tone`;tone.setAttribute('aria-label','Callout color');
       for(const value of CALLOUT_TONES){const option=element('option');option.value=value;option.textContent=value[0].toUpperCase()+value.slice(1);tone.append(option);}tone.value=b.tone;
-      const pageId=renderPageId;tone.addEventListener('change',()=>{void action('update_block',{pageId,blockId:b.id,patch:{tone:tone.value as typeof b.tone}},{quiet:true}).then(result=>{if(result)body.dataset.tone=tone.value;});});
+      controlChange(tone,async()=>{const value=tone.value as typeof b.tone,previous=body.dataset.tone??b.tone;const result=await action('update_block',{pageId,blockId:b.id,patch:{tone:value}},{quiet:true});if(result)body.dataset.tone=value;else tone.value=previous;});
       body.append(symbol,textEditors!.mount(b,renderPageId),tone);shell.append(body);break;
     }
     case 'heading': {
@@ -161,7 +199,7 @@ function renderBlock(b:Block,containerId:string,index:number,count:number) {
       text.addEventListener('keydown',event=>{
         const key=event as KeyboardEvent;if(key.key!=='Enter'||key.isComposing||key.keyCode===229||composition.isComposing(text))return;
         key.preventDefault();if(key.repeat||finishing)return;finishing=true;
-        void action('update_block',{pageId,blockId:b.id,patch:{text:text.value}},{quiet:true}).then(result=>{if(result&&document.activeElement===text)text.blur();}).finally(()=>{finishing=false;});
+        void flushInputEdits().then(()=>{if(document.activeElement===text)text.blur();}).catch(error=>notify(errorOf(error).message,'error',true)).finally(()=>{finishing=false;});
       });shell.append(text);break;
     }
     case 'divider': shell.append(element('hr')); break;
@@ -173,16 +211,17 @@ function renderBlock(b:Block,containerId:string,index:number,count:number) {
     case 'reminder': renderReminder(shell, b); break;
     case 'kanban': renderKanban(shell, b); break;
     case 'mermaid': {
-      shell.append(title(b,'◇'),editable(b.source,'Mermaid Markdown source',async (value,pageId)=>{if(await action('update_block',{pageId,blockId:b.id,patch:{source:value}},{quiet:true}))diagrams!.updateSource(b.id,value);},{multiline:true,className:'mermaid-source',id:`${b.id}-source`,placeholder:'flowchart LR\n  A --> B'}),diagrams!.mount(b,renderPageId)); break;
+      shell.append(title(b,'◇'),editable(b.source,'Mermaid Markdown source',async (value,pageId)=>{const result=await action('update_block',{pageId,blockId:b.id,patch:{source:value}},{quiet:true});if(result)diagrams!.updateSource(pageId,b.id,value);return result;},{multiline:true,className:'mermaid-source',id:`${b.id}-source`,placeholder:'flowchart LR\n  A --> B'}),diagrams!.mount(b,renderPageId)); break;
     }
     case 'excalidraw': {
-      const head=title(b,'✎');head.append(button('↗ Full page','Open canvas full page',()=>openCanvas(b.id), 'add-inline'));
+      const head=title(b,'✎');head.append(button('↗ Full page','Open canvas full page',()=>openCanvas(b.id,pageId), 'add-inline'));
       const placeholder=element('div','canvas-placeholder');placeholder.dataset.canvasPlaceholder=b.id;placeholder.append(diagrams!.mount(b,renderPageId));shell.append(head,placeholder); break;
     }
   }
   return shell;
 }
 function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
+  const pageId=renderPageId,action=pageAction(pageId);
   const completedFormat=new Intl.DateTimeFormat(undefined,{dateStyle:'medium',timeStyle:'short'}),completedDetail=new Intl.DateTimeFormat(undefined,{dateStyle:'full',timeStyle:'long'});
   let total=0,done=0;
   async function addItem(parentId?:string,index?:number) {const result=await action('checklist_add',{blockId:b.id,parentId,index});if(result)requestAnimationFrame(()=>domId(result.itemId)?.focus());}
@@ -193,7 +232,7 @@ function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
       const parent=ancestors.at(-1),level=ancestors.length+1;
       const entry=element('div','checklist-item');entry.setAttribute('role','listitem');entry.dataset.itemId=item.id;entry.dataset.level=String(level);
       const row=element('div',`check-row ${item.done?'done':''}`),check=element('input');check.type='checkbox';check.checked=item.done;check.setAttribute('aria-label',`Complete ${item.text||'item'}`);
-      check.addEventListener('change',()=>action('checklist_update',{blockId:b.id,itemId:item.id,patch:{done:check.checked}}));
+      controlChange(check,async()=>{if(!await action('checklist_update',{blockId:b.id,itemId:item.id,patch:{done:check.checked}}))check.checked=item.done;});
       const canIndent=index>0&&level+checklistHeight(item)<=MAX_CHECKLIST_LEVELS;
       const indent=()=>action('checklist_move',{blockId:b.id,itemId:item.id,parentId:items[index-1].id,index:items[index-1].children?.length??0},{focus:item.id});
       const outdent=()=>{
@@ -222,7 +261,8 @@ function renderChecklist(shell:HTMLElement,b:BlockOf<'checklist'>) {
   shell.append(button('+ Add an item', 'Add checklist item', async () => { const r = await action('checklist_add', { blockId: b.id }); if (r) requestAnimationFrame(() => domId(r.itemId)?.focus()); }, 'add-inline'));
 }
 function renderTable(shell:HTMLElement,b:BlockOf<'table'>) {
-  const pageId=store.getActivePageId(),cellKey=(rowId:string,columnId:string)=>`table-cell-${encodeURIComponent(JSON.stringify([b.id,rowId,columnId]))}`,cellId=(r:number,c:number)=>cellKey(b.rows[r].id,b.columns[c].id);
+  const action=pageAction(renderPageId);
+  const pageId=renderPageId,cellKey=(rowId:string,columnId:string)=>`table-cell-${encodeURIComponent(JSON.stringify([b.id,rowId,columnId]))}`,cellId=(r:number,c:number)=>cellKey(b.rows[r].id,b.columns[c].id);
   const toolbar=element('div','table-toolbar'),size=element('span','muted');toolbar.style.width=`${b.columns.length*160+32}px`;size.textContent=`${b.rows.length} rows × ${b.columns.length} columns`;
   const addRow=async(index?:number)=>{const result=await action('table_row_add',{pageId,blockId:b.id,index});if(result)requestAnimationFrame(()=>document.getElementById(cellKey(result.rowId,b.columns[0].id))?.focus());};
   const addColumn=async(index?:number)=>{const result=await action('table_column_add',{pageId,blockId:b.id,index});if(result)requestAnimationFrame(()=>document.getElementById(cellKey(b.rows[0].id,result.columnId))?.focus());};
@@ -230,11 +270,11 @@ function renderTable(shell:HTMLElement,b:BlockOf<'table'>) {
   rowButton.disabled=b.rows.length>=MAX_TABLE_ROWS;columnButton.disabled=b.columns.length>=MAX_TABLE_COLUMNS;
   const checkbox=(label:string,checked:boolean,patch:'headerRow'|'pinnedHeader')=>{
     const wrapper=element('label'),input=element('input');input.type='checkbox';input.checked=checked;input.id=`${b.id}-${patch}`;input.setAttribute('aria-label',label);
-    input.addEventListener('change',async()=>{if(!await action('update_block',{pageId,blockId:b.id,patch:{[patch]:input.checked}}))input.checked=checked;});wrapper.append(input,document.createTextNode(label));return wrapper;
+    controlChange(input,async()=>{if(!await action('update_block',{pageId,blockId:b.id,patch:{[patch]:input.checked}}))input.checked=checked;});wrapper.append(input,document.createTextNode(label));return wrapper;
   };
   const pins=element('label'),select=element('select');select.setAttribute('aria-label','Pinned first columns');select.id=`${b.id}-pins`;
   for(let i=0;i<=b.columns.length;i++){const option=element('option');option.value=String(i);option.textContent=String(i);select.append(option);}select.value=String(b.pinnedColumns);
-  select.addEventListener('change',async()=>{if(!await action('update_block',{pageId,blockId:b.id,patch:{pinnedColumns:Number(select.value)}}))select.value=String(b.pinnedColumns);});pins.append(document.createTextNode('Pin first columns '),select);
+  controlChange(select,async()=>{if(!await action('update_block',{pageId,blockId:b.id,patch:{pinnedColumns:Number(select.value)}}))select.value=String(b.pinnedColumns);});pins.append(document.createTextNode('Pin first columns '),select);
   const options=element('details','table-options'),summary=element('summary'),panel=element('div','table-options-panel');options.open=document.querySelector<HTMLDetailsElement>(`[data-block-id="${CSS.escape(b.id)}"] .table-options`)?.open??false;summary.setAttribute('aria-label','Table options');summary.append(icon('settings'),document.createTextNode('Table options'));
   options.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();options.open=false;summary.focus();}});
   const pinHeader=checkbox('Pin header',b.pinnedHeader,'pinnedHeader');pinHeader.querySelector('input')!.disabled=!b.headerRow;
@@ -283,7 +323,8 @@ function renderTable(shell:HTMLElement,b:BlockOf<'table'>) {
   shell.append(title(b,'▦'),toolbar,scroll);const hint=element('small','muted');hint.textContent='Tab: next cell · Enter: next row · Shift+Enter: new line · Ctrl/⌘ + arrows: adjacent cell';shell.append(hint);
 }
 function renderTabs(shell:HTMLElement,b:BlockOf<'tabs'>) {
-  const pageId=store.getActivePageId();
+  const action=pageAction(renderPageId);
+  const pageId=renderPageId;
   shell.append(title(b, '▤')); const group = element('div', 'tab-group'); const layout = element('div', `tabs-layout ${b.orientation}`);
   const tablist = element('div', 'tablist'); tablist.setAttribute('role', 'tablist'); tablist.setAttribute('aria-label', b.title || 'Tabs'); tablist.setAttribute('aria-orientation', b.orientation);
   const headers:HTMLElement[]=[];
@@ -322,7 +363,7 @@ function renderTabs(shell:HTMLElement,b:BlockOf<'tabs'>) {
       const session={flush:()=>finish()};
       function close(focus=false) {
         finished=true;observer.disconnect();if(tabTitleEdit===session)tabTitleEdit=undefined;
-        input.remove();header.removeAttribute('role');for(const name of ['aria-label','aria-selected','aria-controls'])header.removeAttribute(name);tab.hidden=rename.hidden=false;if(focus&&tab.isConnected)tab.focus();
+        input.remove();header.removeAttribute('role');for(const name of ['aria-label','aria-selected','aria-controls'])header.removeAttribute(name);tab.hidden=rename.hidden=false;if(focus&&tab.isConnected)tab.focus();settleInputRender();refreshInputStatus();
       }
       function finish(focus=false,finalComposition=false):Promise<void> {
         if(finished)return Promise.resolve();requested=true;
@@ -360,29 +401,33 @@ function renderTabs(shell:HTMLElement,b:BlockOf<'tabs'>) {
   panel.append(edit, renderer.childList(t.id)); layout.append(tablist, panel); group.append(layout); shell.append(group);
 }
 function renderToggle(shell:HTMLElement,b:BlockOf<'toggle'>) {
+  const pageId=renderPageId,action=pageAction(pageId);
   const head = element('div', 'toggle-head'); const arrow = button(b.open ? '▾' : '▸', `${b.open ? 'Collapse' : 'Expand'} ${b.title}`, () => action('update_block', { blockId: b.id, patch: { open: !b.open } }), 'toggle-arrow'); arrow.setAttribute('aria-expanded', String(b.open)); arrow.setAttribute('aria-controls', `${b.id}-content`);
-  head.append(arrow, editable(b.title, 'Expandable block title', (value,pageId) => action('update_block', { pageId, blockId: b.id, patch: { title: value } }, { quiet: true }), { className: 'block-title' })); shell.append(head);
+  head.append(arrow, editable(b.title, 'Expandable block title', (value,pageId) => action('update_block', { pageId, blockId: b.id, patch: { title: value } }, { quiet: true }), { className: 'block-title',draftId:JSON.stringify([b.id,'title']) })); shell.append(head);
   if (b.open) { const content = element('div', 'toggle-content'); content.id = `${b.id}-content`; content.append(renderer.childList(b.id)); shell.append(content); }
 }
 function renderAccordion(shell:HTMLElement,b:BlockOf<'accordion'>) {
+  const pageId=renderPageId,action=pageAction(pageId);
   shell.append(title(b, '≡')); const group = element('div', 'accordion');
   b.items.forEach((item, i) => {
     const part = element('div', 'accordion-item'); const head = element('div', 'accordion-head'); const arrow = button(item.open ? '▾' : '▸', `${item.open ? 'Collapse' : 'Expand'} ${item.title}`, () => action('accordion_update', { blockId: b.id, itemId: item.id, patch: { open: !item.open } }), 'toggle-arrow'); arrow.setAttribute('aria-expanded', String(item.open)); arrow.setAttribute('aria-controls', `${item.id}-content`);
-    head.append(arrow, editable(item.title, 'Accordion item title', (value,pageId) => action('accordion_update', { pageId, blockId: b.id, itemId: item.id, patch: { title: value } }, { quiet: true }), { className: 'block-title' }), rowsControls(() => action('accordion_move', { blockId: b.id, itemId: item.id, index: i - 1 }), () => action('accordion_move', { blockId: b.id, itemId: item.id, index: i + 1 }), async () => { if (await confirmAction('Remove this section?', 'Its contents will be removed too. You can undo it.', 'Remove')) action('accordion_remove', { blockId: b.id, itemId: item.id }); }, i === 0, i === b.items.length - 1, 'accordion section'));
+    head.append(arrow, editable(item.title, 'Accordion item title', (value,pageId) => action('accordion_update', { pageId, blockId: b.id, itemId: item.id, patch: { title: value } }, { quiet: true }), { className: 'block-title',draftId:JSON.stringify([b.id,item.id,'title']) }), rowsControls(() => action('accordion_move', { blockId: b.id, itemId: item.id, index: i - 1 }), () => action('accordion_move', { blockId: b.id, itemId: item.id, index: i + 1 }), async () => { if (await confirmAction('Remove this section?', 'Its contents will be removed too. You can undo it.', 'Remove')) action('accordion_remove', { blockId: b.id, itemId: item.id }); }, i === 0, i === b.items.length - 1, 'accordion section'));
     part.append(head); if (item.open) { const content = element('div', 'accordion-content'); content.id = `${item.id}-content`; content.append(renderer.childList(item.id)); part.append(content); } group.append(part);
   }); shell.append(group, button('+ Add a section', 'Add accordion section', () => action('accordion_add', { blockId: b.id }), 'add-inline'));
 }
 function toLocalDateTime(iso:string) { if (!iso) return ''; const d = new Date(iso); const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000); return local.toISOString().slice(0, 16); }
 function renderReminder(shell:HTMLElement,b:BlockOf<'reminder'>) {
+  const pageId=renderPageId,action=pageAction(pageId);
   const box = element('div', 'reminder-box'); const reminderIcon=icon('reminder');reminderIcon.classList.add('reminder-icon');
-  const body = element('div', 'reminder-body'); body.append(editable(b.title, 'Reminder text', (value,pageId) => action('update_block', { pageId, blockId: b.id, patch: { title: value } }, { quiet: true }), { className: 'block-title' }));
+  const body = element('div', 'reminder-body'); body.append(editable(b.title, 'Reminder text', (value,pageId) => action('update_block', { pageId, blockId: b.id, patch: { title: value } }, { quiet: true }), { className: 'block-title',draftId:JSON.stringify([b.id,'title']) }));
   const dateRow = element('div', 'reminder-date'); const input = element('input'); input.type = 'datetime-local'; input.value = toLocalDateTime(b.dueAt); input.setAttribute('aria-label', 'Reminder date and time');
-  input.addEventListener('change', () => { const dueAt = input.value ? new Date(input.value).toISOString() : ''; action('update_block', { blockId: b.id, patch: { dueAt, enabled: !!dueAt } }); });
+  controlChange(input, async () => { const dueAt = input.value ? new Date(input.value).toISOString() : ''; if(!await action('update_block', { blockId: b.id, patch: { dueAt, enabled: !!dueAt } }))input.value=toLocalDateTime(b.dueAt); });
   const status = element('span', 'reminder-status'); status.textContent = b.firedAt ? 'Delivered' : !b.enabled ? 'Off' : Date.parse(b.dueAt) <= Date.now() ? 'Due' : 'Scheduled'; dateRow.append(input, status); body.append(dateRow);
-  const label = element('label', 'reminder-enable'); const enabled = element('input'); enabled.type = 'checkbox'; enabled.checked = b.enabled; enabled.disabled = !b.dueAt; enabled.addEventListener('change', () => action('update_block', { blockId: b.id, patch: { enabled: enabled.checked } })); label.append(enabled, document.createTextNode('On')); box.append(reminderIcon, body, label); shell.append(box);
+  const label = element('label', 'reminder-enable'); const enabled = element('input'); enabled.type = 'checkbox'; enabled.checked = b.enabled; enabled.disabled = !b.dueAt; controlChange(enabled, async () => {if(!await action('update_block', { blockId: b.id, patch: { enabled: enabled.checked } }))enabled.checked=b.enabled;}); label.append(enabled, document.createTextNode('On')); box.append(reminderIcon, body, label); shell.append(box);
   const note = element('p', 'reminder-note'); note.textContent = 'While open, or when you return. Notification settings ↗'; note.append(button('Settings', 'Reminder settings', () => openSettings(), 'link-button')); shell.append(note);
 }
 function renderKanban(shell:HTMLElement,b:BlockOf<'kanban'>) {
+  const pageId=renderPageId,action=pageAction(pageId);
   const head = title(b, '▥'); head.append(button('+ Column', 'Add board column', () => action('column_add', { blockId: b.id }), 'add-inline')); shell.append(head);
   const board = element('div', 'kanban-board');
   b.columns.forEach((col, ci) => {
@@ -390,16 +435,16 @@ function renderKanban(shell:HTMLElement,b:BlockOf<'kanban'>) {
     const header = element('div', 'column-header'); const dot = element('span', 'column-dot'); dot.setAttribute('aria-hidden', 'true');
     const handle = button('⠿', 'Drag column', () => {}, 'icon-button block-drag'); handle.style.fontSize = '12px'; handle.style.minWidth = '17px'; draggable(handle, { kind: 'column', blockId: b.id, columnId: col.id });
     const count = element('span', 'card-count'); count.textContent=String(col.cards.length);
-    header.append(dot, editable(col.title, 'Column title', (value,pageId) => action('column_update', { pageId, blockId: b.id, columnId: col.id, title: value }, { quiet: true }), { className: 'column-title' }), count, handle,
+    header.append(dot, editable(col.title, 'Column title', (value,pageId) => action('column_update', { pageId, blockId: b.id, columnId: col.id, title: value }, { quiet: true }), { className: 'column-title',draftId:JSON.stringify([b.id,col.id,'title']) }), count, handle,
       rowsControls(() => action('column_move', { blockId: b.id, columnId: col.id, index: ci - 1 }), () => action('column_move', { blockId: b.id, columnId: col.id, index: ci + 1 }), async () => { if (await confirmAction('Remove this column?', `${col.cards.length} card(s) in this column will also be removed. You can undo it.`, 'Remove column')) action('column_remove', { blockId: b.id, columnId: col.id }); }, ci === 0, ci === b.columns.length - 1, 'column'));
     column.append(header); const cards = element('div', 'cards');
     col.cards.forEach((card, i) => {
       const el = element('div', 'kanban-card'); el.dataset.cardId = card.id;
-      el.append(editable(card.title, 'Card title', (value,pageId) => action('card_update', { pageId, blockId: b.id, cardId: card.id, patch: { title: value } }, { quiet: true }), { multiline: true, className: 'card-title', placeholder: 'A small next step', id: card.id }), editable(card.description, 'Card description', (value,pageId) => action('card_update', { pageId, blockId: b.id, cardId: card.id, patch: { description: value } }, { quiet: true }), { multiline: true, className: 'card-description', placeholder: 'Add a note…' }));
+      el.append(editable(card.title, 'Card title', (value,pageId) => action('card_update', { pageId, blockId: b.id, cardId: card.id, patch: { title: value } }, { quiet: true }), { multiline: true, className: 'card-title', placeholder: 'A small next step', id: card.id,draftId:JSON.stringify([b.id,card.id,'title']) }), editable(card.description, 'Card description', (value,pageId) => action('card_update', { pageId, blockId: b.id, cardId: card.id, patch: { description: value } }, { quiet: true }), { multiline: true, className: 'card-description', placeholder: 'Add a note…',draftId:JSON.stringify([b.id,card.id,'description']) }));
       const tools = element('div', 'card-tools'); const handle = button('⠿', 'Drag card', () => {}, 'icon-button block-drag'); handle.style.fontSize = '12px'; draggable(handle, { kind: 'card', blockId: b.id, cardId: card.id, columnId: col.id });
       const select = element('select', 'card-move'); select.setAttribute('aria-label', 'Move card to column');
       b.columns.forEach(c => { const o = element('option'); o.value = c.id; o.textContent = `→ ${c.title || 'Untitled'}`; select.append(o); }); select.value = col.id;
-      select.addEventListener('change', () => action('card_move', { blockId: b.id, cardId: card.id, columnId: select.value }));
+      controlChange(select, async () => {if(!await action('card_move', { blockId: b.id, cardId: card.id, columnId: select.value }))select.value=col.id;});
       tools.append(handle, select, rowsControls(() => action('card_move', { blockId: b.id, cardId: card.id, columnId: col.id, index: i - 1 }), () => action('card_move', { blockId: b.id, cardId: card.id, columnId: col.id, index: i + 1 }), () => action('card_remove', { blockId: b.id, cardId: card.id }), i === 0, i === col.cards.length - 1, 'card'));
       el.append(tools); dropTarget(el, data => data.kind === 'card' && data.blockId === b.id && data.cardId !== card.id, data => { let index = i; if (data.columnId === col.id && col.cards.findIndex(c => c.id === data.cardId) < i) index--; action('card_move', { blockId: b.id, cardId: data.cardId!, columnId: col.id, index }); }); cards.append(el);
     });
@@ -433,7 +478,7 @@ async function convertTextBlock(blockId:string,pageId:string,option:SlashOption,
   (block?.querySelector<HTMLElement>('[contenteditable="true"]')??block?.querySelector<HTMLElement>('input,textarea')??block?.querySelector<HTMLElement>('.block-controls button:not(.block-drag)'))?.focus();
 }
 export function openPicker(containerId = 'page',anchor?:InsertionAnchor) {
-  const pageId=store.getActivePageId(),allowed = allowedTypes(store.getRenderState(), containerId);
+  const pageId=renderPageId;if(pageId!==store.getActivePageId()){notify('Finish switching pages before adding a block.','error');return;}const allowed=allowedTypes(store.getRenderState(),containerId);
   const grid = domId('picker-options'); grid.replaceChildren();let adding=false;
   for (const [type, orientation, glyph, name, caption] of options) {
     if (!allowed.types.includes(type) || type === 'tabs' && allowed.tabOrientation && allowed.tabOrientation !== orientation) continue;
@@ -471,7 +516,7 @@ function applyTheme(theme:Page['theme']) {
 let renderPageId:string;
 function render(state:Page, { quiet = false, reminderBlockId, reminderPageId, changedBlockId, changedPageId, reset=false }:ChangeEvent={}) {
   if(composition.hasActive()){deferredRender=true;return;}
-  applyTheme(shell!.getView().theme); domId('notification-mode').value = state.notificationMode;
+  applyTheme(shell!.getView().theme); domId('notification-mode').value = state.notificationMode;domId('notification-mode').dataset.savedValue=state.notificationMode;
   if(renderPageId!==state.id&&domId('picker').open)domId('picker').close();
 
   domId('undo-button').disabled = !store.canUndo(); domId('redo-button').disabled = !store.canRedo();
@@ -486,8 +531,9 @@ function render(state:Page, { quiet = false, reminderBlockId, reminderPageId, ch
   const focused=document.activeElement as HTMLInputElement|HTMLTextAreaElement|null; const focusId = focused?.id; const selection = focused?.selectionStart == null ? null : [focused.selectionStart, focused.selectionEnd!] as const;
   const editorFocus=textEditors?.captureFocus()??null,tableFocus=tableEditors?.captureFocus()??null;
   const scroll=[scrollX,scrollY] as const;
-  for(const [selector,value] of [['#page-title',state.title],['#page-subtitle',state.subtitle]]){const el=$<HTMLInputElement|HTMLTextAreaElement>(selector);if(el.value!==value){el.value=value;fit(el);}}
+  for(const [selector,value] of [['#page-title',state.title],['#page-subtitle',state.subtitle]]){const el=$<HTMLInputElement|HTMLTextAreaElement>(selector),shown=inputEdits.get(inputEditKey(el,state.id))?.value??value;if(el.value!==shown){el.value=shown;fit(el);}}
   if(renderPageId===state.id&&!reset)return;
+  if(renderPageId===state.id&&(tabTitleEdit||[...inputEdits.values()].some(edit=>edit.input.closest('#notebook')))){deferredInputRender=true;return;}
   renderPageId=state.id;diagrams?.begin();renderer.begin(state.id);
   reconcile(domId('notebook'),[renderer.list(state.blocks,'page')]);renderer.end();diagrams?.end();textEditors?.end();tableEditors?.end();
   for(const el of document.querySelectorAll<HTMLElement>('[data-autofit],.auto-height'))if(!el.dataset.fitted){fit(el);el.dataset.fitted='true';}
@@ -519,14 +565,15 @@ export async function deliverReminder(reminder:Pick<ReminderBlock,'id'|'title'>,
 function startupError(error:Error) {
   document.body.replaceChildren(); const box = element('main', 'startup-error'); const h = element('h1'); h.textContent = 'Your notebook needs a moment.'; const p = element('p'); p.textContent = error.message;
   const backup = button('Download saved data', 'Download saved data', () => { try { downloadJson(localStorage.getItem(STORAGE_KEY) ?? '', 'omd-recovery.json'); } catch { location.reload(); } }, 'secondary-button');
-  box.append(h, p, backup, button('Try again', 'Reload app', () => location.reload(), 'secondary-button')); document.body.append(box);
+  box.append(h,p,...(isCloudflare?[]:[backup]),button('Try again', 'Reload app', () => location.reload(), 'secondary-button')); document.body.append(box);
 }
 async function boot() {
-  try { store = await createStore(localStorage,{activePageId:routePageId()??undefined}); } catch (error) { startupError(errorOf(error)); return; }
+  try { store = await createStore(localStorage,{activePageId:routePageId()??undefined,canReload:()=>!hasPendingEdits()}); } catch (error) { startupError(errorOf(error)); return; }
+  if(isCloudflare){domId('data-description').textContent='This notebook is shared with anyone who can open this URL. Changes save to the cloud and require a connection. Export JSON for a backup.';domId('persist-storage').hidden=true;domId('storage-mode').hidden=false;domId('storage-mode').textContent='Shared cloud notebook';}
   for (const close of document.querySelectorAll('[data-close]')) close.addEventListener('click', () => close.closest('dialog')!.close());
   for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', e => { if (e.target === dialog) { const rect = dialog.getBoundingClientRect(); if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) dialog.close(); } });
   diagrams=createDiagramManager(store,{notify});
-  textEditors=createTextEditors(store,{composition,notify,createNext:(blockId,pageId)=>createTextAfter(blockId,pageId,false),slash:{options:slashOptions,convert:convertTextBlock}});
+  textEditors=createTextEditors(store,{composition,notify,beforeHistory:()=>flushPending({waitForComposition:true}),createNext:(blockId,pageId)=>createTextAfter(blockId,pageId,false),slash:{options:slashOptions,convert:convertTextBlock}});
   tableEdits=createTableEdits(store,{settled:()=>composition.settled(input=>input instanceof Element&&input.classList.contains('table-cell'))});
   tableEditors=createTableEditors(store,{composition,drafts:tableEdits,notify,flushPending});
   const dirtyContainers=new Set<string>();
@@ -539,6 +586,7 @@ async function boot() {
   });
   store.afterChange(()=>{
     if(!dirtyContainers.size)return;const state=store.getRenderState(),options=store.getLastEvent(),ids=[...dirtyContainers];dirtyContainers.clear();if(options.reset)return;
+    if([...inputEdits.values()].some(edit=>edit.input.closest('#notebook'))){deferredInputRender=true;return;}
     const focused=document.activeElement as HTMLInputElement|HTMLTextAreaElement|null,focusId=focused?.id,selection=focused?.selectionStart==null?null:[focused.selectionStart,focused.selectionEnd!] as const,scroll=[scrollX,scrollY] as const;
     const editorFocus=textEditors!.captureFocus(),tableFocus=tableEditors?.captureFocus()??null;
     diagrams!.begin();for(const id of ids)try{renderer.refresh(findContainer(state,id).blocks,id);}catch(error){if(!/not found/.test(errorOf(error).message))notify(errorOf(error).message,'error',true);}diagrams!.end();textEditors!.end();tableEditors?.end();
@@ -548,41 +596,46 @@ async function boot() {
   });
   shell=setupShell(store,{beforeNavigate,openPalette,confirm:confirmAction,onError:error=>notify(errorOf(error).message,'error',true),onThemeChange:applyTheme});
   store.subscribe(render); render(store.getRenderState());
-  store.subscribeStatus(({pending,navigating,error})=>{domId('page-title').disabled=navigating&&!composition.isComposing(domId('page-title'));domId('page-subtitle').disabled=navigating&&!composition.isComposing(domId('page-subtitle'));domId('notebook').inert=navigating&&!composition.hasActive();const status=domId('save-status');status.replaceChildren();const dot=element('span','status-dot');status.append(dot,document.createTextNode(pending?'Saving…':error?'Not saved':'Saved'));});
+  let saveStatus:SaveStatus={pending:0,navigating:false,error:null};
+  refreshInputStatus=()=>{const {pending,navigating,error,unsaved}=saveStatus;cloudUnsaved=!!unsaved;domId('page-title').disabled=navigating&&!composition.isComposing(domId('page-title'));domId('page-subtitle').disabled=navigating&&!composition.isComposing(domId('page-subtitle'));domId('notebook').inert=navigating&&!composition.hasActive();const status=domId('save-status');status.replaceChildren();const dot=element('span','status-dot');status.append(dot,document.createTextNode(pending?'Saving…':error||hasPendingEdits()?'Not saved':isCloudflare?'Saved to cloud':'Saved'));};
+  let statusFrame=0;const scheduleStatusRefresh=()=>{if(!statusFrame)statusFrame=requestAnimationFrame(()=>{statusFrame=0;refreshInputStatus();});};
+  // Editor promise finalizers release their drafts after the store emits its completed status.
+  store.subscribeStatus(status=>{saveStatus=status;refreshInputStatus();scheduleStatusRefresh();});
+  for(const event of ['input','compositionstart','compositionend'])document.addEventListener(event,scheduleStatusRefresh);
   palette = setupPalette(store, { onError: error => notify(errorOf(error).message, 'error', true), beforeOpen:()=>shell!.closeMobile(), beforeNavigate });
   setupRoutes(store,{beforeNavigate,onError:error=>notify(error.message,'error',true)});
   let fitFrame=0;window.addEventListener('resize',()=>{cancelAnimationFrame(fitFrame);fitFrame=requestAnimationFrame(()=>{for(const el of document.querySelectorAll<HTMLElement>('[data-autofit],.auto-height'))fit(el);});});
   domId('canvas-stage-close').addEventListener('click',closeCanvas);domId('canvas-stage-pages').addEventListener('click',openPalette);
-  window.addEventListener('pagehide',event=>{flushPending().then(()=>{if(!event.persisted){textEditors!.destroy();tableEditors?.destroy();return store.close();}}).catch(error=>notify(errorOf(error).message,'error',true));});window.addEventListener('beforeunload',event=>{if(textEditors?.hasPending()||tableEditors?.hasPending()){event.preventDefault();event.returnValue='';}void flushPending().catch(()=>{});});
+  if(isCloudflare){const refresh=()=>{if(document.visibilityState==='visible')void store.reload().catch(error=>notify(errorOf(error).message,'error'));};const timer=setInterval(refresh,5000);window.addEventListener('focus',refresh);window.addEventListener('online',()=>{void flushPending().then(refresh).catch(error=>notify(errorOf(error).message,'error',true));});window.addEventListener('pagehide',event=>{if(!event.persisted)clearInterval(timer);});}
+  window.addEventListener('pagehide',event=>{flushPending().then(()=>{if(!event.persisted){textEditors!.destroy();tableEditors?.destroy();return store.close();}}).catch(error=>notify(errorOf(error).message,'error',true));});window.addEventListener('beforeunload',event=>{if(hasPendingEdits()||cloudUnsaved){event.preventDefault();event.returnValue='';}void flushPending().catch(()=>{});});
   for (const [selector, key] of [['#page-title', 'title'], ['#page-subtitle', 'subtitle']]) {
     const el=$<HTMLInputElement|HTMLTextAreaElement>(selector);
-    const write = (pageId:string) => {const saved=action('set_page', {pageId,[key]:el.value}, {quiet:true});fit(el);return saved;};
-    composition.track(el,write,()=>store.getActivePageId());el.addEventListener('input',()=>{if(!composition.isComposing(el))write(store.getActivePageId());});
+    const write=trackInput(el,(value,pageId)=>{const saved=action('set_page',{pageId,[key]:value},{quiet:true});fit(el);return saved;},()=>renderPageId);
     if(key==='title') {
       let finishing=false;
       el.addEventListener('keydown',async event=>{
         const key=event as KeyboardEvent;
         if(key.key!=='Enter'||key.isComposing||key.keyCode===229||composition.isComposing(el))return;
         key.preventDefault();if(key.repeat||finishing)return;
-        finishing=true;const pageId=store.getActivePageId(),title=el.value;
+        finishing=true;const pageId=renderPageId,title=el.value;
         try {
           await store.idle();
-          if(store.getPageMetadata(pageId)?.title!==title&&!await action('set_page',{pageId,title},{quiet:true}))return;
+          if(store.getPageMetadata(pageId)?.title!==title||inputEdits.has(inputEditKey(el,pageId))){if(!await write(pageId))return;}
           if(store.getActivePageId()===pageId&&el.value===title&&!composition.isComposing(el))el.blur();
         } finally {finishing=false;}
       });
     }
   }
   domId('theme').addEventListener('change', e => {try{shell!.setView({theme:(e.target as HTMLSelectElement).value as Page['theme']});}catch(error){applyTheme(shell!.getView().theme);notify(errorOf(error).message,'error',true);}}); themeQuery.addEventListener('change', () => applyTheme(shell!.getView().theme));
-  domId('notification-mode').addEventListener('change', e => action('set_page', { notificationMode: (e.target as HTMLSelectElement).value as NotificationMode }));
-  domId('undo-button').addEventListener('click', async () => { try { await flushPending();await store.undo(); } catch (e) { notify(errorOf(e).message, 'error'); } });
-  domId('redo-button').addEventListener('click', async () => { try { await flushPending();await store.redo(); } catch (e) { notify(errorOf(e).message, 'error'); } });
+  controlChange(domId<HTMLSelectElement>('notification-mode'), async e => {const select=e.target as HTMLSelectElement,pageId=renderPageId,value=select.value as NotificationMode,previous=select.dataset.savedValue??store.getRenderState().notificationMode;if(!await action('set_page', { pageId,notificationMode:value })&&renderPageId===pageId)select.value=store.getPageMetadata(pageId)?.notificationMode??previous;});
+  domId('undo-button').addEventListener('click', async () => { try { await flushPending({waitForComposition:true});await store.undo(); } catch (e) { notify(errorOf(e).message, 'error'); } });
+  domId('redo-button').addEventListener('click', async () => { try { await flushPending({waitForComposition:true});await store.redo(); } catch (e) { notify(errorOf(e).message, 'error'); } });
   domId('export-button').addEventListener('click', async () => { domId('page-menu').open=false;await downloadJson(); notify('Notebook exported.'); });
   domId('import-button').addEventListener('click', () => {domId('page-menu').open=false;domId('import-file').click();});
   domId('import-file').addEventListener('change', async event => {
     const file=(event.target as HTMLInputElement).files?.[0];(event.target as HTMLInputElement).value = ''; if (!file) return;
     try { const raw = await file.text(); const { parseBook } = await import('./notebook.js'); parseBook(raw);
-      if (await confirmAction('Replace this notebook?', 'All current pages will be exported as a backup before importing. Import replaces the entire notebook, page order and settings.', 'Back up & import')) { await beforeNavigate();await downloadJson(await store.export(), `omd-before-import-${Date.now()}.json`); await store.import(raw); notify('Notebook imported.'); }
+      if (await confirmAction('Replace this notebook?', 'All current pages will be exported as a backup before importing. Import replaces the entire notebook, page order and settings.', 'Back up & import')) { await beforeNavigate({waitForComposition:true});const backup=await store.export(),backedUp=parseBook(backup);await downloadJson(backup, `omd-before-import-${Date.now()}.json`);await flushPending({waitForComposition:true});if(store.getRevision()!==backedUp.revision||store.getNotebookId()!==backedUp.id)throw new Error('The notebook changed during backup. Retry the import to back up your latest edits.');await store.import(raw); notify('Notebook imported.'); }
     } catch (error) { notify(errorOf(error).message, 'error', true); }
   });
   domId('settings-button').addEventListener('click', openSettings); domId('sidebar-settings').addEventListener('click', openSettings); domId('agent-status').addEventListener('click', openSettings);
